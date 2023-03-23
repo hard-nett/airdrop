@@ -64,23 +64,6 @@ No minting or inflation schedule set
 | year 42 | 6,754,109,731.96 |  0.00% |     252     |   |
 ## Airdrop [Link](https://github.com/terpnetwork/airdrop)
 
-Process: percentile based, normalized for each project
-
-**Airdrop recipients:**
-
- - BCNA holders -5%
- - Cosmos Hub Stakers - 25%
- - Crypto Canna Club - 10.25%
- - Chronic Token - 25%
- - MonsterBuds - 9% 
- - Glaktic Gang - 6% 
- - CannaLabs - 2.5 %
- - Secret Sesh - 3.5%
-Reserved in Treasury for following communities:
-
- - Any other Cannabis + Web3 Community Token Projects
-
-![Distribution](../public/distribution-chart.png)
 **Calculations:**
 
 piecewise linear function:
@@ -105,4 +88,3 @@ Reward(R)= func(p, a, b, min, max)
  - 5% unlocked every 12 months, until 50 % of Foundation Tokens have been fully vested
  - 25% unlocked after 72 months from 50% of inital Foundation DAO tokens 
  
-![Vesting](../public/vesting-unbonding.png)
