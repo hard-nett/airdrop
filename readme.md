@@ -1,10 +1,9 @@
 # Airdrop - Terp Network
 ## Overview: Inital Token Distribution
+The current suggested genesis file for Terp Network includes a mixture of [**ATOM delegators**](./interchain/gaia.csv),[**BCNA**](./interchain/bcna_delegators.csv),[**TERP OG Participants**](./points/terp-og.md), [**Scavenger Hunt Participants**](./points/scavenger-hunt.md), **Genesis Validators**, and **Protocol Treasury Tokens**.
 
-## Inital Distribution
-- 165,815 unique addresses
-- A mixture of ATOM holders, BCNA holders, TERP OG Participants, Scavenger Hunt Participants, Genesis Validators, & Treasury Tokens. 
-- All accounts TERP tokens (excluding Treasury Tokens & 1 Terp for each Genesis Validator) are vesting until 1697803200 UNIX time (Oct, 20th, 2023).
+Each inital account with TERP (excluding Protocol Treasury & 1 Terp for each Genesis Validator) will be vesting until 1697803200 UNIX time (Oct, 20th, 2023).
+
 
 ### Details
 - [114,846 ATOM holders rewarded 1 point. (13,276,409.490870 TERP & PERSY)]
