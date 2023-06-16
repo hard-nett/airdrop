@@ -20,5 +20,6 @@ Each inital account with TERP (excluding Protocol Treasury & 1 Terp for each Gen
 - [43 TERP OG & SCAVENGER HUNT participants rewarded either 1 or 1.34 points. (111913.879345 TERP & PERSY)]
 - [4 Genesis Validators rewarded 1 TERP & PERSY for gentx]
 
+## Airdrop Cycle 2: Cannabis Culture Communities 
 
-
+### Check [here](./eth/README.md) to learn about the parameters for the airdrop to token holders of projects supporting the vision of web-3 + cannabis culture.
