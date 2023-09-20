@@ -1,38 +1,31 @@
 # Airdrop - Cannabis Culture Projects
 
-## Introduction 
-An airdrop to the token holders of projects focused on web-3 & cannabis culture infusion is an action that directly aligns with a project rooted in progressive decentralization.
+## The Goal
+**Allocate ownership to those pre-invested in web3 & cannabis communities.**
 
-This public repository contains all of the data aggregated from various blockchain ecosystem of the point system, wallet addresses, allocations, and processes that collectively makes up the second leg of Terp Network airdrop cycle.
+This event has been pre-organized by community members, and will be voted on via the terp network governance process.
+
+It is believed that those who are owners of existing cannabis brands & communities tokens that are using blockchain technology are not just acquiring ownership of these projects tokens for the brands potential fiscal return, but more broadly due to the nature of the benefit’s these technologies provide, specifically in permissionless sovereignty.    
 
 ## Process
 ### 1. Data Collection
 First, any community to potentially be included in the airdrop must have their token holders data exported and provided in the [holders](./holders/) folder, with the timestamp of the snapshot taken. If you would like to suggest a community to be included in the airdrop, please open a new PR on this repo. 
 
 ### 2. Point Allocation
-Once the holder information has been aggregated and added to this repository, we can utilize a piecewise linear function to find a fair-tiered distribution of token holders within each community. 
+Once the holder information has been aggregated and added to this repository, we can utilize a piecewise linear function to find a [fair-tiered distribution](./points/) of token holders within each community. 
+
+A piecewise liner curve was used to generalize ranges in each community, to which we then allocated points. This was used as a data point helping to determine a fair point distribution between communities and the range of how invested various token holders are. 
+
+Piecewise linear curves also help minimize over-allocating ownership to massive whales & project owners.
 
 
-### 3. Point to Token Conversion
-For this next airdrop cycle, the TerpNET Foundation DAO will propose to allocate 15% (63 Million) of the total supply of TERP & THIOL between the token holders included. 
+### 4. Eth to Terp Wallet Address Conversion
 
-This can make a fair point distribution to be found by normalizing data between communities included in the airdrop, by diving the expected number of tokens to a specific community, by the total points allocated to that community. 
+A UI for users to connect to & verify their airdrop allocation will be available, and will utilize the Metamask Snap Functionality now available thanks to a number of teams in the cosmos! 
 
-This creates a ratio between each community that can be compared and modified relative to the number of token holders, in a way that will be deemed fair by consnesus of the community.
+To determine the public address associated with an existing address, there are a number of tools to handle [bech32](https://github.com/atmoner/cosmos-bech32) & [address converters](https://www.npmjs.com/package/@evmos/address-converter).
 
-### 4. Eth to Evmos Wallet Address Conversion
-
-Evmos is an EVM chain in the cosmos, which has native metamask support. To learn more about the wallet compatibility of Evmos, click [here](https://docs.evmos.org/use/wallet).
-
-For this step, all eth public wallet addresses must be converted to their evmos counterparts. Converted data must be available in the [addresses](./addresses/) folder, and will include the points & token conversion data as well.
-
-### 5. Prepare Smart Contract Creation Plan
-This step is where the escrow smart contract will planned and mapped out, to be included in the next step. 
+### 5. TODO: Smart Contract? Gov Prop?
 
 ### 6. Verify Consensus
 This is when all data and steps can be verified using the on-chain governance procedure. To learn more, check our [Governance Proposal Framework](https://docs.terp.network/overview/governance).
-
-### 7. Airdrop/Escrow Smart Contract Developed
-If we have consensus of the parameters of the second airdrop cycle, then the smart contract that will power this airdrop will be deployed and contain the final parameters of the airdrop.
-
-## Next Steps
