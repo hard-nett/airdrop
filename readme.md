@@ -6,19 +6,24 @@ Each inital account with TERP (excluding Protocol Treasury & 1 Terp for each Gen
 
 
 ### Details
-- [114,846 ATOM holders rewarded 1 point. (13,276,409.490870 TERP & PERSY)]
-- [40,877 ATOM holders rewarded 2 points. (9,450,913.236130TERP & PERSY)]
-- [8,147 ATOM holders rewarded 3 points. (2,825,424.701792 TERP & PERSY)]
-- [1,443 BCNA holders rewarded 3 points & also earned 1 ATOM holders point.(8013565.901289 TERP & PERSY)]
-- [264 BCNA holders rewarded 3 points, & also earned 2 ATOM holders point.(1496618.262216 TERP & PERSY)]
-- [79 BCNA holders rewarded 3 points, & also earned 3 ATOM holders point.(451199.612292 TERP & PERSY)]
-- [100 BCNA holders rewarded 6 points. (1087560.976000 TERP & PERSY)]
-- [4 BCNA holders rewarded 6 points & also earned 1 ATOM holders point.(43964.846400 TERP & PERSY)]
-- [4 BCNA holders rewarded 6 points & also earned 2 ATOM holders point.(33320.440350 TERP & PERSY)]
-- [4 BCNA holders rewarded 6 points & also earned 3 ATOM holders point.(44889.661160 TERP & PERSY)]
-- [4 BCNA holders rewarded 9 points. (65,253.658520 TERP & PERSY)]
-- [43 TERP OG & SCAVENGER HUNT participants rewarded either 1 or 1.34 points. (111913.879345 TERP & PERSY)]
-- [4 Genesis Validators rewarded 1 TERP & PERSY for gentx]
+| Project                     | Points     | # of addresses | Total Tokens (TERP & PERSY)  | 
+|-----------------------------|------------|----------------|---------------|
+| ATOM                        | 1          | 114,846        | 13,276,409.490870
+| ATOM                        | 2          | 40,877         | 9,450,913.236130
+| ATOM                        | 3          | 8,147          | 2,825,424.701792
+| ATOM + BCNA                 | 4          | 1,443          | 8013565.901289
+| ATOM + BCNA                 | 5          | 264            | 1496618.262216
+| ATOM + BCNA                 | 6          | 79             | 451199.612292
+| BCNA                        | 6          | 100            | 1087560.976000
+| ATOM + BCNA                 | 7          | 4              | 43964.846400
+| ATOM + BCNA                 | 8          | 4              | 33320.440350
+| ATOM + BCNA                 | 9          | 4              | 44889.661160
+| BCNA                        | 9          | 4              | 65,253.658520 
+| TERP OG & SCAVENGER HUNT    | 1 - 1.34   |  43            | 111913.879345
+| GENTX                       | 1          | 4              | 4
 
 
 
+## Airdrop Cycle 2: Cannabis Culture Communities 
+
+### Check [here](./eth/README.md) to learn about the parameters for the airdrop to token holders of projects supporting the vision of web-3 + cannabis culture.
