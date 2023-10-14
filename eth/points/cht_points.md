@@ -2,9 +2,9 @@
 ## Summary 
 | Total Possible Points | Percentile   | Points  |       |
 |-----------------------|--------------|---------|-------|
-| 3                     | 14-60th      | 4717.48 |       |
+| 3                     | 14th-60th    | 4717.48 |       |
 | 6                     | 61st-85rd    | 5565.86 |       |
-| 9                     | 86th - 100th | 4490.71 |       |
+| 9                     | 86th-100th   | 4490.71 |       |
 |                       |              | 14,774.05   | Total |
 ## Breakdown 
 | Percentile            | Tokens         | # of Addresses |       |

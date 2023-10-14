@@ -1,5 +1,5 @@
 # Monster Buds Address Conversion
-| Evmos Public Address | Ethereum Public Address  | Tokens Held   |   Points    | Airdrop Allocation | 
+| Terp Public Address | Ethereum Public Address  | Tokens Held   |   Points    | Airdrop Allocation | 
 |----------------------|--------------------------|---------------|-------------|--------------------|
 | terp1er86c0c7pq7sl75h3m5zk7juf0k8k5d8zlrp98 | 0xc8cfac3f1e083d0ffa978ee82b7a5c4bec7b51a7 | 289 | 6 | 5377.62108 |
 | terp1qqydxscfrmut60h6wv8k4tj6y63gt3azptvx2q | 0x0008d343091ef8bd3efa730f6aae5a26a285c7a2 | 178 | 6 | 5377.62108 |

@@ -1,5 +1,5 @@
 # Galaktic Gang Address Conversion
-| Evmos Public Address | Ethereum Public Address  | Tokens Held   |   Points    | Airdrop Allocation | 
+| Terp Public Address | Ethereum Public Address  | Tokens Held   |   Points    | Airdrop Allocation | 
 |----------------------|--------------------------|---------------|-------------|--------------------|
 | terp1k30z7xcc2nngw94pnzfzmnnrhptx6gfgdz78y0 | 0xb45e2f1b1854e68716a198922dce63b8566d2128 | 66 | 8 |	4246.713852 |
 | terp1n86zgtnljhlusv23mpk0uldhscctmey78u6d4p | 0x99f4242e7f95ffc83151d86cfe7db78630bde49e | 53 | 8 |	4246.713852 |

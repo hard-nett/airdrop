@@ -25,7 +25,9 @@ A UI for users to connect to & verify their airdrop allocation will be available
 
 To determine the public address associated with an existing address, there are a number of tools to handle [bech32](https://github.com/atmoner/cosmos-bech32) & [address converters](https://www.npmjs.com/package/@evmos/address-converter).
 
-### 5. TODO: Smart Contract? Gov Prop?
+### 5. Governance Proposal 
 
-### 6. Verify Consensus
+We are able to propose a network upgrade that handles the distribution of tokens to individual addresses. You can find the logic tested on the test network [here](https://github.com/terpnetwork/terp-core/blob/main/app/upgrades/v3/headstash.go)
+
+### 6. Verify Community Consensus
 This is when all data and steps can be verified using the on-chain governance procedure. To learn more, check our [Governance Proposal Framework](https://docs.terp.network/overview/governance).

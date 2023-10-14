@@ -1,5 +1,5 @@
 # HLK Address Conversion
-| Evmos Public Address | Ethereum Public Address  | Tokens Held   |   Points    | Airdrop Allocation | 
+| Terp Public Address | Ethereum Public Address  | Tokens Held   |   Points    | Airdrop Allocation | 
 |----------------------|--------------------------|---------------|-------------|--------------------|
 |terp168fxarmuw9uplj38n7udpgm5lw55xyvn5ej8as | 0xd1d26e8f7c71781fca279fb8d0a374fba9431193 | 116 | 6 | 5663.577386 | |
 | terp1pw6jr0tt9g8tsxs82rsd0rzsj9ej8k2ch0cm2u | 0x0bb521bd6b2a0eb81a0750e0d78c50917323d958 | 45 | 6 | 5663.577386 | |

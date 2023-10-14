@@ -1,5 +1,5 @@
 # Crypto Canna Club Address Conversion
-| Evmos Public Address | Ethereum Public Address  | Tokens Held   |   Points    | Airdrop Allocation | 
+| Terp Public Address | Ethereum Public Address  | Tokens Held   |   Points    | Airdrop Allocation | 
 |----------------------|--------------------------|---------------|-------------|--------------------|
 | terp1mgdfg8ez2erfgy03s9c8jjluwuq8s9cmd5epe0 | 0xda1a941f2256469411f18170794bfc770078171b | 300 |	6 |	5389.358009 |
 | terp19g6sl2e2zdh48ann3my2hpgkl8rnug6ggd6je9 | 0x2a350fab2a136f53f6738ec8ab8516f9c73e2348 | 205 |	6 |	5389.358009 |
