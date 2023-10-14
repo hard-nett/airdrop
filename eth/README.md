@@ -23,9 +23,23 @@ Piecewise linear curves also help minimize over-allocating ownership to massive 
 
 A UI for users to connect to & verify their airdrop allocation will be available, and will utilize the Metamask Snap Functionality now available thanks to a number of teams in the cosmos! 
 
-To determine the public address associated with an existing address, there are a number of tools to handle [bech32](https://github.com/atmoner/cosmos-bech32) & [address converters](https://www.npmjs.com/package/@evmos/address-converter).
+To determine the public address associated with an existing address, there are a number of tools to handle [bech32](https://github.com/atmoner/cosmos-bech32) & [address converters](https://www.npmjs.com/package/@Terp/address-converter).
 
-### 5. TODO: Smart Contract? Gov Prop?
+### 5. Governance Proposal 
 
-### 6. Verify Consensus
+We are able to propose a network upgrade that handles the distribution of tokens to individual addresses. You can find the logic tested on the test network [here](https://github.com/terpnetwork/terp-core/blob/main/app/upgrades/v3/headstash.go)
+
+### 6. Verify Community Consensus
 This is when all data and steps can be verified using the on-chain governance procedure. To learn more, check our [Governance Proposal Framework](https://docs.terp.network/overview/governance).
+
+## Projects Included 
+
+| Project | Unique Addresses  | Date Of Snapshot   | Total Tokens Allocated | Average Token Per Point |
+|---------|-------------------|-------------------|-------------------| -------------------| 
+| [Chronic Token](./addresses/cht_erc20_holders.md)        | 1255 | Oct 11th, 2022    | 12600000.000000 TERP & THIOL |
+| [Crypto Canna Club](./addresses/crypto_canna_club.md)    | 4405 | Oct 11th, 2022    | 10969140.000000 TERP & THIOL |
+| [MonsterBuds](./addresses/monster_buds.md)          | 3385 | Oct 11th, 2022    | 9660000.000000  TERP & THIOL |
+| [Hippie Life Krew](./addresses/hlk.md)     | 342  | June 16th, 2023   | 1111949.026877  TERP & THIOL |
+| [N8 Free Mint Holders](./addresses/n8-free-mint.md) | 316  | Oct 11th, 2022    | 735000.000000   TERP & THIOL |
+| [Secret Sesh](./addresses/secret_sesh.md)          | 527  | Oct 11th, 2022    | 4200000.000000  TERP & THIOL |
+| [Galaktic Gang](./addresses/galaktic_holders.md)          | 2568  | Oct 11th, 2022    | 4200000.000000  TERP & THIOL |

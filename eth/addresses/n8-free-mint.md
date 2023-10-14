@@ -1,5 +1,5 @@
 # N8 Free Mint Address Conversion
-| Evmos Public Address | Ethereum Public Address  | Tokens Held   |   Points    | Airdrop Allocation | 
+| Terp Public Address | Ethereum Public Address  | Tokens Held   |   Points    | Airdrop Allocation | 
 |----------------------|--------------------------|---------------|-------------|--------------------|
 | terp1r55vtlyukveddyhp2nv3y20hzkdzl6w2xutnwg | 0x1d28c5fc9cb332d692e154d91229f7159a2fe9ca | 6 | 6 | 5417.690418 |
 | terp1hx74t66p5jxa3vc5rgyuf3kc9x6crnlttvkzpp | 0xb9bd55eb41a48dd8b3141a09c4c6d829b581cfeb | 5 | 6 | 5417.690418 |

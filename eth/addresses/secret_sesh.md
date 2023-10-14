@@ -1,5 +1,5 @@
 # Secret Sesh Address Conversion
-| Evmos Public Address | Ethereum Public Address  | Tokens Held   |   Points    | Airdrop Allocation | 
+| Terp Public Address | Ethereum Public Address  | Tokens Held   |   Points    | Airdrop Allocation | 
 |----------------------|--------------------------|---------------|-------------|--------------------|
 |terp1ec3tsu6ss4v04yfpwynj4e7arx8q8rnhwdtqsp |	0xce22b873508558fa912171272ae7dd198e038e77 | 148 | 18 | 16091.95402 |
 |terp1ysu9t29n5wt0meks4dj9huucuux3p82zkhdfza |	0x243855a8b3a396fde6d0ab645bf398e70d109d42 | 41 | 18 | 16091.95402 |

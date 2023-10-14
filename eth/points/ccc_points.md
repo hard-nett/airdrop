@@ -2,9 +2,9 @@
 ## Overview
 | Total Possible Points | Percentile  | Points |       |
 |-----------------------|-------------|--------|-------|
-| 1                     |  65th percentile     | 2947 |      
-| 2                     |  95th percentile   |  2520  |      
-| 3                     |  100th percentile  |   564  |      
+| 1                     |  1st - 65th percentile     | 2947 |      
+| 2                     |  66th - 95th percentile   |  2520  |      
+| 3                     |  96th - 100th percentile  |   564  |      
 |                       |             | 6031 | Total  |
 ## Breakdown
 | Percentile            | Owned Tokens           | # of Addresses |       |
