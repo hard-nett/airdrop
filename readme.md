@@ -28,12 +28,14 @@ Each inital account with TERP (excluding Protocol Treasury & 1 Terp for each Gen
 
 | Project | Unique Addresses  | Date Of Snapshot   | Total Tokens Allocated | Average Token Per Point |
 |---------|-------------------|-------------------|-------------------| -------------------| 
-| [Chronic Token](./eth/addresses/cht_erc20_holders.md)        | 1255 | Oct 11th, 2022    | 12600000.000000 TERP & THIOL |
-| [Crypto Canna Club](./eth/addresses/crypto_canna_club.md)    | 4405 | Oct 11th, 2022    | 10969140.000000 TERP & THIOL |
-| [MonsterBuds](./eth/addresses/monster_buds.md)          | 3385 | Oct 11th, 2022    | 9660000.000000  TERP & THIOL |
-| [Hippie Life Krew](./eth/addresses/hlk.md)     | 342  | June 16th, 2023   | 1111949.026877  TERP & THIOL |
-| [N8 Free Mint Holders](./eth/addresses/n8-free-mint.md) | 316  | Oct 11th, 2022    | 735000.000000   TERP & THIOL |
-| [Secret Sesh](./eth/addresses/secret_sesh.md)          | 527  | Oct 11th, 2022    | 4200000.000000  TERP & THIOL |
-| [Galaktic Gang](./eth/addresses/galaktic_holders.md)          | 2568  | Oct 11th, 2022    | 4200000.000000  TERP & THIOL |
+| [Chronic Token](./eth/communities/cht.csv)        | 1,256 | Oct 11th, 2022    | 7,615,897.44 TERP & THIOL |
+| [Crypto Canna Club](./eth/communities/ccc.csv)    | 4,405 | Oct 11th, 2022    | 12,706,127.17 TERP & THIOL |
+| [MonsterBuds](./eth/communities/the-buds.csv)          | 3,385 | Oct 11th, 2022    | 5,746,617.43  TERP & THIOL |
+| [Hippie Life Krew](./eth/communities/hlk.csv)     | 342  | June 16th, 2023   | 807,361.96  TERP & THIOL |
+| [N8 Free Mint Holders](./eth/communities/n8.csv) | 316  | Oct 11th, 2022    | 735000.000000   TERP & THIOL |
+| [Secret Sesh](./eth/communities/sesh.csv)          | 779  | Oct 11th, 2022    | 4200000.000000  TERP & THIOL |
+| [Galaktic Gang](./eth/communities/gg.csv)          | 2566  | Oct 11th, 2022    | 6,306,752.41  TERP & THIOL |
+| [Buddah Bears](./eth/communities/bb.csv)          | 2453  |  <>     | 6,300,000.00  TERP & THIOL |
+| [Re-Bud](./eth/communities/rebud.csv)          | 585  | <>    | 927,127.66  TERP & THIOL |
 
 ### Check [here](./eth/README.md) to learn about the parameters for the airdrop to token holders of projects supporting the vision of web-3 + cannabis culture.
