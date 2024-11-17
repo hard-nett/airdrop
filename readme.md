@@ -76,3 +76,4 @@ Leaving us with the following additional tokens to distribute to each category o
 - scripts: create scripts that calculate genesis distribution for accuracy
 - scripts: create scripts to determine additional allocation for genesis distribution that balances inital distribution ratio
 - scripts: create scripts that form accurate final distribution file to use for deployment of adding eligilbe addrs to headstash
+- docs: calculate expected tokens for airdrop, including additional random rewards
