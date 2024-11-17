@@ -26,11 +26,11 @@ Each inital account with TERP (excluding Protocol Treasury & 1 Terp for each Gen
 ### Genesis Distribution Normalization
 To normalize the TPP for each type of token holder, we can use the following formula to calculate how many additional tokens should be distirbuted to holders in each category 
 
-$ NewTokenPerPoint = (TotalTokens + Y) ÷  NumAddrs ÷ Points $
+$NewTokenPerPoint = (TotalTokens + Y) ÷  NumAddrs ÷ Points$
 
 where we can calcluate the additional tokens by:
 
-$ Y = (NewTokenPerPoint * NumAddrs * Points) - TotalTokens $
+$Y = (NewTokenPerPoint * NumAddrs * Points) - TotalTokens$
 
 
 Leaving us with the following additional tokens to distribute to each category of genesis addrs:
@@ -43,7 +43,7 @@ Leaving us with the following additional tokens to distribute to each category o
 | ATOM + BCNA               |`5` | `336,005.955384`|`1,832,624.2176`| `6,941.7584`| `1,388.351680` |`254.549966`|
 | ATOM + BCNA               |`6` |`206,879.084028`|`658,078.69632`|`8,330.11008`|`1,388.351680`| `436.453764`|
 | BCNA                      | -  | - | - | - | - |
-| ATOM + BCNA               |`7` | `10,024.850788`| `53,989.697188` `13,497.424297` `1,928.203471`|`358.030386` |
+| ATOM + BCNA               |`7` | `10,024.850788`| `53,989.697188` | `13,497.424297` | `1,928.203471`|`358.030386` |
 | ATOM + BCNA               |`8` | `28,382.070722`|`61,702.511072` |`15,425.627768`|`1,928.203471` | `886.939711` |
 | ATOM + BCNA               |`9` | `24,525.663796`| `69,415.324956`| `17,353.831239`| `1,928.203471` | `681.268439` |
 | BCNA                      | -  | - | -   | - | 
