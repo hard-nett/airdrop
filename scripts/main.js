@@ -1,9 +1,9 @@
 import fs from 'fs';
 
 import { processData, encodeAddrs } from "./solana-utils.js";
+import { processFiles } from './genesis-script.js';
 
-// Call the function
-
+// Call the function∂
 
 // Process command line arguments
 const args = process.argv.slice(2);
@@ -22,8 +22,7 @@ if (args.length < 1) {
     let outputFile = "../headstash/communities/stoned-ape-club/sac-w-tokens-encoded.csv";
     encodeAddrs(inputFile, outputFile);
 } else if (args[0] === '-3') {
-    instantiate_test_contract();
+    processFiles().catch(console.error);
 } else {
     console.error('Invalid option.');
-
 }

@@ -11,13 +11,14 @@ Each inital account with TERP (excluding Protocol Treasury & 1 Terp for each Gen
 | ATOM                        | `1`          | `114,846`        | `13,276,409.490870` | `115.601845`
 | ATOM                        | `2`          | `40,877`         | `9,450,913.236130`  | `115.601845`
 | ATOM                        | `3`          | `8,147`          | `2,825,424.701792`  | `115.601845`
-| ATOM + BCNA                 | `4`          | `1,443 `         | `8,013,565.901289`  | `1,388.351680`
-| ATOM + BCNA                 | `5`          | `264`            | `1,496,618.262216`  | `1,133.8017138`
-| ATOM + BCNA                 | `6`          | `79`             | `451,199.612292`    | `951.897916`
+| BCNA                        | `3`          | `?`              | `?`                 | `1,812.601626`
+| ATOM(1) + BCNA(3)           | `4`          | `1,443 `         | `8,013,565.901289`  | `1,388.351680`
+| ATOM(2) + BCNA(3)           | `5`          | `264`            | `1,496,618.262216`  | `1,133.8017138`
+| ATOM(3) + BCNA(3)           | `6`          | `79`             | `451,199.612292`    | `951.897916`
 | BCNA                        | `6`          | `100`            | `1,087,560.976`     | `1,812.601626`
-| ATOM + BCNA                 | `7`          | `4`              | `43,964.846400`     | `1,570.173085`
-| ATOM + BCNA                 | `8`          | `4`              | `33,320.440350`     | `1,041.263760`
-| ATOM + BCNA                 | `9`          | `4`              | `44,889.661160`     | `1,246.935032`
+| ATOM(1) + BCNA(6)           | `7`          | `4`              | `43,964.846400`     | `1,570.173085`
+| ATOM(2) + BCNA(6)           | `8`          | `4`              | `33,320.440350`     | `1,041.263760`
+| ATOM(3) + BCNA(6)           | `9`          | `4`              | `44,889.661160`     | `1,246.935032`
 | BCNA                        | `9`          | `4`              | `65,253.658520`     | `1,812.601625`
 | TERP OG & SCAVENGER HUNT    | `1 - 1.34`   | `43`             | `111,913.879345`    | ~`2,263.172484`
 | GENTX                       | `1`          | `4`              | `4`                 | `1`
@@ -69,11 +70,12 @@ Leaving us with the following additional tokens to distribute to each category o
 | [Re-Bud](./eth/communities/rebud.csv)             | 585               | <>                | 927,127.66  TERP & THIOL |
 | [Stoned Ape Club](./eth/communities/rebud.csv)    | 2059              | Oct 24th, 2024    | 927,127.66  TERP & THIOL |
 
-### Check [here](./eth/README.md) to learn about the parameters for the airdrop to token holders of projects supporting the vision of web-3 + cannabis culture.
+### Check [here](./headstash/README.md) to learn about the parameters for the airdrop to token holders of projects supporting the vision of web-3 + cannabis culture.
 
 
 ## Todo
-- scripts: create scripts that calculate genesis distribution for accuracy
-- scripts: create scripts to determine additional allocation for genesis distribution that balances inital distribution ratio
-- scripts: create scripts that form accurate final distribution file to use for deployment of adding eligilbe addrs to headstash
-- docs: calculate expected tokens for airdrop, including additional random rewards
+__~~- scripts: create scripts that calculate genesis distribution for accuracy~~__\
+__- scripts: create scripts that form accurate headstash final distribution file__\
+__- scripts: create scripts taking network export, compare genesis holders balance with expected balance form new scripts__\
+__- scripts: create scripts to determine additional allocation for genesis distribution that balances inital distribution ratio__\
+__- docs: calculate expected tokens for airdrop, including additional random rewards, improve details regarding headstash airdrop__\
