@@ -59,16 +59,17 @@ Leaving us with the following additional tokens to distribute to each category o
 
 | Project                                           | Unique Addresses  | Date Of Snapshot   | Total Tokens Allocated | Average Token Per Point |
 |---------------------------------------------------|-------------------|-------------------|-------------------| -------------------| 
-| [Chronic Token](./eth/communities/cht.csv)        | 1,256             | Oct 11th, 2022    | 7,615,897.44 TERP & THIOL |
-| [Crypto Canna Club](./eth/communities/ccc.csv)    | 4,405             | Oct 11th, 2022    | 12,706,127.17 TERP & THIOL |
-| [MonsterBuds](./eth/communities/the-buds.csv)     | 3,385             | Oct 11th, 2022    | 5,746,617.43  TERP & THIOL |
-| [Hippie Life Krew](./eth/communities/hlk.csv)     | 342               | June 16th, 2023   | 807,361.96  TERP & THIOL |
-| [N8 Free Mint Holders](./eth/communities/n8.csv)  | 316               | Oct 11th, 2022    | 735000.000000   TERP & THIOL |
-| [Secret Sesh](./eth/communities/sesh.csv)         | 779               | Oct 11th, 2022    | 4200000.000000  TERP & THIOL |
-| [Galaktic Gang](./eth/communities/gg.csv)         | 2566              | Oct 11th, 2022    | 6,306,752.41  TERP & THIOL |
-| [Buddah Bears](./eth/communities/bb.csv)          | 2453              |  <>               | 6,300,000.00  TERP & THIOL |
-| [Re-Bud](./eth/communities/rebud.csv)             | 585               | <>                | 927,127.66  TERP & THIOL |
-| [Stoned Ape Club](./eth/communities/rebud.csv)    | 2059              | Oct 24th, 2024    | 927,127.66  TERP & THIOL |
+| [Chronic Token](./headstash/communities/chronic-token/cht.csv)        | 1,256             | Oct 11th, 2022    | 7,615,897.44 TERP & THIOL |
+| [Crypto Canna Club](./headstash/communities/crypto-canna-club/ccc.csv)    | 4,405             | Oct 11th, 2022    | 12,706,127.17 TERP & THIOL |
+| [MonsterBuds](./headstash/communities/monster-buds/the-buds.csv)     | 3,385             | Oct 11th, 2022    | 5,746,617.43  TERP & THIOL |
+| [Hippie Life Krew](./headstash/communities/hippie-life-krew/hlk.csv)     | 342               | June 16th, 2023   | 807,361.96  TERP & THIOL |
+| [Secret Sesh](./headstash/communities/secret-sesh/sesh.csv)         | 779               | Oct 11th, 2022    | 4200000.000000  TERP & THIOL |
+| [Galaktic Gang](./headstash/communities/galacktic-gang/gg.csv)         | 2566              | Oct 11th, 2022    | 6,306,752.41  TERP & THIOL |
+| [Buddah Bears](./headstash/communities/buddah-bears/bb.csv)          | 2453              |  <>               | 6,300,000.00  TERP & THIOL |
+| [Re-Bud](./headstash/communities/rebud/rebud.csv)             | 585               | <>                | 927,127.66  TERP & THIOL |
+| [Stoned Ape Club](./headstash/communities/stoned-ape-club/sac.csv)    | 2059              | Oct 24th, 2024    | 927,127.66  TERP & THIOL |
+| [Wake-And-Bake](./headstash/communities/wake-and-bake/wab.csv)      | -                 | Nov 9th, 2024     | -  TERP & THIOL |
+| [Cannabuddies](./headstash/communities/cannabuddies/cb.csv)       | -                 | Nov 4th, 2024     | -  TERP & THIOL |
 
 ### Check [here](./headstash/README.md) to learn about the parameters for the airdrop to token holders of projects supporting the vision of web-3 + cannabis culture.
 
