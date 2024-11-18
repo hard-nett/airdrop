@@ -2,6 +2,7 @@ import fs from 'fs';
 
 import { processData, encodeAddrs } from "./solana-utils.js";
 import { processFiles } from './genesis-script.js';
+import { processDistributions } from './headstash-scripts.js';
 
 // Call the function∂
 
@@ -22,7 +23,11 @@ if (args.length < 1) {
     let outputFile = "../headstash/communities/stoned-ape-club/sac-w-tokens-encoded.csv";
     encodeAddrs(inputFile, outputFile);
 } else if (args[0] === '-3') {
+    // Genesis file scripts
     processFiles().catch(console.error);
+} else if (args[0] === '-4') {
+    // Headstash script
+    processDistributions().catch(console.error);
 } else {
     console.error('Invalid option.');
 }

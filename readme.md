@@ -76,7 +76,7 @@ Leaving us with the following additional tokens to distribute to each category o
 
 ## Todo
 __~~- scripts: create scripts that calculate genesis distribution for accuracy~~__\
-__- scripts: create scripts that form accurate headstash final distribution file__\
+__~~- scripts: create scripts that form accurate headstash final distribution file~~__\
 __- scripts: create scripts taking network export, compare genesis holders balance with expected balance form new scripts__\
 __- scripts: create scripts to determine additional allocation for genesis distribution that balances inital distribution ratio__\
 __- docs: calculate expected tokens for airdrop, including additional random rewards, improve details regarding headstash airdrop__\
