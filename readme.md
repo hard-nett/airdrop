@@ -65,11 +65,16 @@ Leaving us with the following additional tokens to distribute to each category o
 | [Hippie Life Krew](./headstash/communities/hippie-life-krew/hlk.csv)  | 342               | June 16th, 2023   | 807,361.96  TERP & THIOL |
 | [Secret Sesh](./headstash/communities/secret-sesh/sesh.csv)           | 779               | Oct 11th, 2022    | 4200000.000000  TERP & THIOL |
 | [Galaktic Gang](./headstash/communities/galacktic-gang/gg.csv)        | 2566              | Oct 11th, 2022    | 6,306,752.41  TERP & THIOL |
-| [Buddah Bears](./headstash/communities/buddah-bears/bb.csv)           | 2453              |  <>               | 6,300,000.00  TERP & THIOL |
+| [Buddah Bears](./headstash/communities/buddah-bears/bb.csv)           | 2453              | <>                | 6,300,000.00  TERP & THIOL |
 | [Re-Bud](./headstash/communities/rebud/rebud.csv)                     | 585               | <>                | 927,127.66  TERP & THIOL |
 | [Stoned Ape Club](./headstash/communities/stoned-ape-club/sac.csv)    | 2059              | Oct 24th, 2024    | 927,127.66  TERP & THIOL |
-| [Wake-And-Bake](./headstash/communities/wake-and-bake/wab.csv)        | -                 | Nov 9th, 2024     | -  TERP & THIOL |
+| [Wake-And-Bake](./headstash/communities/wake-and-bake/wab.csv)        | -                 | Nov 18th, 2024     | -  TERP & THIOL |
 | [Cannabuddies](./headstash/communities/cannabuddies/cb.csv)           | -                 | Nov 18th, 2024     | -  TERP & THIOL |
+| [Special-K](./headstash/communities/special-k/cb.csv)                 | -                 | Nov 18th, 2024     | -  TERP & THIOL |
+| [CryptoWizards](./headstash/communities/cryptowizards/cb.csv)         | -                 | Nov 18th, 2024     | -  TERP & THIOL |
+| [N8](./headstash/communities/n8/cb.csv)                               | -                 | -                  | -  TERP & THIOL |
+| [Heady Pipe society](./headstash/communities/heady-pipe-society/cb.csv)| -                | Nov 18th, 2024     | -  TERP & THIOL |
+| [Carta: Beta Gang](./headstash/communities/carta-beta-gang/cb.csv)    | | Nov 19th, 2024  | -  TERP & THIOL |
 
 ### Check [here](./headstash/README.md) to learn about the parameters for the airdrop to token holders of projects supporting the vision of web-3 + cannabis culture.
 
