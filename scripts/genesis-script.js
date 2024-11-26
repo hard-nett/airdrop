@@ -15,7 +15,7 @@ let files = [
     "../genesis/terp_og.csv",
 ];
 
-// Point system based on balance thresholds for Gaia and BCNA
+// Point system based on balance percentiles for Gaia and BCNA
 const atomPoints = [
     { points: 1, min: 0, max: 56290873.26 }, // 0th - 74th percentile
     { points: 2, min: 56290873.26, max: 581059663.70 }, // 75th - 95th percentile
@@ -66,7 +66,7 @@ function readCSV(filePath) {
 }
 
 // Aggregate and process CSV files
-async function processFiles() {
+async function processGenesisDistribution() {
     let gaiaData = await readCSV(files[1]);
     let bcnaData = await readCSV(files[0]);
 
@@ -143,4 +143,4 @@ async function processFiles() {
     console.log(`Final CSV generated: ${outputFile}`);
 }
 
-export { processFiles }
+export { processGenesisDistribution }

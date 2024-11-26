@@ -1,7 +1,7 @@
 import fs from 'fs';
 import csv from 'csv-parser';
 
-const processData = async (data) => {
+const processSacNFTdata = async (data) => {
     const stringCounts = {};
 
     // Parse the JSON data
@@ -49,4 +49,4 @@ const encodeAddrs = async (inputFile, outputFile) => {
 };
 
 
-export { processData, encodeAddrs }
+export { processSacNFTdata, encodeAddrs }

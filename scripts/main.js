@@ -1,10 +1,10 @@
 import fs from 'fs';
 
 import { processData, encodeAddrs } from "./solana-utils.js";
-import { processFiles } from './genesis-script.js';
-import { processDistributions } from './headstash-scripts.js';
+import { processExportedState } from './exported-state.js';
+import { processHeadstashDistributions } from './headstash-scripts.js';
+import { processGenesisDistribution } from './genesis-script.js';
 
-// Call the function∂
 
 // Process command line arguments
 const args = process.argv.slice(2);
@@ -24,10 +24,12 @@ if (args.length < 1) {
     encodeAddrs(inputFile, outputFile);
 } else if (args[0] === '-3') {
     // Genesis file scripts
-    processFiles().catch(console.error);
+    processGenesisDistribution().catch(console.error);
 } else if (args[0] === '-4') {
     // Headstash script
-    processDistributions().catch(console.error);
+    processHeadstashDistributions().catch(console.error);
+} else if (args[0] === '-5') {
+    processExportedState()
 } else {
     console.error('Invalid option.');
 }

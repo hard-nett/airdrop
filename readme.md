@@ -6,23 +6,23 @@ Each inital account with TERP (excluding Protocol Treasury & 1 Terp for each Gen
 
 
 ### Genesis Distribution Details
-| Project                     | Points     | # of addresses | Total Tokens (TERP & THIOL)  | TPP (Token per point)
-|-----------------------------|------------|----------------|---------------|-----|
-| ATOM                        | `1`          | `114,846`        | `13,276,409.490870` | `115.601845`
-| ATOM                        | `2`          | `40,877`         | `9,450,913.236130`  | `115.601845`
-| ATOM                        | `3`          | `8,147`          | `2,825,424.701792`  | `115.601845`
-| BCNA                        | `3`          | `?`              | `?`                 | `1,812.601626`
-| ATOM(1) + BCNA(3)           | `4`          | `1,443 `         | `8,013,565.901289`  | `1,388.351680`
-| ATOM(2) + BCNA(3)           | `5`          | `264`            | `1,496,618.262216`  | `1,133.8017138`
-| ATOM(3) + BCNA(3)           | `6`          | `79`             | `451,199.612292`    | `951.897916`
-| BCNA                        | `6`          | `100`            | `1,087,560.976`     | `1,812.601626`
-| ATOM(1) + BCNA(6)           | `7`          | `4`              | `43,964.846400`     | `1,570.173085`
-| ATOM(2) + BCNA(6)           | `8`          | `4`              | `33,320.440350`     | `1,041.263760`
-| ATOM(3) + BCNA(6)           | `9`          | `4`              | `44,889.661160`     | `1,246.935032`
-| BCNA                        | `9`          | `4`              | `65,253.658520`     | `1,812.601625`
-| TERP OG & SCAVENGER HUNT    | `1 - 1.34`   | `43`             | `111,913.879345`    | ~`2,263.172484`
-| GENTX                       | `1`          | `4`              | `4`                 | `1`
-| **TOTAL**                   | -          |  **`165,819`**     | **`36,901,038.666364`** | -
+| Project | Max Tokens in Percentile Range | Points     | # of addresses | Total Tokens (TERP & THIOL)  | TPP (Token per point) | Tokens 
+|-----------------------|------|------------|----------------|---------------|-----| --- |
+| ATOM  |   `56.290873` | `1`  | `114,846`  | `13,276,409.490870` | `115.601845` | `115.601845` |
+| ATOM  |   `581.059663`| `2`  | `40,877`   | `9,450,913.236130`  | `115.601845` | `231.203690` |
+| ATOM  |`11,695,142.809644`|`3`| `8,147` | `2,825,424.701792`    | `115.601845` | `346.805536` |
+| BCNA  | `56.104789`   | `3`  | `1073`      | `5,834,764.634094` | `1,812.601626`|  `5,437.804878` | 
+| ATOM(1) + BCNA(3)    |  -      | `4`| `1,443` * *`342`*| `8,013,565.901289`  | `1,388.351680` | `5,553.40672` |
+| ATOM(2) + BCNA(3)    | -      | `5`| `264`| `1,496,618.262216`  | `1,133.8017138` |`5,669.008569` |
+| ATOM(3) + BCNA(3)    | -     | `6`          | `79`             | `451,199.612292`    | `951.897916` |`5,784.610414` |
+| BCNA | `3,835.224107`| `6`          | `100`            | `1,087,560.976`     | `1,812.601626` | `10,875.609760` |
+| ATOM(1) + BCNA(6)  | -        | `7`          | `4`  * *`264`*             | `43,964.846400`     | `1,570.173085` | -|
+| ATOM(2) + BCNA(6)  | -        | `8`          | `4`              | `33,320.440350`     | `1,041.263760` | - |
+| ATOM(3) + BCNA(6) | -           | `9`          | `4`              | `44,889.661160`     | `1,246.935032` | - |
+| BCNA   |`32,910,049.646754` | `9`          | `4`              | `65,253.658520`     | `1,812.601625` | - |
+| TERP OG & SCAVENGER HUNT | -  | `1 - 1.34`   | `43`             | `111,913.879345`    | ~`2,263.172484` | - |
+| GENTX         |              | `1`          | `4`              | `4`                 | `1` | - |
+| **TOTAL**                   | -          |  **`165,819`**     | **`36,901,038.666364`** | - | - | -| 
 
 ### Genesis Distribution Normalization
 To normalize the TPP for each type of token holder, we can use the following formula to calculate how many additional tokens should be distirbuted to holders in each category 
@@ -63,7 +63,7 @@ Leaving us with the following additional tokens to distribute to each category o
 | [Crypto Canna Club](./headstash/communities/crypto-canna-club/ccc.csv)| 4,405             | Oct 11th, 2022    | 12,706,127.17 TERP & THIOL |
 | [MonsterBuds](./headstash/communities/monster-buds/the-buds.csv)      | 3,385             | Oct 11th, 2022    | 5,746,617.43  TERP & THIOL |
 | [Hippie Life Krew](./headstash/communities/hippie-life-krew/hlk.csv)  | 342               | June 16th, 2023   | 807,361.96  TERP & THIOL |
-| [Secret Sesh](./headstash/communities/secret-sesh/sesh.csv)           | 779               | Oct 11th, 2022    | 4200000.000000  TERP & THIOL |
+| [Secret Sesh](./headstash/communities/secret-sesh/sesh.csv)           | 779               | Oct 11th, 2022    | 4,200,000.000000  TERP & THIOL |
 | [Galaktic Gang](./headstash/communities/galacktic-gang/gg.csv)        | 2566              | Oct 11th, 2022    | 6,306,752.41  TERP & THIOL |
 | [Buddah Bears](./headstash/communities/buddah-bears/bb.csv)           | 2453              | <>                | 6,300,000.00  TERP & THIOL |
 | [Re-Bud](./headstash/communities/rebud/rebud.csv)                     | 585               | <>                | 927,127.66  TERP & THIOL |

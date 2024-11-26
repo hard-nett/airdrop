@@ -170,7 +170,7 @@ function encodeSolanaAddress(address) {
 // Create an object to store the final tally
 let finalTally = {};
 
-async function processDistributions() {
+async function processHeadstashDistributions() {
     let addressCommunities = {};
     let communities = [];
 
@@ -280,4 +280,4 @@ function createFinalTallyCsv(finalTally, addressCommunities, communities) {
         });
     });
 }
-export { processDistributions }
+export { processHeadstashDistributions }
