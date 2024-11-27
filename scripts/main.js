@@ -1,10 +1,9 @@
 import fs from 'fs';
 
 import { processSacNFTdata, encodeAddrs } from "./solana-utils.js";
-import { analyzeHeadstashDistribution } from "./analyze-headstash-dist.js";
 import { processExportedState } from './exported-state.js';
 import { processHeadstashDistributions } from './headstash-scripts.js';
-import { processGenesisDistribution } from './genesis-script.js';
+import { processGenesisDistribution, checkAddresses } from './genesis-script.js';
 
 
 // Process command line arguments
@@ -33,6 +32,8 @@ if (args.length < 1) {
     processExportedState()
 } else if (args[0] === '-6') {
     analyzeHeadstashDistribution()
+} else if (args[0] === '-7') {
+    checkAddresses()
 } else {
     console.error('Invalid option.');
 }
