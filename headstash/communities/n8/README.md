@@ -4,3 +4,11 @@
 
 ## Distribution 
 ![dist](../../../static/n8-dist.png)
+
+## Percentiles
+
+| | Points | Min | Max | # In Percentile |
+|--|--------|-----|-----|----------|
+| 1st-98th   | 1  | 1  | 3 | 230
+| 99th  | 2  | 4  | 4 | 81
+| 100th | 3  | 5 | 6 | 5 | 

@@ -5,3 +5,9 @@
 ![dist](../../../static/rebud-dist.png)
 
 ## Percentiles
+
+| | Points | Min | Max | # In Percentile |
+|--|--------|-----|-----|----------|
+| 1st-87th   | 1  | 1  | 10 |  |
+| 88th-90th  | 2  | 11 | 14 |  |
+| 79th-100th | 3  | 15 | 93 |  | 

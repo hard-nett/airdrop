@@ -5,3 +5,10 @@
 ## Distribution 
 
 ![dist](../../../static/ccc-dist.png)
+
+## Percentiles 
+| | Points | Min | Max | # In Percentile |
+|--|--------|-----|-----|----------|
+|66th | 1 | 1 | 1 | 2948
+|95th | 2 | 2 | 6 | 2528
+|100th| 3 | 7 | 300 | 193

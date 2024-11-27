@@ -4,3 +4,10 @@
 
 ## Distirbution
 ![dist](../../../static/cbg-dist.png)
+
+## Percentiles 
+| | Points | Min | Max | # In Percentile |
+|--|--------|-----|-----|----------|
+|88th | 1 | 1 | 1 | 139
+|99th | 2 | 2 | 3 | 17
+|100th| 3 | 4 | 15 | 1

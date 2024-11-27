@@ -6,141 +6,213 @@ import fs from 'fs';
 import csv from 'csv-parser';
 import path from 'path'
 
+const totalSupply = 420000000
+
 let etpp = [
     {
+        name: "buddah-bears",
+        numOfHolders: 2453,
+        percTotalSupply: 1.5,
+        csv: "../headstash/communities/buddah-bears/bb.csv",
+        points: [
+            { points: 1, min: 1, max: 1 }, // 1st - 59th
+            { points: 2, min: 2, max: 6 }, // 60th - 90th
+            { points: 3, min: 7, max: 790 } // 91st - 100th
+        ],
+        tpp: 1762.237762
+    },
+    {
+        name: "cannabuddies",
+        numOfHolders: 238,
+        percTotalSupply: 0.125,
+        csv: "../headstash/communities/cannabuddies/cb.csv",
+        points: [
+            { points: 1, min: 1, max: 1 }, // 1st - 59th
+            { points: 2, min: 2, max: 3 }, // 60th - 90th
+            { points: 3, min: 4, max: 9 }  // 91st - 100th
+        ],
+        tpp: 1595.744681
+    },
+    {
+        name: "carta-beta-gang",
+        numOfHolders: 157,
+        percTotalSupply: 0.06,
         csv: "../headstash/communities/carta-beta-gang/carta.csv",
         points: [
-            { points: 1, min: 1, max: 1 }, // 1st - 88th percentile
-            { points: 2, min: 2, max: 3 }, // 88st - 99th percentile
-            { points: 3, min: 15, max: 15 }, // 100th percentile
+            { points: 1, min: 1, max: 1 }, // 1st - 88th
+            { points: 2, min: 2, max: 3 },  // 89th - 99th 
+            { points: 3, min: 15, max: 15 }, // 100th
         ],
         tpp: 1431.818182 // 0.06% 
     },
     {
+        name: "chronic-token",
+        numOfHolders: 1256,
+        percTotalSupply: 2.0,
+        csv: "../headstash/communities/chronic-token/cht.csv",
+        points: [
+            { points: 1, min: 2949.07, max: 29907.26 },    // 15th - 60th
+            { points: 2, min: 29907.27, max: 126425.37 },  // 61st - 83rd
+            { points: 3, min: 126425.38, max: 631620.69 }, // 84th - 95th
+            { points: 4, min: 631620.7, max: 52230931.14 } // 96th - 100th 
+        ],
+        tpp: 4615.384615
+    },
+    {
+        name: "crypto-canna-club",
+        numOfHolders: 4405,
+        percTotalSupply: 3.0,
+        csv: "../headstash/communities/crypto-canna-club/ccc.csv",
+        points: [
+            { points: 1, min: 1, max: 1 }, // 1st - 65th
+            { points: 2, min: 2, max: 6 }, // 66th - 95th
+            { points: 3, min: 7, max: 300 } // 96th - 100th
+        ],
+        tpp: 2080.924855
+    },
+    {
+        name: "cryptowizards",
+        numOfHolders: 55,
+        percTotalSupply: 0.02,
         csv: "../headstash/communities/cryptowizards/cw.csv",
         points: [
-            { points: 1, min: 1, max: 1 }, // 1st - 71th percentile
-            { points: 2, min: 2, max: 5 }, // 72st - 96th percentile
-            { points: 3, min: 6, max: 14 }, // 97th - 100th 
+            { points: 1, min: 1, max: 1 }, // 1st - 70th
+            { points: 2, min: 2, max: 4 }, // 71st - 95th
+            { points: 3, min: 5, max: 14 }, // 96th - 100th 
         ],
         tpp: 1150.684932 // 0.02%
     },
     {
+        name: "galacktic-gang",
+        numOfHolders: 2566,
+        percTotalSupply: 1.5,
+        csv: "../headstash/communities/galacktic-gang/gg.csv", 
+        points: [
+            { points: 1, min: 1, max: 1 }, // 1st - 63rd
+            { points: 2, min: 2, max: 4 }, // 64th - 95th
+            { points: 3, min: 5, max: 66 } // 96th - 100th
+        ], 
+        tpp: 1688.102894
+    },
+    {
+        name: "heady-pipe-society",
+        numOfHolders: 342,
+        percTotalSupply: 0.25,
         csv: "../headstash/communities/heady-pipe-society/hps.csv",
         points: [
-            { points: 1, min: 1, max: 1 }, // 1st - 56th percentile
-            { points: 2, min: 2, max: 5 }, // 72st - 95th percentile
+            { points: 1, min: 1, max: 1 }, // 1st - 56th 
+            { points: 2, min: 2, max: 5 }, // 72st - 95th
             { points: 3, min: 6, max: 10 }, // 96th - 100th 
         ],
         tpp: 1852.941176 // 0.015%
     },
     {
-        csv: "../headstash/communities/n8/n8.csv",
+        name: "hippie-life-krew",
+        numOfHolders: 342,
+        percTotalSupply: 0.25,
+        csv: "../headstash/communities/hippie-life-krew/hlk.csv",
         points: [
-            { points: 1, min: 1, max: 1 }, // 1st - 72nd percentile
-            { points: 2, min: 2, max: 3 }, // 73rd - 98th percentile
-            { points: 3, min: 4, max: 6 }, // 99th - 100th percentile
+            { points: 1, min: 1, max: 1 },   // 1st - 37th 
+            { points: 2, min: 2, max: 22 },  // 38th - 99th 
+            { points: 3, min: 23, max: 116 } // 100th
+        ], 
+        tpp: 2147.239264
+    },
+    {
+        name: "monster-buds",
+        numOfHolders: 3385,
+        percTotalSupply: 1.5,
+        csv: "../headstash/communities/monster-buds/buds.csv",
+        points: [
+            { points: 1, min: 1, max: 1 },    // 1st - 49th
+            { points: 2, min: 2, max: 10 },   // 26th - 93rd
+            { points: 3, min: 11, max: 289 }  // 94th - 100th 
+        ],
+        tpp: 1861.152142
+    },
+    {
+        name: "n8",
+        csv: "../headstash/communities/n8/n8.csv",
+        numOfHolders: 316,
+        percTotalSupply: 0.15,
+        points: [
+            { points: 1, min: 1, max: 3 }, // 1st - 98th
+            { points: 2, min: 4, max: 4 }, // 99th
+            { points: 3, min: 5, max: 6 }, // 100th
         ],
         tpp: 1547.911548 // 0.15% 
     },
     {
+        name: "rebud",
+        csv: "../headstash/communities/rebud/rebud.csv",
+        numOfHolders: 585,
+        percTotalSupply: 0.35,
+        tpp: 1861.152142,
+        points: [
+            { points: 1, min: 1, max: 10 },  // 1st - 87th percentile
+            { points: 2, min: 11, max: 41 }, // 88th - 99th percentile
+            { points: 3, min: 42, max: 93 }  // 100th percentile
+        ],
+    },
+    {
+        name: "secret-sesh",
+        csv: "../headstash/communities/secret-sesh/sesh.csv",
+        numOfHolders: 780,
+        percTotalSupply: 0.25,
+        points: [
+            { points: 1, min: 1, max: 1 },
+            { points: 2, min: 2, max: 4 },  
+            { points: 3, min: 5, max: 148 }   
+        ], 
+        tpp: 1992.409867
+    },
+    {
+        name: "shurlok",
+        csv: "../headstash/communities/shurlok/shurlok.csv",
+        numOfHolders: 33,
+        percTotalSupply: 0.025,
+        tpp: 1660.079051,
+        points: [
+            { points: 1, min: 1, max: 1 },   // 1st - 25th percentile
+            { points: 2, min: 2, max: 5 }, // 26th - 75th percentile
+            { points: 3, min: 6, max: 89 } // 76th - 100th percentile
+        ], 
+    },
+    {
+        name: "special-k",
         csv: "../headstash/communities/special-k/special-k.csv",
+        numOfHolders: 46,
+        percTotalSupply: 0.02,
+        tpp: 1423.728814, // 0.02%
         points: [
             { points: 1, min: 1, max: 1 }, // 1st - 76th percentile
             { points: 2, min: 2, max: 4 }, // 77th - 95th percentile
             { points: 3, min: 5, max: 15 }, // 96th - 100th percentile
         ],
-        tpp: 1423.728814 // 0.02%
     },
     {
-        csv: "../headstash/communities/buddah-bears/bb.csv",
+        name: "stoned-ape-club",
+        csv: "../headstash/communities/stoned-ape-club/sac.csv",
+        numOfHolders: 2059,
+        percTotalSupply: 1.25,
+        tpp: 1577.524038,
         points: [
-            { points: 1, min: 1, max: 1 }, // 1st - 87th percentile
-            { points: 2, min: 2, max: 12 }, // 26th - 75th percentile
-            { points: 3, min: 13, max: 790 } // 76th - 100th percentile
-        ],
-        tpp: 1762.237762
+            { points: 1, min: 1, max: 1 },   // 1st - 46th 
+            { points: 2, min: 2, max: 9 },   // 47th - 93rd 
+            { points: 3, min: 10, max: 132 } // 94th - 100th 
+        ], 
     },
     {
-        csv: "../headstash/communities/monster-buds/buds.csv",
+        name: "wake-and-bake",
+        csv: "../headstash/communities/wake-and-bake/wab.csv",
+        numOfHolders: 154,
+        percTotalSupply: 0.1,
+        tpp: 1660.079051,
         points: [
-            { points: 1, min: 1, max: 1 },  // 1st - 25th percentile
-            { points: 2, min: 2, max: 8 },  // 26th - 75th percentile
-            { points: 3, min: 9, max: 289 } // 76th - 100th percentile
-        ],
-        tpp: 1861.152142
-    },
-    {
-        csv: "../headstash/communities/cannabuddies/cb.csv",
-        points: [
-            { points: 1, min: 1, max: 1 }, // 1st - 68th percentile
-            { points: 2, min: 2, max: 3 }, // 69th - 93rd percentile
-            { points: 3, min: 4, max: 9 } // 94th - 100th percentile
-        ],
-        tpp: 1595.744681
-    },
-    {
-        csv: "../headstash/communities/crypto-canna-club/ccc.csv",
-        points: [
-            { points: 1, min: 1, max: 1 }, // 1st - 65th  percentile
-            { points: 2, min: 2, max: 6 }, // 66th - 95th percentile
-            { points: 3, min: 7, max: 300 } // 96th - 100th percentile
-        ],
-        tpp: 2080.924855
-    },
-    {
-        csv: "../headstash/communities/chronic-token/cht.csv",
-        points: [
-            { points: 1, min: 2957.53, max: 29907.26 }, // 15th - 60th percentile
-            { points: 2, min: 29982.06, max: 144068.86 }, // 61stth - 83rd percentile
-            { points: 3, min: 146172.26, max: 1006878.94 }, // 84th - 95thpercentile
-            { points: 4, min: 1016322.14, max: 52230931.14 } // 96th - 100th percentile
-        ],
-        tpp: 4615.384615
-    },
-    {
-        csv: "../headstash/communities/galacktic-gang/gg.csv", points: [
-            { points: 1, min: 1, max: 1 }, // 1st - 65th  percentile
-            { points: 2, min: 2, max: 8 }, // 66th - 92th percentile
-            { points: 3, min: 9, max: 66 } // 93rd - 100th percentile
-        ], tpp: 1688.102894
-    },
-    {
-        csv: "../headstash/communities/hippie-life-krew/hlk.csv", points: [
-            { points: 1, min: 1, max: 9 },    // 1st - 89th percentile
-            { points: 2, min: 10, max: 45 },  // 90th - 99th percentile
-            { points: 3, min: 116, max: 116 } // 100th percentile
-        ], tpp: 2147.239264
-    },
-    {
-        csv: "../headstash/communities/rebud/rebud.csv",
-        points: [
-            { points: 1, min: 1, max: 10 },  // 1st - 87th percentile
-            { points: 2, min: 11, max: 74 }, // 88thth - 99th percentile
-            { points: 3, min: 93, max: 93 }  // 100th percentile
-        ],
-        tpp: 1861.152142
-    },
-    {
-        csv: "../headstash/communities/secret-sesh/sesh.csv", points: [
-            { points: 1, min: 1, max: 1 },     // 1st - 52nd percentile
-            { points: 2, min: 2, max: 41 },    // 53rd - 75th percentile
-            { points: 3, min: 148, max: 148 }  // 76th - 100th percentile
-        ], tpp: 1992.409867
-    },
-    {
-        csv: "../headstash/communities/stoned-ape-club/sac.csv", points: [
-            { points: 1, min: 1, max: 1 },   // 1st - 46th percentile
-            { points: 2, min: 2, max: 9 },   // 47th - 93rd percentile
-            { points: 3, min: 10, max: 132 } // 94th - 100th percentile
-        ], tpp: 1577.524038
-    },
-    {
-        csv: "../headstash/communities/wake-and-bake/wab.csv", points: [
-            { points: 1, min: 1, max: 1 },   // 1st - 25th percentile
-            { points: 2, min: 2, max: 9 }, // 26th - 75th percentile
-            { points: 3, min: 10, max: 10 } // 76th - 100th percentile
-        ], tpp: 1660.079051
+            { points: 1, min: 1, max: 1 },   // 1st - 25th  
+            { points: 2, min: 2, max: 9 }, // 26th - 75th 
+            { points: 3, min: 10, max: 10 } // 76th - 100th  
+        ], 
     },
 ]
 
@@ -271,7 +343,7 @@ function createFinalTallyCsv(finalTally, addressCommunities, communities) {
             csvContent += row + "\n";
         });
 
-        fs.writeFile('../headstash/final_tally.csv', csvContent, (err) => {
+        fs.writeFile('../headstash/scripts-data/final_tally.csv', csvContent, (err) => {
             if (err) {
                 reject(err);
             } else {

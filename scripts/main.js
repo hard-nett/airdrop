@@ -1,6 +1,6 @@
 import fs from 'fs';
 
-import { processData, encodeAddrs } from "./solana-utils.js";
+import { processSacNFTdata, encodeAddrs } from "./solana-utils.js";
 import { processExportedState } from './exported-state.js';
 import { processHeadstashDistributions } from './headstash-scripts.js';
 import { processGenesisDistribution } from './genesis-script.js';
@@ -15,7 +15,7 @@ if (args.length < 1) {
         if (err) {
             console.error(err);
         } else {
-            processData(data);
+            processSacNFTdata(data);
         }
     });
 } else if (args[0] === '-2') {

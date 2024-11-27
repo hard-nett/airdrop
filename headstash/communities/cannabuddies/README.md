@@ -4,3 +4,10 @@
 
 ## Distribution 
 ![dist](../../../static/cb-dist.png)
+
+## Percentiles 
+| | Points | Min | Max | # In Percentile |
+|--|--------|-----|-----|----------|
+|68th | 1 | 1 | 1 | 162
+|93rd | 2 | 2 | 3 | 61
+|100th| 3 | 4 | 9 | 15

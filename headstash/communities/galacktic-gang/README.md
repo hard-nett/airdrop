@@ -5,4 +5,9 @@
 ## Distribution 
 ![dist](../../../static/gg-dist.png)
 
-## Percentiles
+## Percentiles 
+| | Points | Min | Max | # In Percentile |
+|--|--------|-----|-----|----------|
+|63rd | 1 | 1 | 1  | 1,620
+|95th | 2 | 2 | 4  | 726
+|100th| 3 | 5 | 66 | 220

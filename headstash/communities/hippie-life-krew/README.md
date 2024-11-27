@@ -6,3 +6,8 @@
 ![dist](../../../static/hlk-dist.png)
 
 ## Percentiles
+| | Points | Min | Max | # In Percentile |
+|--|--------|-----|-----|----------|
+|37th | 1 | 1 | 1  |309
+|99th | 2 | 2 | 22  |32
+|100th| 3 | 23 | 116| 1

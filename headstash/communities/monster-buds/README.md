@@ -6,3 +6,8 @@
  ![dist](../../../static/buds-dist.png)
 
 ## Percentiles
+| | Points | Min | Max | # In Percentile |
+|--|--------|-----|-----|----------|
+|49th | 1 | 1 | 1  | 1684
+|93rd | 2 | 2 | 10  | 1473
+|100th| 3 | 11 | 289| 228
