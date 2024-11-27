@@ -10,7 +10,7 @@ const networkExport = "../data/export.json"
 const genesisDistribution = "../genesis/scripts-data/final_output.csv"
 
 
-function processExportedState(newStartingBalance, bonusAmount) {
+function processExportedState() {
     // Read the JSON file
     fs.readFile(networkExport, (err, data) => {
         if (err) {

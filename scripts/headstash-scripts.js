@@ -8,12 +8,12 @@ import path from 'path'
 
 const totalSupply = 420000000
 
-let etpp = [
+const distributionData = [
     {
         name: "buddah-bears",
         numOfHolders: 2453,
         percTotalSupply: 1.5,
-        csv: "../headstash/communities/buddah-bears/bb.csv",
+        csv: "../headstash/communities/buddah-bears/buddah-bears.csv",
         points: [
             { points: 1, min: 1, max: 1 }, // 1st - 59th
             { points: 2, min: 2, max: 6 }, // 60th - 90th
@@ -25,7 +25,7 @@ let etpp = [
         name: "cannabuddies",
         numOfHolders: 238,
         percTotalSupply: 0.125,
-        csv: "../headstash/communities/cannabuddies/cb.csv",
+        csv: "../headstash/communities/cannabuddies/cannabuddies.csv",
         points: [
             { points: 1, min: 1, max: 1 }, // 1st - 59th
             { points: 2, min: 2, max: 3 }, // 60th - 90th
@@ -37,7 +37,7 @@ let etpp = [
         name: "carta-beta-gang",
         numOfHolders: 157,
         percTotalSupply: 0.06,
-        csv: "../headstash/communities/carta-beta-gang/carta.csv",
+        csv: "../headstash/communities/carta-beta-gang/carta-beta-gang.csv",
         points: [
             { points: 1, min: 1, max: 1 }, // 1st - 88th
             { points: 2, min: 2, max: 3 },  // 89th - 99th 
@@ -49,7 +49,7 @@ let etpp = [
         name: "chronic-token",
         numOfHolders: 1256,
         percTotalSupply: 2.0,
-        csv: "../headstash/communities/chronic-token/cht.csv",
+        csv: "../headstash/communities/chronic-token/chronic-token.csv",
         points: [
             { points: 1, min: 2949.07, max: 29907.26 },    // 15th - 60th
             { points: 2, min: 29907.27, max: 126425.37 },  // 61st - 83rd
@@ -62,7 +62,7 @@ let etpp = [
         name: "crypto-canna-club",
         numOfHolders: 4405,
         percTotalSupply: 3.0,
-        csv: "../headstash/communities/crypto-canna-club/ccc.csv",
+        csv: "../headstash/communities/crypto-canna-club/crypto-canna-club.csv",
         points: [
             { points: 1, min: 1, max: 1 }, // 1st - 65th
             { points: 2, min: 2, max: 6 }, // 66th - 95th
@@ -74,7 +74,7 @@ let etpp = [
         name: "cryptowizards",
         numOfHolders: 55,
         percTotalSupply: 0.02,
-        csv: "../headstash/communities/cryptowizards/cw.csv",
+        csv: "../headstash/communities/cryptowizards/cryptowizards.csv",
         points: [
             { points: 1, min: 1, max: 1 }, // 1st - 70th
             { points: 2, min: 2, max: 4 }, // 71st - 95th
@@ -86,19 +86,19 @@ let etpp = [
         name: "galacktic-gang",
         numOfHolders: 2566,
         percTotalSupply: 1.5,
-        csv: "../headstash/communities/galacktic-gang/gg.csv", 
+        csv: "../headstash/communities/galacktic-gang/galacktic-gang.csv",
         points: [
             { points: 1, min: 1, max: 1 }, // 1st - 63rd
             { points: 2, min: 2, max: 4 }, // 64th - 95th
             { points: 3, min: 5, max: 66 } // 96th - 100th
-        ], 
+        ],
         tpp: 1688.102894
     },
     {
         name: "heady-pipe-society",
         numOfHolders: 342,
         percTotalSupply: 0.25,
-        csv: "../headstash/communities/heady-pipe-society/hps.csv",
+        csv: "../headstash/communities/heady-pipe-society/heady-pipe-society.csv",
         points: [
             { points: 1, min: 1, max: 1 }, // 1st - 56th 
             { points: 2, min: 2, max: 5 }, // 72st - 95th
@@ -110,19 +110,19 @@ let etpp = [
         name: "hippie-life-krew",
         numOfHolders: 342,
         percTotalSupply: 0.25,
-        csv: "../headstash/communities/hippie-life-krew/hlk.csv",
+        csv: "../headstash/communities/hippie-life-krew/hippie-life-krew.csv",
         points: [
             { points: 1, min: 1, max: 1 },   // 1st - 37th 
             { points: 2, min: 2, max: 22 },  // 38th - 99th 
             { points: 3, min: 23, max: 116 } // 100th
-        ], 
+        ],
         tpp: 2147.239264
     },
     {
         name: "monster-buds",
         numOfHolders: 3385,
         percTotalSupply: 1.5,
-        csv: "../headstash/communities/monster-buds/buds.csv",
+        csv: "../headstash/communities/monster-buds/monster-buds.csv",
         points: [
             { points: 1, min: 1, max: 1 },    // 1st - 49th
             { points: 2, min: 2, max: 10 },   // 26th - 93rd
@@ -156,14 +156,14 @@ let etpp = [
     },
     {
         name: "secret-sesh",
-        csv: "../headstash/communities/secret-sesh/sesh.csv",
+        csv: "../headstash/communities/secret-sesh/secret-sesh.csv",
         numOfHolders: 780,
         percTotalSupply: 0.25,
         points: [
             { points: 1, min: 1, max: 1 },
-            { points: 2, min: 2, max: 4 },  
-            { points: 3, min: 5, max: 148 }   
-        ], 
+            { points: 2, min: 2, max: 4 },
+            { points: 3, min: 5, max: 148 }
+        ],
         tpp: 1992.409867
     },
     {
@@ -176,7 +176,7 @@ let etpp = [
             { points: 1, min: 1, max: 1 },   // 1st - 25th percentile
             { points: 2, min: 2, max: 5 }, // 26th - 75th percentile
             { points: 3, min: 6, max: 89 } // 76th - 100th percentile
-        ], 
+        ],
     },
     {
         name: "special-k",
@@ -192,7 +192,7 @@ let etpp = [
     },
     {
         name: "stoned-ape-club",
-        csv: "../headstash/communities/stoned-ape-club/sac.csv",
+        csv: "../headstash/communities/stoned-ape-club/stoned-ape-club.csv",
         numOfHolders: 2059,
         percTotalSupply: 1.25,
         tpp: 1577.524038,
@@ -200,11 +200,11 @@ let etpp = [
             { points: 1, min: 1, max: 1 },   // 1st - 46th 
             { points: 2, min: 2, max: 9 },   // 47th - 93rd 
             { points: 3, min: 10, max: 132 } // 94th - 100th 
-        ], 
+        ],
     },
     {
         name: "wake-and-bake",
-        csv: "../headstash/communities/wake-and-bake/wab.csv",
+        csv: "../headstash/communities/wake-and-bake/wake-and-bake.csv",
         numOfHolders: 154,
         percTotalSupply: 0.1,
         tpp: 1660.079051,
@@ -212,7 +212,7 @@ let etpp = [
             { points: 1, min: 1, max: 1 },   // 1st - 25th  
             { points: 2, min: 2, max: 9 }, // 26th - 75th 
             { points: 3, min: 10, max: 10 } // 76th - 100th  
-        ], 
+        ],
     },
 ]
 
@@ -246,7 +246,7 @@ async function processHeadstashDistributions() {
     let addressCommunities = {};
     let communities = [];
 
-    for (let distribution of etpp) {
+    for (let distribution of distributionData) {
         try {
             // Read the CSV file for the current community
             const csvData = await readCsvFile(distribution.csv);
@@ -324,7 +324,7 @@ function readCsvFile(filePath) {
 
 // Function to create the final tally CSV file
 function createFinalTallyCsv(finalTally, addressCommunities, communities) {
-    return new Promise((resolve, reject) => {
+    return new Promise(async (resolve, reject) => {
         let csvContent = "addr,points";
         for (let community of communities) {
             csvContent += `,${path.basename(community)}`;
@@ -350,6 +350,54 @@ function createFinalTallyCsv(finalTally, addressCommunities, communities) {
                 resolve();
             }
         });
+
+        try {
+            await createCommunityPointsSummaryCsv(addressCommunities, communities);
+            console.log('Community points summary CSV file created successfully!');
+        } catch (error) {
+            console.error(`Error creating community points summary CSV: ${error}`);
+        }
     });
 }
-export { processHeadstashDistributions }
+
+// Function to create the community points summary CSV file
+function createCommunityPointsSummaryCsv(addressCommunities, communities) {
+    return new Promise((resolve, reject) => {
+        let communityPoints = {};
+
+        // Calculate the sum of points for each community
+        communities.forEach((community) => {
+            communityPoints[community] = { points: {}, addrCount: 0 };
+            Object.keys(addressCommunities).forEach((address) => {
+                if (addressCommunities[address][community]) {
+                    communityPoints[community].addrCount++;
+                    const points = addressCommunities[address][community];
+                    if (communityPoints[community].points[points]) {
+                        communityPoints[community].points[points]++;
+                    } else {
+                        communityPoints[community].points[points] = 1;
+                    }
+                }
+            });
+        });
+
+        // Create the CSV content
+        let csvContent = "community,addrCount,points,count\n";
+        communities.forEach((community) => {
+            Object.keys(communityPoints[community].points).forEach((points) => {
+                csvContent += `${path.basename(community)},${communityPoints[community].addrCount},${points},${communityPoints[community].points[points]}\n`;
+            });
+        });
+
+        // Write the CSV file
+        fs.writeFile('../headstash/scripts-data/community_points_summary.csv', csvContent, (err) => {
+            if (err) {
+                reject(err);
+            } else {
+                resolve();
+            }
+        });
+    });
+}
+
+export { processHeadstashDistributions, distributionData }
