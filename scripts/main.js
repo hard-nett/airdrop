@@ -1,7 +1,7 @@
 import fs from 'fs';
 
 import { processSacNFTdata, encodeAddrs } from "./solana-utils.js";
-import { processExportedState } from './exported-state.js';
+import { processExportedState, calculateTokenDifference } from './exported-state.js';
 import { processHeadstashDistributions } from './headstash-scripts.js';
 import { processGenesisDistribution, checkAddresses } from './genesis-script.js';
 
@@ -34,6 +34,8 @@ if (args.length < 1) {
     analyzeHeadstashDistribution()
 } else if (args[0] === '-7') {
     checkAddresses()
+} else if (args[0] === '-8') {
+    calculateTokenDifference()
 } else {
     console.error('Invalid option.');
 }

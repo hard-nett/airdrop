@@ -59,6 +59,6 @@ Each inital account with TERP (excluding Protocol Treasury & 1 Terp for each Gen
 __~~- scripts: create scripts that calculate genesis distribution for accuracy~~__\
 __~~- scripts: create scripts that form accurate headstash final distribution file~~__\
 __- scripts: create scripts taking network export, compare genesis holders balance with expected balance form new scripts__\
-__- scripts: create scripts to determine additional allocation for genesis distribution that balances inital distribution ratio__\
+__~~- scripts: create scripts to determine additional allocation for genesis distribution that balances inital distribution ratio~~__\
 __- docs: calculate expected tokens for airdrop, including additional random rewards, improve details regarding headstash airdrop__\
 __- docs: update status & reason of new distribution__\

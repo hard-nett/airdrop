@@ -1,5 +1,7 @@
 import fs from 'fs';
 import csv from 'csv-parser';
+
+import { mergedPoints } from './genesis-script.js';
 // 1. find & filter all accounts that:
 // a. exist in final_output.csv
 // b. has not performed any actions (sequence is 0)
@@ -7,7 +9,10 @@ import csv from 'csv-parser';
 
 
 const networkExport = "../data/export.json"
-const genesisDistribution = "../genesis/scripts-data/final_output.csv"
+const genesisDistributionFile = "../genesis/scripts-data/final_output.csv"
+const zeroSequenceAccountsFile = "../genesis/scripts-data/updated_zero_sequence_accounts.json"
+const nonZeroSequenceAccountFile = "../genesis/scripts-data/updated_greater_zero_sequence_accounts.json"
+const tokenDifferences = "token_differences.csv"
 
 
 function processExportedState() {
@@ -24,7 +29,7 @@ function processExportedState() {
 
         // Read the CSV file
         const genesisAccounts = [];
-        fs.createReadStream(genesisDistribution)
+        fs.createReadStream(genesisDistributionFile)
             .pipe(csv())
             .on('data', (row) => {
                 genesisAccounts.push(row);
@@ -54,12 +59,71 @@ function processExportedState() {
                 });
                 updatedGreaterZeroSequenceAccounts.sort((a, b) => parseInt(b.sequence) - parseInt(a.sequence));
                 const updatedZeroSequenceAccountsJson = { app_state: { auth: { accounts: updatedZeroSequenceAccounts } } };
-                fs.writeFileSync('../genesis/scripts-data/updated_zero_sequence_accounts.json', JSON.stringify(updatedZeroSequenceAccountsJson, null, 2));
+                fs.writeFileSync(zeroSequenceAccountsFile, JSON.stringify(updatedZeroSequenceAccountsJson, null, 2));
                 const updatedGreaterZeroSequenceAccountsJson = { app_state: { auth: { accounts: updatedGreaterZeroSequenceAccounts } } };
-                fs.writeFileSync('../genesis/scripts-data/updated_greater_zero_sequence_accounts.json', JSON.stringify(updatedGreaterZeroSequenceAccountsJson, null, 2));
+                fs.writeFileSync(nonZeroSequenceAccountFile, JSON.stringify(updatedGreaterZeroSequenceAccountsJson, null, 2));
             });
     });
 }
+// Read genesisDistribution.csv
+const readGenesisDistribution = async () => {
+    return new Promise((resolve, reject) => {
+        const genesisDistribution = [];
+        fs.createReadStream(genesisDistributionFile)
+            .pipe(csv())
+            .on('data', (row) => {
+                genesisDistribution.push({
+                    address: row.Address,
+                    tokens: parseInt(row.Tokens),
+                });
+            })
+            .on('end', () => {
+                resolve(genesisDistribution);
+            })
+            .on('error', (error) => {
+                reject(error);
+            });
+    });
+};
+
+// Read JSON files
+const readJsonFile = async (filename) => {
+    return new Promise((resolve, reject) => {
+        fs.readFile(filename, 'utf8', (err, data) => {
+            if (err) {
+                reject(err);
+            } else {
+                resolve(JSON.parse(data));
+            }
+        });
+    });
+};
+
+// Calculate token difference
+const calculateTokenDifference = async () => {
+    const genesisDistribution = await readGenesisDistribution();
+    const zeroSequenceAccounts = await readJsonFile(zeroSequenceAccountsFile);
+    const nonZeroSequenceAccounts = await readJsonFile(nonZeroSequenceAccountFile);
+    const output = [];
+
+    const processAccounts = (accounts) => {
+        accounts.forEach((account) => {
+            const matchedGenesisDistribution = genesisDistribution.find((item) => item.address === account.address);
+            if (matchedGenesisDistribution) {
+                const tokenDifference = matchedGenesisDistribution.tokens - (account.original_vesting_amount / 1000000); // Assuming original_vesting_amount is in micro-units
+                output.push(`${account.address},${tokenDifference}`);
+            }
+        });
+    };
+
+    output.push('Address,Token Difference'); // Header row
+
+    processAccounts(zeroSequenceAccounts.app_state.auth.accounts);
+    processAccounts(nonZeroSequenceAccounts.app_state.auth.accounts);
+
+    fs.writeFileSync(tokenDifferences, output.join('\n'));
+};
+
 // const newPoints =
 //     [
 //         { p: 5, expected: 5669.008569, actual: 5669.008569, new: 6941.7584 },
@@ -69,4 +133,4 @@ function processExportedState() {
 //         { p: 9, expected: 16313.414625, actual: 5784.610414, new: 15425.627768 },
 //     ]
 
-export { processExportedState }
+export { processExportedState, calculateTokenDifference }

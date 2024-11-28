@@ -21,27 +21,27 @@ const files = [
 
 // Point system based on balance percentiles for Gaia and BCNA
 const atomPoints = [
-    { points: 1, min: 1, max: 56290873.26 }, // 1st - 74th percentile
-    { points: 2, min: 56290873.26, max: 581059663.70 }, // 75th - 95th percentile
-    { points: 3, min: 581059663.70, max: 11695142809644.00 } // 96th - 100th percentile
+    { points: 1, min: 1, max: 56290873.26, tpp: 119.131693 }, // 1st - 74th percentile
+    { points: 2, min: 56290873.26, max: 581059663.70, tpp: 119.131693 }, // 75th - 95th percentile
+    { points: 3, min: 581059663.70, max: 11695142809644.00, tpp: 119.131693 } // 96th - 100th percentile
 ];
 
 const bcnaPoints = [
-    { points: 3, min: 0, max: 56104789.25 }, // 0th - 25th percentile
-    { points: 6, min: 56104789.25, max: 3835224107.75 }, // 26th - 75th percentile
-    { points: 9, min: 3835224107.75, max: 32910049646754.00 } // 76th - 100th percentile
+    { points: 3, min: 0, max: 56104789.25, tpp: 5790.90909 }, // 0th - 25th percentile
+    { points: 6, min: 56104789.25, max: 3835224107.75, tpp: 5790.90909 }, // 26th - 75th percentile
+    { points: 9, min: 3835224107.75, max: 32910049646754.00, tpp: 5790.90909 } // 76th - 100th percentile
 ];
 
-const mergedPoints = [
-    { points: 4, bcna: 3, atom: 1 },
-    { points: 5, bcna: 3, atom: 2 },
-    { points: 6, bcna: 3, atom: 3 },
-    { points: 7, bcna: 6, atom: 1 },
-    { points: 8, bcna: 6, atom: 2 },
-    { points: 9, bcna: 6, atom: 3 },
-    { points: 10, bcna: 9, atom: 1 },
-    { points: 11, bcna: 9, atom: 2 },
-    { points: 12, bcna: 9, atom: 3 },
+export const mergedPoints = [
+    { points: 4, bcna: 3, atom: 1, tpp: 1477.51019575 },
+    { points: 5, bcna: 3, atom: 2, tpp: 1205.8344952 },
+    { points: 6, bcna: 3, atom: 3, tpp: 1024.7173615 },
+    { points: 7, bcna: 6, atom: 1, tpp: 1671.564267 },
+    { points: 8, bcna: 6, atom: 2, tpp: 1477.510195 },
+    { points: 9, bcna: 6, atom: 3, tpp: 1326.579251 },
+    { points: 10, bcna: 9, atom: 1, tpp: 1749.185896 },
+    { points: 11, bcna: 9, atom: 2, tpp: 1600.999150 },
+    { points: 12, bcna: 9, atom: 3, tpp: 1477.510195 },
 ]
 
 /// Token distribution constants
@@ -157,27 +157,41 @@ async function processGenesisDistribution() {
                 }
             }
 
-            // Add to result
+            let gaiaPointValue = atomPoints.find(ap => ap.points === gaiaBalance.points);
+            let gaiaTokens = gaiaPointValue ? gaiaBalance.points * gaiaPointValue.tpp : 0;
+
+            let bcnaPointValue = bcnaPoints.find(bp => bp.points === bcnaBalance.points);
+            let bcnaTokens = bcnaPointValue ? bcnaBalance.points * bcnaPointValue.tpp : 0;
+
+            let mergedPointValue = mergedPoints.find(mp => mp.points === combinedPoints);
+            let mergedTokens = mergedPointValue ? combinedPoints * mergedPointValue.tpp : 0;
+
             result.push({
                 address: addr,
                 gaiaBalance: gaiaBalance.balance,
                 bcnaBalance: bcnaBalance.balance,
                 gaiaPoints: gaiaBalance.points,
                 bcnaPoints: bcnaBalance.points,
-                points: combinedPoints
+                points: combinedPoints,
+                tokens: mergedTokens
             });
 
             totalGaiaPoints += gaiaBalance.points;
             totalBcnaPoints += bcnaBalance.points;
         } else {
             // Add to result
+            // For non-merged addresses
+            let pointValue = atomPoints.find(ap => ap.points === gaiaBalance.points);
+            let tokens = pointValue ? gaiaBalance.points * pointValue.tpp : 0;
+
             result.push({
                 address: addr,
                 gaiaBalance: gaiaBalance.balance,
                 bcnaBalance: 0,
                 gaiaPoints: gaiaBalance.points,
                 bcnaPoints: 0,
-                points: gaiaBalance.points
+                points: gaiaBalance.points,
+                tokens: tokens
             });
 
             totalGaiaPoints += gaiaBalance.points;
@@ -189,9 +203,9 @@ async function processGenesisDistribution() {
     result.sort((a, b) => b.points - a.points);
 
     // Create the CSV content with a header row
-    let csvContent = 'Address,Gaia Balance,BCNA Balance,Gaia Points,BCNA Points,Points\n';
+    let csvContent = 'Address,Gaia Balance,BCNA Balance,Gaia Points,BCNA Points,Points,Tokens\n';
     result.forEach(row => {
-        csvContent += `${row.address},${row.gaiaBalance},${row.bcnaBalance},${row.gaiaPoints},${row.bcnaPoints},${row.points}\n`;
+        csvContent += `${row.address},${row.gaiaBalance},${row.bcnaBalance},${row.gaiaPoints},${row.bcnaPoints},${row.points},${row.tokens}\n`;
     });
 
     // Write the sorted CSV content to the file
