@@ -27,7 +27,7 @@ const atomPoints = [
 ];
 
 const bcnaPoints = [
-    { points: 3, min: 1, max: 56104789.25 }, // 1st - 25th percentile
+    { points: 3, min: 0, max: 56104789.25 }, // 0th - 25th percentile
     { points: 6, min: 56104789.25, max: 3835224107.75 }, // 26th - 75th percentile
     { points: 9, min: 3835224107.75, max: 32910049646754.00 } // 76th - 100th percentile
 ];
@@ -113,42 +113,77 @@ async function processGenesisDistribution() {
     // Step 3: Merge data from both sources and calculate combined points
     let totalGaiaPoints = 0;
     let totalBcnaPoints = 0;
+    // objects to count # of addr in each point range
+    let gaiaPointsDistribution = { 1: 0, 2: 0, 3: 0 };
+    let bcnaPointsDistribution = { 3: 0, 6: 0, 9: 0 };
+    let mergedPointsDistribution = { 4: 0, 5: 0, 6: 0, 7: 0, 8: 0, 9: 0, 10: 0, 11: 0, 12: 0 };
 
+    // Count Gaia addresses
+    for (let addr in gaiaBalances) {
+        let gaiaBalance = gaiaBalances[addr];
+        if (!bcnaBalances[addr]) {
+            gaiaPointsDistribution[gaiaBalance.points]++;
+        }
+    }
+
+    // Count BCNA addresses
+    for (let addr in bcnaBalances) {
+        let bcnaBalance = bcnaBalances[addr];
+        if (!gaiaBalances[addr]) {
+            bcnaPointsDistribution[bcnaBalance.points]++;
+        }
+    }
     // calculate new allocation from points and percentDistribution
     for (let addr in gaiaBalances) {
         let gaiaBalance = gaiaBalances[addr];
-        let bcnaBalance = bcnaBalances[addr] || { balance: 0, points: 0 };
+        if (bcnaBalances[addr]) {
+            let bcnaBalance = bcnaBalances[addr];
+            // Attempt to find a matching merged point combination
+            let mergedPoint = mergedPoints.find(mp => mp.bcna === bcnaBalance.points && mp.atom === gaiaBalance.points);
 
-        // Attempt to find a matching merged point combination
-        let mergedPoint = mergedPoints.find(mp => mp.bcna === bcnaBalance.points && mp.atom === gaiaBalance.points);
-
-        // Calculate combined points
-        let combinedPoints = 0;
-        if (mergedPoint) {
-            combinedPoints = mergedPoint.points;  // If a match, take the merged points
-        } else {
-            if (bcnaBalance.points === 0) {
-                combinedPoints = gaiaBalance.points;
-            } else if (gaiaBalance.points === 0) {
-                combinedPoints = bcnaBalance.points;
+            // Calculate combined points
+            let combinedPoints = 0;
+            if (mergedPoint) {
+                combinedPoints = mergedPoint.points;  // If a match, take the merged points
+                console.log(mergedPoint)
+                mergedPointsDistribution[mergedPoint.points]++;
             } else {
-                combinedPoints = Math.max(bcnaBalance.points, gaiaBalance.points);
+                if (bcnaBalance.points === 0) {
+                    combinedPoints = gaiaBalance.points;
+                } else if (gaiaBalance.points === 0) {
+                    combinedPoints = bcnaBalance.points;
+                } else {
+                    combinedPoints = Math.max(bcnaBalance.points, gaiaBalance.points);
+                }
             }
+
+            // Add to result
+            result.push({
+                address: addr,
+                gaiaBalance: gaiaBalance.balance,
+                bcnaBalance: bcnaBalance.balance,
+                gaiaPoints: gaiaBalance.points,
+                bcnaPoints: bcnaBalance.points,
+                points: combinedPoints
+            });
+
+            totalGaiaPoints += gaiaBalance.points;
+            totalBcnaPoints += bcnaBalance.points;
+        } else {
+            // Add to result
+            result.push({
+                address: addr,
+                gaiaBalance: gaiaBalance.balance,
+                bcnaBalance: 0,
+                gaiaPoints: gaiaBalance.points,
+                bcnaPoints: 0,
+                points: gaiaBalance.points
+            });
+
+            totalGaiaPoints += gaiaBalance.points;
         }
-
-        // Add to result
-        result.push({
-            address: addr,
-            gaiaBalance: gaiaBalance.balance,
-            bcnaBalance: bcnaBalance.balance,
-            gaiaPoints: gaiaBalance.points,
-            bcnaPoints: bcnaBalance.points,
-            points: combinedPoints
-        });
-
-        totalGaiaPoints += gaiaBalance.points;
-        totalBcnaPoints += bcnaBalance.points;
     }
+
 
     // Step 4: Write final output to CSV 
     result.sort((a, b) => b.points - a.points);
@@ -172,7 +207,21 @@ async function processGenesisDistribution() {
     fs.writeFileSync(totalPointsDist, totalPointsContent, 'utf-8');
     console.log(`Total points file generated: total-points.csv`);
 
-    countPoints();
+
+    // Step 6: Write Point distribution 
+    let pointsDistributionContent = 'Project,Points,Count\n';
+    for (let points in gaiaPointsDistribution) {
+        pointsDistributionContent += `Gaia,${points},${gaiaPointsDistribution[points]}\n`;
+    }
+    for (let points in bcnaPointsDistribution) {
+        pointsDistributionContent += `BCNA,${points},${bcnaPointsDistribution[points]}\n`;
+    }
+    for (let points in mergedPointsDistribution) {
+        pointsDistributionContent += `Merged,${points},${mergedPointsDistribution[points]}\n`;
+    }
+    fs.writeFileSync(pointsDist, pointsDistributionContent, 'utf-8');
+    console.log(`Points distribution file generated: ${pointsDist}`);
+
 }
 
 
@@ -240,44 +289,6 @@ function checkAddresses() {
                     fs.writeFileSync(patchedDist, `Address,Points,New Allocation,Original Vesting Amount\n${csvContent}`, 'utf-8');
                     console.log(`CSV file processed and output written to ${patchedDist}`);
                 });
-        });
-}
-
-function countPoints() {
-    const gaiaPoints = { '1': 0, '2': 0, '3': 0 };
-    const bcnaPoints = { '0': 0, '3': 0, '6': 0, '9': 0 };
-    const totalPoints = {};
-
-    // buggy, but total seems to work.
-    fs.createReadStream(genesisDistFile)
-        .pipe(csv())
-        .on('data', (data) => {
-            const gaiaPoint = data['Gaia Points'];
-            const bcnaPoint = data['BCNA Points'];
-            const points = data['Points'];
-
-            if (gaiaPoint) {
-                gaiaPoints[gaiaPoint]++;
-            }
-
-            if (bcnaPoint) {
-                bcnaPoints[bcnaPoint]++;
-            }
-
-            if (!totalPoints[points]) {
-                totalPoints[points] = 0;
-            }
-            totalPoints[points]++;
-        })
-        .on('end', () => {
-            const gaiaResults = Object.keys(gaiaPoints).map((key) => `Gaia,${key},${gaiaPoints[key]}`).join('\n');
-            const bcnaResults = Object.keys(bcnaPoints).map((key) => `BCNA,${key},${bcnaPoints[key]}`).join('\n');
-            const totalResults = Object.keys(totalPoints).map((key) => `Total,${key},${totalPoints[key]}`).join('\n');
-
-            const csvContent = `Points Type,Points Value,Count\n${gaiaResults}\n${bcnaResults}\n${totalResults}`;
-
-            fs.writeFileSync(pointsDist, csvContent);
-            console.log('Results written to points_distribution.csv');
         });
 }
 

@@ -6,51 +6,26 @@ Each inital account with TERP (excluding Protocol Treasury & 1 Terp for each Gen
 
 
 ### Genesis Distribution Details
-| Project | Max Tokens in Percentile Range | Points     | # of addresses | Total Tokens (TERP & THIOL)  | TPP (Token per point) | Tokens 
+| Project | Upper Bound %   |Points| # of addrs | Total TERP     | Token / Point | Tokens 
 |---------------------------|------|------------|----------------|---------------|-----| --- |
-| ATOM  |   `56.290873`     | `1`  | `114,846`  | `13,276,409.490870` | `115.601845` | `115.601845` |
-| ATOM  |   `581.059663`    | `2`  | `40,877`   | `9,450,913.236130`  | `115.601845` | `231.203690` |
-| ATOM  |`11,695,142.809644`|`3`| `8,147` | `2,825,424.701792`    | `115.601845` | `346.805536` |
-| BCNA  | `56.104789`   | `3`  | `1073`      | `5,834,764.634094` | `1,812.601626`|  `5,437.804878` | 
-| ATOM(1) + BCNA(3)    |  -      | `4`| `1,443` * *`342`*| `8,013,565.901289`  | `1,388.351680` | `5,553.40672` |
-| ATOM(2) + BCNA(3)    | -      | `5`| `264`| `1,496,618.262216`  | `1,133.8017138` |`5,669.008569` |
-| ATOM(3) + BCNA(3)    | -     | `6`          | `79`             | `451,199.612292`    | `951.897916` |`5,784.610414` |
-| BCNA | `3,835.224107`| `6`          | `100`            | `1,087,560.976`     | `1,812.601626` | `10,875.609760` |
-| ATOM(1) + BCNA(6)  | -        | `7`          | `4`  * *`264`*             | `43,964.846400`     | `1,570.173085` | -|
-| ATOM(2) + BCNA(6)  | -        | `8`          | `4`              | `33,320.440350`     | `1,041.263760` | - |
-| ATOM(3) + BCNA(6) | -           | `9`          | `4`              | `44,889.661160`     | `1,246.935032` | - |
-| BCNA   |`32,910,049.646754` | `9`          | `4`              | `65,253.658520`     | `1,812.601625` | - |
-| TERP OG & SCAVENGER HUNT | -  | `1 - 1.34`   | `43`             | `111,913.879345`    | ~`2,263.172484` | - |
-| GENTX         |              | `1`          | `4`              | `4`                 | `1` | - |
-| **TOTAL**                   | -          |  **`165,819`**     | **`36,901,038.666364`** | - | - | -| 
-
-### Genesis Distribution Normalization
-To normalize the TPP for each type of token holder, we can use the following formula to calculate how many additional tokens should be distirbuted to holders in each category 
-
-$NewTokenPerPoint = (TotalTokens + Y) ÷  NumAddrs ÷ Points$
-
-where we can calcluate the additional tokens by:
-
-$Y = (NewTokenPerPoint * NumAddrs * Points) - TotalTokens$
-
-
-Leaving us with the following additional tokens to distribute to each category of genesis addrs:
-| Project                  |Points   | Additional Tokens  | New Total | New Token Per Addr  | New TPP | Diff in TPP (Token per point)
-|-----------------------------|---|------------|----------------|---------------|-----| --- |
-| ATOM                      | -  | -        | -      | - | - |
-| ATOM                      | -  |-        | -       | - | - |
-| ATOM                      | -  |-        | -         | - | - |
-| ATOM + BCNA               | -  |-        | -       | -  | - | - |
-| ATOM + BCNA               |`5` | `336,005.955384`|`1,832,624.2176`| `6,941.7584`| `1,388.351680` |`254.549966`|
-| ATOM + BCNA               |`6` |`206,879.084028`|`658,078.69632`|`8,330.11008`|`1,388.351680`| `436.453764`|
-| BCNA                      | -  | - | - | - | - |
-| ATOM + BCNA               |`7` | `10,024.850788`| `53,989.697188` | `13,497.424297` | `1,928.203471`|`358.030386` |
-| ATOM + BCNA               |`8` | `28,382.070722`|`61,702.511072` |`15,425.627768`|`1,928.203471` | `886.939711` |
-| ATOM + BCNA               |`9` | `24,525.663796`| `69,415.324956`| `17,353.831239`| `1,928.203471` | `681.268439` |
-| BCNA                      | -  | - | -   | - | 
-| TERP OG & SCAVENGER HUNT  | -  | - | -  | - | 
-| GENTX                     | -  | - | - | - |
-| **TOTAL**                 | -  | `605,817.624718`| - | - | - |
+| ATOM  |   `56.290873`     | `1`  | `121,390`  |   | `119.131693` | `119.131693` |
+| ATOM  |   `581.059663`    | `2`  | `34,320`   |   | `119.131693` | `238.263386` |
+| ATOM  |`11,695,142.809644`| `3`  | `8,145`    |   | `119.131693` | `357.395079` |
+| BCNA  | `56.104789`       | `3`  | `360`      |   | `1930.303030`|  `5790.90909` | 
+| ATOM(1) + BCNA(3)|    -   | `4`  |  `110`     |   | `1477.51019575` |   `5910.040783` |
+| ATOM(2) + BCNA(3)| -      | `5`  | `33`       |   | `1205.8344952`| `6029.172476` |
+| ATOM(3) + BCNA(3)| -      | `6`  | `9`        |   | `1024.7173615` | `6148.304169` |
+| BCNA | `3,835.224107`     | `6`  | `483`      |   | `1930.303030` | `11581.81818` |
+| ATOM(1) + BCNA(6)| -      | `7`  |  `249`     |   | `1671.564267` | `11700.949873`|
+| ATOM(2) + BCNA(6)| -      | `8`  | `174`      |   | `1477.510195`|  `11820.081566`|
+| ATOM(3) + BCNA(6)| -      | `9`  | `44`       |   | `1326.579251` | `11939.213259` |
+| BCNA |`32,910,049.646754` | `9`  | `376`      |   | `1930.303030` | `17372.72727` |
+| ATOM(1) + BCNA(9)| -      | `10` | `36`       |   | `1749.185896` | `17491.858963` |
+| ATOM(2) + BCNA(9)| -      | `11` | `33`       |   | `1600.999150`| `17610.990656` |
+| ATOM(3) + BCNA(9)| -      | `12` | `31`       |   | `1477.510195` | `17730.122349` |
+| TERP OG & SCAVENGER HUNT   | | `1 - 1.34` | `43`| ` `    |  ` ` |  ` ` |
+| GENTX | `1`| `4`| `4`| `1` | ` ` |
+| **TOTAL**                   |  ` `         |  **` `**     | **` `** | ` ` | ` ` | ` `| 
 
 
 ## Airdrop Cycle 2: Cannabis Culture Communities 
@@ -86,3 +61,4 @@ __~~- scripts: create scripts that form accurate headstash final distribution fi
 __- scripts: create scripts taking network export, compare genesis holders balance with expected balance form new scripts__\
 __- scripts: create scripts to determine additional allocation for genesis distribution that balances inital distribution ratio__\
 __- docs: calculate expected tokens for airdrop, including additional random rewards, improve details regarding headstash airdrop__\
+__- docs: update status & reason of new distribution__\
