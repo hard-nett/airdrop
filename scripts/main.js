@@ -5,7 +5,6 @@ import { processExportedState, calculateTokenDifference } from './exported-state
 import { processHeadstashDistributions } from './headstash-scripts.js';
 import { processGenesisDistribution, checkAddresses } from './genesis-script.js';
 
-
 // Process command line arguments
 const args = process.argv.slice(2);
 if (args.length < 1) {
@@ -34,7 +33,7 @@ if (args.length < 1) {
     analyzeHeadstashDistribution()
 } else if (args[0] === '-7') {
     checkAddresses()
-} else if (args[0] === '-8') {
+} else if (args[0] === '-11') {
     calculateTokenDifference()
 } else {
     console.error('Invalid option.');

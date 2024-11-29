@@ -12,7 +12,7 @@ const networkExport = "../data/export.json"
 const genesisDistributionFile = "../genesis/scripts-data/final_output.csv"
 const zeroSequenceAccountsFile = "../genesis/scripts-data/updated_zero_sequence_accounts.json"
 const nonZeroSequenceAccountFile = "../genesis/scripts-data/updated_greater_zero_sequence_accounts.json"
-const tokenDifferences = "token_differences.csv"
+const tokenDifferences = "../genesis/scripts-data/token_differences.csv"
 
 
 function processExportedState() {
@@ -123,14 +123,5 @@ const calculateTokenDifference = async () => {
 
     fs.writeFileSync(tokenDifferences, output.join('\n'));
 };
-
-// const newPoints =
-//     [
-//         { p: 5, expected: 5669.008569, actual: 5669.008569, new: 6941.7584 },
-//         { p: 6, expected: 5711.387496, actual: 5784.610414, new: 8330.11008 },
-//         { p: 7, expected: 10991.211595, actual: 5553.406723, new: 13497.424297 },
-//         { p: 8, expected: 8330.11008, actual: 5669.008569, new: 13497.424297 },
-//         { p: 9, expected: 16313.414625, actual: 5784.610414, new: 15425.627768 },
-//     ]
 
 export { processExportedState, calculateTokenDifference }
