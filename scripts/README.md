@@ -1,29 +1,32 @@
 # Scripts
 
+These are helping scripts for un
 This script checks for and sums any duplicate allocation together to generate a csv file that does not contain duplicate addresses.
 
-| Command   | Description| 
-|------------|----------|
-| `node main.js -1 `| Process solana nft holder distribution (used for SAC)  | 
-| `node main.js -2 `| Encode Processed data from `-1` into encoded format (cw-headstash requires sol addr and offline signature as base64 encoded) | 
-| `node main.js -3 `| Process genesis allocations based on points & percentiles  | 
-| `node main.js -4 `| Process headstash allocations based on points & percentiles  | 
-| `node main.js -5 `| Process distribution from an exported state   | 
+| Command   | Description|Files Created |
+|------------|----------| -- |
+| `node main.js -1`| Processes data from eligible projects holder distributions, based on expected distribution parameters defined.|
+| `node main.js -2`| Process genesis allocations (BCNA & ATOM) based on points & percentiles |
+| `node main.js -3`| Process headstash allocations based on points & percentiles  |
+| `node main.js -4`| Process distribution from an exported state   |
+ 
 
 |----------|----------|----------| |
 
-
 ## Adding A New Community For Headstash (EVM based)
 
-### Step 1: Distribution Snapshot 
+### Step 1: Distribution Snapshot
+
 - Date snapshot was taken
 - .csv file with `addr,amount` as headers
 - create new folder in `../headstash/communities/<new-community>`
 
-### Step 2: Percentile Distribution Calculation 
-- calculate points for percentile range
-- calculate token per point (propose total allocation for community)
+### Step 2: Percentile Distribution Calculation
+
+- calculate desired points for percentile range & desired token per point
+
 ### Step 3: Addition To Scripts
+
 
 ```js
     {

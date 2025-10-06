@@ -1,23 +1,27 @@
-// Genesis script that creates a single file containing all of the balances and distributions  for gaia & btsg holders
+// Genesis script that creates a single file containing all of the balances and distributions for gaia & btsg holders
 //  1. convert addrs to represent terp bech32 prefix 
-//  2. sum together duplicate values for addrs, append points expected for addr based on requirements to csv
+//  2. calculate points for each unique address.
 
 import fs from 'fs';
 import csv from 'csv-parser';
 import { bech32 } from 'bech32'
+import { readCsvFile } from './utils.js';
 
 // File paths
-const genesisDistFile = '../genesis/scripts-data/final_output.csv';
-const totalPointsDist = '../genesis/scripts-data/total-points.csv';
-const patchedDist = '../genesis/scripts-data/patched-distribution.csv';
-const pointsDist = '../genesis/scripts-data/points_distribution.csv';
-const files = [
+const RAW_SNAPSHOT_FILES = [
     "../genesis/bcna_delegators.csv",
     "../genesis/gaia.csv",
     "../genesis/scavenger_hunt.csv",
     "../genesis/terp_og.csv",
 ];
 
+
+const PATCHED_DISTRIBUTION_FILE_OUTPUT = '../genesis/scripts-data/patched-distribution.csv';
+const POINTS_SUMMARY_FILE = '../genesis/scripts-data/points-distribution.csv';
+const INACTIVE_ACCOUNT_FILE = '../genesis/scripts-data/accounts-inactive.json'
+const ACTIVE_ACCOUNTS_FILE = '../genesis/scripts-data/accounts-active.json'
+const GENESIS_DISTRIBUTION_FILE = '../genesis/scripts-data/final-output.csv';
+const TOTAL_POINTS_OUTPUT = '../genesis/scripts-data/total-points.csv';
 
 // Point system based on balance percentiles for Gaia and BCNA
 const atomPoints = [
@@ -45,7 +49,7 @@ export const mergedPoints = [
 ]
 
 /// Token distribution constants
-const totalSupply = 420000000;
+export const TOTAL_SUPPLY = 420000000;
 const gaiaPercSupply = 0.061152;
 const bcnaPercSupply = 0.01911;
 
@@ -65,74 +69,59 @@ function convertToTerpAddress(addr) {
     return newAddress;
 }
 
-// Read and parse CSV files
-function readCSV(filePath) {
-    return new Promise((resolve, reject) => {
-        const results = [];
-        fs.createReadStream(filePath)
-            .pipe(csv())
-            .on('data', (data) => results.push(data))
-            .on('end', () => resolve(results))
-            .on('error', reject);
-    });
+function processBalanceData(data, pointValue) {
+    return data.reduce((acc, row) => {
+        let addr = convertToTerpAddress(row.address); // Convert to 'terp' format
+        let balance = parseFloat(row.balance);
+        let points = getPoints(balance, pointValue);
+
+        acc[addr] = acc[addr] || { balance: 0, points: 0 };
+        acc[addr].balance += balance;
+        acc[addr].points = points; // Note: points based on current balance only
+        return acc;
+    }, {});
 }
+
+// Reusable function to count addresses and distribute points
+function countAddresses(balances, distribution, exclude = {}) {
+    let count = 0;
+    for (let addr in balances) {
+        if (exclude[addr]) continue; // Skip if in exclude list
+        let points = balances[addr].points;
+        distribution[points] = (distribution[points] || 0) + 1;
+        count++;
+    }
+    return count;
+}
+
 
 // Aggregate and process CSV files
 async function processGenesisDistribution() {
-    let gaiaData = await readCSV(files[1]);
-    let bcnaData = await readCSV(files[0]);
+    let gaiaData = await readCsvFile(RAW_SNAPSHOT_FILES[1]);
+    let bcnaData = await readCsvFile(RAW_SNAPSHOT_FILES[0]);
 
     let result = [];
 
-    // Step 1: calculate Gaia points based on balances
-    let gaiaBalances = gaiaData.reduce((acc, row) => {
-        let addr = row.address;
-        let balance = parseFloat(row.balance);
-        let points = getPoints(balance, atomPoints);
-        addr = convertToTerpAddress(addr);  // Convert to 'terp' format
+    // Step 1: Calculate Gaia & BCNA based on balances
+    let gaiaBalances = processBalanceData(gaiaData, atomPoints);
+    let bcnaBalances = processBalanceData(bcnaData, bcnaPoints);
 
-        acc[addr] = acc[addr] || { balance: 0, points: 0 };
-        acc[addr].balance += balance;
-        acc[addr].points = points;
-        return acc;
-    }, {});
-
-    // Step 2: Process BCNA data to assign points based on balance
-    let bcnaBalances = bcnaData.reduce((acc, row) => {
-        let addr = row.address;
-        let balance = parseFloat(row.balance);
-        let points = getPoints(balance, bcnaPoints);
-        addr = convertToTerpAddress(addr);  // Convert to 'terp' format
-
-        acc[addr] = acc[addr] || { balance: 0, points: 0 };
-        acc[addr].balance += balance;
-        acc[addr].points = points;
-        return acc;
-    }, {});
 
     // Step 3: Merge data from both sources and calculate combined points
     let totalGaiaPoints = 0;
     let totalBcnaPoints = 0;
+    let totalGaiaAddrs = 0;
+    let totalBcnaAddrs = 0;
+
     // objects to count # of addr in each point range
     let gaiaPointsDistribution = { 1: 0, 2: 0, 3: 0 };
     let bcnaPointsDistribution = { 3: 0, 6: 0, 9: 0 };
     let mergedPointsDistribution = { 4: 0, 5: 0, 6: 0, 7: 0, 8: 0, 9: 0, 10: 0, 11: 0, 12: 0 };
 
-    // Count Gaia addresses
-    for (let addr in gaiaBalances) {
-        let gaiaBalance = gaiaBalances[addr];
-        if (!bcnaBalances[addr]) {
-            gaiaPointsDistribution[gaiaBalance.points]++;
-        }
-    }
+    // Count standalone Gaia and BCNA addresses (non-overlapping)
+    totalGaiaAddrs = countAddresses(gaiaBalances, gaiaPointsDistribution, bcnaBalances);
+    totalBcnaAddrs = countAddresses(bcnaBalances, bcnaPointsDistribution, gaiaBalances);
 
-    // Count BCNA addresses
-    for (let addr in bcnaBalances) {
-        let bcnaBalance = bcnaBalances[addr];
-        if (!gaiaBalances[addr]) {
-            bcnaPointsDistribution[bcnaBalance.points]++;
-        }
-    }
     // calculate new allocation from points and percentDistribution
     for (let addr in gaiaBalances) {
         let gaiaBalance = gaiaBalances[addr];
@@ -201,24 +190,25 @@ async function processGenesisDistribution() {
 
     // Step 4: Write final output to CSV 
     result.sort((a, b) => b.points - a.points);
-
-    // Create the CSV content with a header row
     let csvContent = 'Address,Gaia Balance,BCNA Balance,Gaia Points,BCNA Points,Points,Tokens\n';
     result.forEach(row => {
         csvContent += `${row.address},${row.gaiaBalance},${row.bcnaBalance},${row.gaiaPoints},${row.bcnaPoints},${row.points},${row.tokens}\n`;
     });
+    fs.writeFileSync(GENESIS_DISTRIBUTION_FILE, csvContent, 'utf-8');
+    console.log(`Final CSV generated: ${GENESIS_DISTRIBUTION_FILE}`);
 
-    // Write the sorted CSV content to the file
-    fs.writeFileSync(genesisDistFile, csvContent, 'utf-8');
-    console.log(`Final CSV generated: ${genesisDistFile}`);
+    // Step 5: Count addresses per project and write totals
+    const gaiaAddresses = new Set(result.filter(r => r.gaiaPoints > 0).map(r => r.address));
+    const bcnaAddresses = new Set(result.filter(r => r.bcnaPoints > 0).map(r => r.address));
+    const gaiaAddressCount = gaiaAddresses.size;
+    const bcnaAddressCount = bcnaAddresses.size;
 
     // Step 5: Write total points for each project to a new file
-    let totalPointsContent = `Project,Total Points,Tokens Per Point,Total Tokens\n`;
-    const gaiaTokensPerPoint = totalSupply * gaiaPercSupply / totalGaiaPoints;
-    const bcnaTokensPerPoint = totalSupply * bcnaPercSupply / totalBcnaPoints;
-    totalPointsContent += `Gaia,${totalGaiaPoints},${gaiaTokensPerPoint},${totalSupply * gaiaPercSupply}\n`;
-    totalPointsContent += `BCNA,${totalBcnaPoints},${bcnaTokensPerPoint},${totalSupply * bcnaPercSupply}\n`;
-    fs.writeFileSync(totalPointsDist, totalPointsContent, 'utf-8');
+    let totalPointsContent = 'Project,Total Points,Address Count,Tokens Per Point,Total Tokens\n';
+    const gaiaTokensPerPoint = TOTAL_SUPPLY * gaiaPercSupply / totalGaiaPoints;
+    const bcnaTokensPerPoint = TOTAL_SUPPLY * bcnaPercSupply / totalBcnaPoints;
+    totalPointsContent += `Gaia,${totalGaiaPoints},${totalGaiaAddrs},${gaiaTokensPerPoint},${TOTAL_SUPPLY * gaiaPercSupply}\n`;
+    totalPointsContent += `BCNA,${totalBcnaPoints},${totalBcnaAddrs},${bcnaTokensPerPoint},${TOTAL_SUPPLY * bcnaPercSupply}\n`; fs.writeFileSync(TOTAL_POINTS_OUTPUT, totalPointsContent, 'utf-8');
     console.log(`Total points file generated: total-points.csv`);
 
 
@@ -233,29 +223,25 @@ async function processGenesisDistribution() {
     for (let points in mergedPointsDistribution) {
         pointsDistributionContent += `Merged,${points},${mergedPointsDistribution[points]}\n`;
     }
-    fs.writeFileSync(pointsDist, pointsDistributionContent, 'utf-8');
-    console.log(`Points distribution file generated: ${pointsDist}`);
-
+    fs.writeFileSync(POINTS_SUMMARY_FILE, pointsDistributionContent, 'utf-8');
+    console.log(`Points distribution file generated: ${POINTS_SUMMARY_FILE}`);
 }
 
 
 function checkAddresses() {
-    // load state export data
-    const zeroSeqAccountsJson = '../genesis/scripts-data/updated_zero_sequence_accounts.json'
-    const nonZeroSeqAccountsJson = '../genesis/scripts-data/updated_greater_zero_sequence_accounts.json'
-    const zeroSeqData = JSON.parse(fs.readFileSync(zeroSeqAccountsJson, 'utf8'));
-    const nonZeroSeqData = JSON.parse(fs.readFileSync(nonZeroSeqAccountsJson, 'utf8'));
+    const zeroSeqData = JSON.parse(fs.readFileSync(INACTIVE_ACCOUNT_FILE, 'utf8'));
+    const nonZeroSeqData = JSON.parse(fs.readFileSync(ACTIVE_ACCOUNTS_FILE, 'utf8'));
     // parse into account array
     const zeroSeqAccounts = zeroSeqData.app_state.auth.accounts;
     const nonZeroSeqAccounts = nonZeroSeqData.app_state.auth.accounts;
 
     // merge into single object
     const accounts = [...zeroSeqAccounts, ...nonZeroSeqAccounts];
-    let csvContent = 'Address,Points,New Allocation,Original Vesting Amount\n';
+    let csvContent = 'Address,Points,New Allocation,Original Allocation\n';
 
     let totalGaiaPoints = 0;
     let totalBcnaPoints = 0;
-    fs.createReadStream(totalPointsDist)
+    fs.createReadStream(TOTAL_POINTS_OUTPUT)
         .pipe(csv())
         .on('data', (row) => {
             if (row['Project'] === 'Gaia') {
@@ -265,7 +251,7 @@ function checkAddresses() {
             }
         })
         .on('end', () => {
-            fs.createReadStream(genesisDistFile)
+            fs.createReadStream(GENESIS_DISTRIBUTION_FILE)
                 .pipe(csv())
                 .on('data', (row) => {
                     // grab address, gaia points, bcna points, total points
@@ -274,7 +260,7 @@ function checkAddresses() {
                     const gaiaPoints = parseInt(row['Gaia Points']);
                     const bcnaPoints = parseInt(row['BCNA Points']);
 
-                    // find address from final_output in exported state
+                    // find address from final-output in exported state
                     const account = accounts.find((acc) => acc.address === address);
                     if (!account) {
                         console.log(`Address ${address} not found in accounts`);
@@ -286,22 +272,25 @@ function checkAddresses() {
                         return;
                     }
 
-
-                    // calculate new allocation from points and percentDistribution
+                    // calculate new, correct allocation
                     // this is calcualted by ((% tokens allocated to project * total supply) / total points allocated for project) * points
-                    const gaiaAllocation = ((gaiaPercSupply * totalSupply) / totalGaiaPoints) * gaiaPoints;
+                    const gaiaAllocation = ((gaiaPercSupply * TOTAL_SUPPLY) / totalGaiaPoints) * gaiaPoints;
                     console.log(`${address} in Gaia with  ${gaiaPoints} Points gets ${gaiaAllocation}TERP`);
-                    const bcnaAllocation = ((bcnaPercSupply * totalSupply) / totalBcnaPoints) * bcnaPoints;
+                    const bcnaAllocation = ((bcnaPercSupply * TOTAL_SUPPLY) / totalBcnaPoints) * bcnaPoints;
                     console.log(`${address} in BCNA with  ${bcnaPoints} Points gets ${bcnaAllocation}TERP`);
                     const expectedAllocation = gaiaAllocation + bcnaAllocation;
-
-                    csvContent += `${address},${points},${expectedAllocation.toFixed(6)},${account.original_vesting_amount}\n`;
+                    const originalAllocation = parseFloat(account.original_vesting_amount);
+                    if (isNaN(originalAllocation)) {
+                        console.error(`Failed to parse original_vesting_amount for address: ${address}, value:`, account.original_vesting_amount);
+                        process.exit(1); // Exit with error
+                    }
+                    const scaledOriginal = originalAllocation / 1_000_000;
+                    csvContent += `${address},${points},${expectedAllocation.toFixed(6)},${scaledOriginal.toFixed(6)}\n`;
                 })
                 .on('end', () => {
                     // Write the CSV content to the file
-
-                    fs.writeFileSync(patchedDist, `Address,Points,New Allocation,Original Vesting Amount\n${csvContent}`, 'utf-8');
-                    console.log(`CSV file processed and output written to ${patchedDist}`);
+                    fs.writeFileSync(PATCHED_DISTRIBUTION_FILE_OUTPUT, `${csvContent}`, 'utf-8');
+                    console.log(`CSV file processed and output written to ${PATCHED_DISTRIBUTION_FILE_OUTPUT}`);
                 });
         });
 }

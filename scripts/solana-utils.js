@@ -1,6 +1,7 @@
 import fs from 'fs';
 import csv from 'csv-parser';
 
+const SAC_OUTPUT_CSV = '../headstash/communities/sac.csv';
 const processSacNFTdata = async (data) => {
     const stringCounts = {};
 
@@ -23,15 +24,16 @@ const processSacNFTdata = async (data) => {
     const outputData = "String,Count\n" + sortedStringCounts.map(([string, count]) => `${string},${count}`).join('\n') + '\n';
 
     // Write the result to a new CSV file
-    fs.writeFile('../headstash/communities/sac.csv', outputData, 'utf8', (err) => {
+    fs.writeFile(SAC_OUTPUT_CSV, outputData, 'utf8', (err) => {
         if (err) {
             console.error(err);
         } else {
-            console.log('Output written to../headstash/communities/sac.csv');
+            console.log(`Output written to:  ${SAC_OUTPUT_CSV}`);
         }
     });
 };
 
+// base64 encode solana addresses
 const encodeAddrs = async (inputFile, outputFile) => {
     const inputStream = fs.createReadStream(inputFile);
     const outputStream = fs.createWriteStream(outputFile);

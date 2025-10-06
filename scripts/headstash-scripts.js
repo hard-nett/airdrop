@@ -3,8 +3,9 @@
 // 2. identify and merge any address that exist in multiple community distributions 
 // 3. if solana wallet, base64 encode wallet address 
 import fs from 'fs';
-import csv from 'csv-parser';
 import path from 'path'
+import { readCsvFile } from './utils.js';
+
 
 const totalSupply = 420000000
 
@@ -303,24 +304,7 @@ async function processHeadstashDistributions() {
     }
 }
 
-// Function to read a CSV file
-function readCsvFile(filePath) {
-    return new Promise((resolve, reject) => {
-        const csvData = [];
 
-        fs.createReadStream(filePath)
-            .pipe(csv())
-            .on('data', (row) => {
-                csvData.push(row);
-            })
-            .on('end', () => {
-                resolve(csvData);
-            })
-            .on('error', (error) => {
-                reject(error);
-            });
-    });
-}
 
 // Function to create the final tally CSV file
 function createFinalTallyCsv(finalTally, addressCommunities, communities) {

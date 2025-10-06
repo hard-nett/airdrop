@@ -1,23 +1,35 @@
-# Distribution:
+# Distribution
 
 ---
+
 ## Overview
+
 ## Supply
+
 ### TERP
+
 - **Inital Supply:** 420,000,000 TERP
-### PERSY 
+
+### PERSY
+
 - **Initial Supply:** 710,000,000 PERSY
 
-## Distribution 
+## Distribution
+
 36% - Vested Airdrops\
 50% - Treasury\
 24% - Foundation
 
 ## Minting Schedule
+
 ### TERP
-No minting or inflation schedule set 
-### PERSY 
+
+No minting or inflation schedule set
+
+### PERSY
+
 93% first year, 1/3rd less each following year (Model based off of Osmosis Zones Thirdening Schedule)
+
 | year 0  |  710,000,000.00  | 93.00% | 660,300,000 |   |
 |---------|:----------------:|:------:|:-----------:|---|
 | year 1  | 1,370,300,000.00 | 62.00% | 849,586,000 |   |
@@ -62,6 +74,7 @@ No minting or inflation schedule set
 | year 40 | 6,754,108,785.18 |  0.00% |     568     |   |
 | year 41 | 6,754,109,353.24 |  0.00% |     379     |   |
 | year 42 | 6,754,109,731.96 |  0.00% |     252     |   |
+
 ## Airdrop [Link](https://github.com/terpnetwork/airdrop)
 
 **Calculations:**
@@ -76,15 +89,14 @@ Reward(R)= func(p, a, b, min, max)
     =a + ((b-a) * (p-min)/(max-min)) ; otherwise 
 ```
 
-## Vesting 
+## Vesting
 
 **General Wallets:**
 
- - 6 months linear vesting
-**Foundation Ownership (24% of Terp Supply) :** 
+- 6 months linear vesting
+**Foundation Ownership (24% of Terp Supply) :**
 
- - 10% unlocked initially
- - 5% unlocked 12 months following first unlock event
- - 5% unlocked every 12 months, until 50 % of Foundation Tokens have been fully vested
- - 25% unlocked after 72 months from 50% of inital Foundation DAO tokens 
- 
+- 10% unlocked initially
+- 5% unlocked 12 months following first unlock event
+- 5% unlocked every 12 months, until 50 % of Foundation Tokens have been fully vested
+- 25% unlocked after 72 months from 50% of inital Foundation DAO tokens
