@@ -6,9 +6,6 @@ import fs from 'fs';
 import path from 'path'
 import { readCsvFile } from './utils.js';
 
-
-const totalSupply = 420000000
-
 const distributionData = [
     {
         name: "buddah-bears",

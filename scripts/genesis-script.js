@@ -7,21 +7,7 @@ import csv from 'csv-parser';
 import { bech32 } from 'bech32'
 import { readCsvFile } from './utils.js';
 
-// File paths
-const RAW_SNAPSHOT_FILES = [
-    "../genesis/bcna_delegators.csv",
-    "../genesis/gaia.csv",
-    "../genesis/scavenger_hunt.csv",
-    "../genesis/terp_og.csv",
-];
-
-
-const PATCHED_DISTRIBUTION_FILE_OUTPUT = '../genesis/scripts-data/patched-distribution.csv';
-const POINTS_SUMMARY_FILE = '../genesis/scripts-data/points-distribution.csv';
-const INACTIVE_ACCOUNT_FILE = '../genesis/scripts-data/accounts-inactive.json'
-const ACTIVE_ACCOUNTS_FILE = '../genesis/scripts-data/accounts-active.json'
-const GENESIS_DISTRIBUTION_FILE = '../genesis/scripts-data/final-output.csv';
-const TOTAL_POINTS_OUTPUT = '../genesis/scripts-data/total-points.csv';
+import { RAW_SNAPSHOT_FILES, GENESIS_DISTRIBUTION_FILE, INACTIVE_ACCOUNT_FILE, ACTIVE_ACCOUNTS_FILE, PATCHED_DISTRIBUTION_FILE, GAIA_PERC_SUPPLY, TOTAL_SUPPLY,BCNA_PERC_SUPPLY, TOTAL_POINTS_FILE, POINTS_SUMMARY_FILE } from './constants.js';
 
 // Point system based on balance percentiles for Gaia and BCNA
 const atomPoints = [
@@ -48,10 +34,7 @@ export const mergedPoints = [
     { points: 12, bcna: 9, atom: 3, tpp: 1477.510195 },
 ]
 
-/// Token distribution constants
-export const TOTAL_SUPPLY = 420000000;
-const gaiaPercSupply = 0.061152;
-const bcnaPercSupply = 0.01911;
+
 
 function getPoints(balance, pointsList) {
     for (const point of pointsList) {
@@ -205,10 +188,10 @@ async function processGenesisDistribution() {
 
     // Step 5: Write total points for each project to a new file
     let totalPointsContent = 'Project,Total Points,Address Count,Tokens Per Point,Total Tokens\n';
-    const gaiaTokensPerPoint = TOTAL_SUPPLY * gaiaPercSupply / totalGaiaPoints;
-    const bcnaTokensPerPoint = TOTAL_SUPPLY * bcnaPercSupply / totalBcnaPoints;
-    totalPointsContent += `Gaia,${totalGaiaPoints},${totalGaiaAddrs},${gaiaTokensPerPoint},${TOTAL_SUPPLY * gaiaPercSupply}\n`;
-    totalPointsContent += `BCNA,${totalBcnaPoints},${totalBcnaAddrs},${bcnaTokensPerPoint},${TOTAL_SUPPLY * bcnaPercSupply}\n`; fs.writeFileSync(TOTAL_POINTS_OUTPUT, totalPointsContent, 'utf-8');
+    const gaiaTokensPerPoint = TOTAL_SUPPLY * GAIA_PERC_SUPPLY / totalGaiaPoints;
+    const bcnaTokensPerPoint = TOTAL_SUPPLY * BCNA_PERC_SUPPLY / totalBcnaPoints;
+    totalPointsContent += `Gaia,${totalGaiaPoints},${totalGaiaAddrs},${gaiaTokensPerPoint},${TOTAL_SUPPLY * GAIA_PERC_SUPPLY}\n`;
+    totalPointsContent += `BCNA,${totalBcnaPoints},${totalBcnaAddrs},${bcnaTokensPerPoint},${TOTAL_SUPPLY * BCNA_PERC_SUPPLY}\n`; fs.writeFileSync(TOTAL_POINTS_FILE, totalPointsContent, 'utf-8');
     console.log(`Total points file generated: total-points.csv`);
 
 
@@ -241,7 +224,7 @@ function checkAddresses() {
 
     let totalGaiaPoints = 0;
     let totalBcnaPoints = 0;
-    fs.createReadStream(TOTAL_POINTS_OUTPUT)
+    fs.createReadStream(TOTAL_POINTS_FILE)
         .pipe(csv())
         .on('data', (row) => {
             if (row['Project'] === 'Gaia') {
@@ -274,9 +257,9 @@ function checkAddresses() {
 
                     // calculate new, correct allocation
                     // this is calcualted by ((% tokens allocated to project * total supply) / total points allocated for project) * points
-                    const gaiaAllocation = ((gaiaPercSupply * TOTAL_SUPPLY) / totalGaiaPoints) * gaiaPoints;
+                    const gaiaAllocation = ((GAIA_PERC_SUPPLY * TOTAL_SUPPLY) / totalGaiaPoints) * gaiaPoints;
                     console.log(`${address} in Gaia with  ${gaiaPoints} Points gets ${gaiaAllocation}TERP`);
-                    const bcnaAllocation = ((bcnaPercSupply * TOTAL_SUPPLY) / totalBcnaPoints) * bcnaPoints;
+                    const bcnaAllocation = ((BCNA_PERC_SUPPLY * TOTAL_SUPPLY) / totalBcnaPoints) * bcnaPoints;
                     console.log(`${address} in BCNA with  ${bcnaPoints} Points gets ${bcnaAllocation}TERP`);
                     const expectedAllocation = gaiaAllocation + bcnaAllocation;
                     const originalAllocation = parseFloat(account.original_vesting_amount);
@@ -289,8 +272,8 @@ function checkAddresses() {
                 })
                 .on('end', () => {
                     // Write the CSV content to the file
-                    fs.writeFileSync(PATCHED_DISTRIBUTION_FILE_OUTPUT, `${csvContent}`, 'utf-8');
-                    console.log(`CSV file processed and output written to ${PATCHED_DISTRIBUTION_FILE_OUTPUT}`);
+                    fs.writeFileSync(PATCHED_DISTRIBUTION_FILE, `${csvContent}`, 'utf-8');
+                    console.log(`CSV file processed and output written to ${PATCHED_DISTRIBUTION_FILE}`);
                 });
         });
 }

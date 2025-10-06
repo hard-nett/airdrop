@@ -2,23 +2,11 @@ import fs from 'fs';
 import csv from 'csv-parser';
 
 import { readCsvFile, readJsonFile } from './utils.js';
-import { mergedPoints, TOTAL_SUPPLY } from './genesis-script.js';
+import { mergedPoints, } from './genesis-script.js';
 
-// inputs
-const LIVE_NETWORK_EXPORT_FILE = "../data/genesis.json"
-const CALCULATED_GENESIS_DISTRIBUTION_FILE = "../genesis/scripts-data/final-output.csv"
-const PATCHED_DISTRIBUTION_FILE = "../genesis/scripts-data/patched-distribution.csv"
-const SCAVENGER_HUNT_FILE = "../genesis/scavenger_hunt.csv"
-const TERPOG_FILE = "../genesis/terp_og.csv"
+import { LIVE_NETWORK_EXPORT_FILE, SUMMARY_OUTPUT, TOTAL_SUPPLY, SCAVENGER_HUNT_FILE, TERPOG_FILE, NETWORK_GENESIS_FILE, TOKEN_DIFF_OUTPUT, GENESIS_DISTRIBUTION_FILE, INACTIVE_ACCOUNT_FILE, ACTIVE_ACCOUNTS_FILE, PATCHED_DISTRIBUTION_FILE, BCNA_PERC_SUPPLY, TOTAL_POINTS_FILE, POINTS_SUMMARY_FILE } from './constants.js';
 
-// outputs
-const INACTIVE_ACCOUNT_OUTPUT = "../genesis/scripts-data/accounts-inactive.json"
-const ACTIVE_ACCOUNTS_OUTPUT = "../genesis/scripts-data/accounts-active.json"
-const TOKEN_DIFF_OUTPUT = "../genesis/scripts-data/token-differences.csv"
-const SUMMARY_OUTPUT = "../genesis/scripts-data/summary.json"
-
-
-// - parse genesis file to get original distributions, run calculations on these. 
+// finds active accounts based on network export file
 // - parse export file to determine which addresses are active and which ones are not. 
 async function processExportedState() {
     fs.readFile(LIVE_NETWORK_EXPORT_FILE, (err, data) => {
@@ -28,38 +16,62 @@ async function processExportedState() {
         }
         // Read the CSV file
         const genesisAccounts = [];
-        fs.createReadStream(CALCULATED_GENESIS_DISTRIBUTION_FILE)
+        fs.createReadStream(GENESIS_DISTRIBUTION_FILE)
+            .pipe(csv())
+            .on('data', (row) => {
+                genesisAccounts.push(row);
+            })
+            .on('end', () => {
+                const updatedGreaterZeroSequenceAccounts = [];
+                JSON.parse(data).app_state.auth.accounts.filter((account) => {
+                    return genesisAccounts.some((genesisAccount) => genesisAccount.address === account.address);
+                }).forEach((account) => {
+                    // Separate accounts by sequence
+                    if (account.base_vesting_account && account.base_vesting_account.base_account.sequence !== '0') {
+                        updatedGreaterZeroSequenceAccounts.push({
+                            account_number: account.base_vesting_account.base_account.account_number,
+                            address: account.base_vesting_account.base_account.address,
+                            sequence: account.base_vesting_account.base_account.sequence,
+                            original_vesting_amount: account.base_vesting_account.original_vesting[0].amount
+                        });
+                    }
+                });
+                updatedGreaterZeroSequenceAccounts.sort((a, b) => parseInt(b.sequence) - parseInt(a.sequence));
+                fs.writeFileSync(ACTIVE_ACCOUNTS_FILE, JSON.stringify({ app_state: { auth: { accounts: updatedGreaterZeroSequenceAccounts } } }, null, 2));
+            });
+    });
+}
+
+// - parse genesis file to get original distributions to run calculations.
+async function processGenesisState() {
+    fs.readFile(NETWORK_GENESIS_FILE, (err, data) => {
+        if (err) {
+            console.error(err);
+            return;
+        }
+        // Read the CSV file
+        const genesisAccounts = [];
+        fs.createReadStream(GENESIS_DISTRIBUTION_FILE)
             .pipe(csv())
             .on('data', (row) => {
                 genesisAccounts.push(row);
             })
             .on('end', () => {
                 const updatedZeroSequenceAccounts = [];
-                const updatedGreaterZeroSequenceAccounts = [];
                 JSON.parse(data).app_state.auth.accounts.filter((account) => {
                     return genesisAccounts.some((genesisAccount) => genesisAccount.address === account.address);
                 }).forEach((account) => {
                     if (account.base_vesting_account) {
-                        // Separate accounts by sequence
-                        const accountInfo = {
+                        updatedZeroSequenceAccounts.push({
                             account_number: account.base_vesting_account.base_account.account_number,
                             address: account.base_vesting_account.base_account.address,
                             sequence: account.base_vesting_account.base_account.sequence,
                             original_vesting_amount: account.base_vesting_account.original_vesting[0].amount
-                        };
-
-                        if (account.base_vesting_account.base_account.sequence === '0') {
-                            updatedZeroSequenceAccounts.push(accountInfo);
-                        } else {
-                            updatedGreaterZeroSequenceAccounts.push(accountInfo);
-                        }
+                        });
                     }
                 });
-                updatedGreaterZeroSequenceAccounts.sort((a, b) => parseInt(b.sequence) - parseInt(a.sequence));
-                const updatedZeroSequenceAccountsJson = { app_state: { auth: { accounts: updatedZeroSequenceAccounts } } };
-                fs.writeFileSync(INACTIVE_ACCOUNT_OUTPUT, JSON.stringify(updatedZeroSequenceAccountsJson, null, 2));
-                const updatedGreaterZeroSequenceAccountsJson = { app_state: { auth: { accounts: updatedGreaterZeroSequenceAccounts } } };
-                fs.writeFileSync(ACTIVE_ACCOUNTS_OUTPUT, JSON.stringify(updatedGreaterZeroSequenceAccountsJson, null, 2));
+                fs.writeFileSync(INACTIVE_ACCOUNT_FILE, JSON.stringify({ app_state: { auth: { accounts: updatedZeroSequenceAccounts } } }, null, 2));
+
             });
     });
 }
@@ -67,7 +79,7 @@ async function processExportedState() {
 const readGenesisDistribution = async () => {
     return new Promise((resolve, reject) => {
         const genesisDistribution = [];
-        fs.createReadStream(CALCULATED_GENESIS_DISTRIBUTION_FILE)
+        fs.createReadStream(GENESIS_DISTRIBUTION_FILE)
             .pipe(csv())
             .on('data', (row) => {
                 genesisDistribution.push({
@@ -205,9 +217,9 @@ const summarizeScavengerHunt = async () => {
 // Calculate token difference
 const calculateTokenDifference = async () => {
     const genesisDistribution = await readGenesisDistribution();
-    const zeroSequenceAccounts = await readJsonFile(INACTIVE_ACCOUNT_OUTPUT);
-    const originalAllocations = await readJsonFile(ACTIVE_ACCOUNTS_OUTPUT);
-    // const nonZeroSequenceAccounts = await readJsonFile(ACTIVE_ACCOUNTS_OUTPUT);
+    const zeroSequenceAccounts = await readJsonFile(INACTIVE_ACCOUNT_FILE);
+    const originalAllocations = await readJsonFile(ACTIVE_ACCOUNTS_FILE);
+    // const nonZeroSequenceAccounts = await readJsonFile(ACTIVE_ACCOUNTS_FILE);
     const output = [];
 
     const processAccounts = (accounts) => {
@@ -227,7 +239,6 @@ const calculateTokenDifference = async () => {
     output.push('Address,Token Difference'); // Header row
 
     processAccounts(zeroSequenceAccounts.app_state.auth.accounts);
-    processAccounts(nonZeroSequenceAccounts.app_state.auth.accounts);
 
     fs.writeFileSync(TOKEN_DIFF_OUTPUT, output.join('\n'));
 };
@@ -242,4 +253,4 @@ const calculateTokenDifference = async () => {
 //     - all existing validators:
 //       - 4,200 TERP & THIOL
 
-export { processExportedState, calculateTokenDifference, summarizeAllResults, summarizeScavengerHunt }
+export { processGenesisState, calculateTokenDifference, summarizeAllResults, summarizeScavengerHunt }
