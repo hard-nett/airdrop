@@ -6,16 +6,16 @@ import fs from 'fs';
 import path from 'path'
 import { readCsvFile } from './utils.js';
 
-const distributionData = [
+const HEADSTASH_DISTRIBUTION_DATA = [
     {
         name: "buddah-bears",
         numOfHolders: 2453,
         percTotalSupply: 1.5,
         csv: "../headstash/communities/buddah-bears/buddah-bears.csv",
         points: [
-            { points: 1, min: 1, max: 1 }, // 1st - 59th
-            { points: 2, min: 2, max: 6 }, // 60th - 90th
-            { points: 3, min: 7, max: 790 } // 91st - 100th
+            { points: 1, min: 1, max: 1, holders: 1461 }, // 1st - 59th
+            { points: 2, min: 2, max: 6, holders: 769 }, // 60th - 90th
+            { points: 3, min: 7, max: 790, holders: 223 } // 91st - 100th
         ],
         tpp: 1762.237762
     },
@@ -25,9 +25,9 @@ const distributionData = [
         percTotalSupply: 0.125,
         csv: "../headstash/communities/cannabuddies/cannabuddies.csv",
         points: [
-            { points: 1, min: 1, max: 1 }, // 1st - 59th
-            { points: 2, min: 2, max: 3 }, // 60th - 90th
-            { points: 3, min: 4, max: 9 }  // 91st - 100th
+            { points: 1, min: 1, max: 1, holders: 162 }, // 1st - 59th
+            { points: 2, min: 2, max: 3, holders: 61 }, // 60th - 90th
+            { points: 3, min: 4, max: 9, holders: 15 }  // 91st - 100th
         ],
         tpp: 1595.744681
     },
@@ -37,9 +37,9 @@ const distributionData = [
         percTotalSupply: 0.06,
         csv: "../headstash/communities/carta-beta-gang/carta-beta-gang.csv",
         points: [
-            { points: 1, min: 1, max: 1 }, // 1st - 88th
-            { points: 2, min: 2, max: 3 },  // 89th - 99th 
-            { points: 3, min: 15, max: 15 }, // 100th
+            { points: 1, min: 1, max: 1, holders: 139 }, // 1st - 88th
+            { points: 2, min: 2, max: 3, holders: 17 },  // 89th - 99th 
+            { points: 3, min: 15, max: 15, holders: 1 }, // 100th
         ],
         tpp: 1431.818182 // 0.06% 
     },
@@ -49,10 +49,10 @@ const distributionData = [
         percTotalSupply: 2.0,
         csv: "../headstash/communities/chronic-token/chronic-token.csv",
         points: [
-            { points: 1, min: 2949.07, max: 29907.26 },    // 15th - 60th
-            { points: 2, min: 29907.27, max: 126425.37 },  // 61st - 83rd
-            { points: 3, min: 126425.38, max: 631620.69 }, // 84th - 95th
-            { points: 4, min: 631620.7, max: 52230931.14 } // 96th - 100th 
+            { points: 1, min: 2949.07, max: 29907.26, holders: 577 },    // 15th - 60th
+            { points: 2, min: 29907.27, max: 126425.37, holders: 288 },  // 61st - 83rd
+            { points: 3, min: 126425.38, max: 631620.69, holders: 151 }, // 84th - 95th
+            { points: 4, min: 631620.7, max: 52230931.14, holders: 63 } // 96th - 100th 
         ],
         tpp: 4615.384615
     },
@@ -62,9 +62,9 @@ const distributionData = [
         percTotalSupply: 3.0,
         csv: "../headstash/communities/crypto-canna-club/crypto-canna-club.csv",
         points: [
-            { points: 1, min: 1, max: 1 }, // 1st - 65th
-            { points: 2, min: 2, max: 6 }, // 66th - 95th
-            { points: 3, min: 7, max: 300 } // 96th - 100th
+            { points: 1, min: 1, max: 1, holders: 2948 }, // 1st - 65th
+            { points: 2, min: 2, max: 6, holders: 1264 }, // 66th - 95th
+            { points: 3, min: 7, max: 300, holders: 193 } // 96th - 100th
         ],
         tpp: 2080.924855
     },
@@ -74,9 +74,9 @@ const distributionData = [
         percTotalSupply: 0.02,
         csv: "../headstash/communities/cryptowizards/cryptowizards.csv",
         points: [
-            { points: 1, min: 1, max: 1 }, // 1st - 70th
-            { points: 2, min: 2, max: 4 }, // 71st - 95th
-            { points: 3, min: 5, max: 14 }, // 96th - 100th 
+            { points: 1, min: 1, max: 1, holders: 39 }, // 1st - 70th
+            { points: 2, min: 2, max: 4, holders: 14 }, // 71st - 95th
+            { points: 3, min: 5, max: 14, holders: 2 }, // 96th - 100th 
         ],
         tpp: 1150.684932 // 0.02%
     },
@@ -86,9 +86,9 @@ const distributionData = [
         percTotalSupply: 1.5,
         csv: "../headstash/communities/galacktic-gang/galacktic-gang.csv",
         points: [
-            { points: 1, min: 1, max: 1 }, // 1st - 63rd
-            { points: 2, min: 2, max: 4 }, // 64th - 95th
-            { points: 3, min: 5, max: 66 } // 96th - 100th
+            { points: 1, min: 1, max: 1, holders: 1620 }, // 1st - 63rd
+            { points: 2, min: 2, max: 4, holders: 726 }, // 64th - 95th
+            { points: 3, min: 5, max: 66, holders: 220 } // 96th - 100th
         ],
         tpp: 1688.102894
     },
@@ -98,9 +98,9 @@ const distributionData = [
         percTotalSupply: 0.25,
         csv: "../headstash/communities/heady-pipe-society/heady-pipe-society.csv",
         points: [
-            { points: 1, min: 1, max: 1 }, // 1st - 56th 
-            { points: 2, min: 2, max: 5 }, // 72st - 95th
-            { points: 3, min: 6, max: 10 }, // 96th - 100th 
+            { points: 1, min: 1, max: 1, holders: 13 }, // 1st - 56th 
+            { points: 2, min: 2, max: 5, holders: 9 }, // 72st - 95th
+            { points: 3, min: 6, max: 10, holders: 1 }, // 96th - 100th 
         ],
         tpp: 1852.941176 // 0.015%
     },
@@ -110,9 +110,9 @@ const distributionData = [
         percTotalSupply: 0.25,
         csv: "../headstash/communities/hippie-life-krew/hippie-life-krew.csv",
         points: [
-            { points: 1, min: 1, max: 1 },   // 1st - 37th 
-            { points: 2, min: 2, max: 22 },  // 38th - 99th 
-            { points: 3, min: 23, max: 116 } // 100th
+            { points: 1, min: 1, max: 1, holders: 309 },   // 1st - 37th 
+            { points: 2, min: 2, max: 22, holders: 32 },  // 38th - 99th 
+            { points: 3, min: 23, max: 116, holders: 1 } // 100th
         ],
         tpp: 2147.239264
     },
@@ -122,23 +122,11 @@ const distributionData = [
         percTotalSupply: 1.5,
         csv: "../headstash/communities/monster-buds/monster-buds.csv",
         points: [
-            { points: 1, min: 1, max: 1 },    // 1st - 49th
-            { points: 2, min: 2, max: 10 },   // 26th - 93rd
-            { points: 3, min: 11, max: 289 }  // 94th - 100th 
+            { points: 1, min: 1, max: 1, holders: 1684 },    // 1st - 49th
+            { points: 2, min: 2, max: 10, holders: 1473 },   // 26th - 93rd
+            { points: 3, min: 11, max: 289, holders: 228 }  // 94th - 100th 
         ],
         tpp: 1861.152142
-    },
-    {
-        name: "n8",
-        csv: "../headstash/communities/n8/n8.csv",
-        numOfHolders: 316,
-        percTotalSupply: 0.15,
-        points: [
-            { points: 1, min: 1, max: 3 }, // 1st - 98th
-            { points: 2, min: 4, max: 4 }, // 99th
-            { points: 3, min: 5, max: 6 }, // 100th
-        ],
-        tpp: 1547.911548 // 0.15% 
     },
     {
         name: "rebud",
@@ -147,9 +135,9 @@ const distributionData = [
         percTotalSupply: 0.35,
         tpp: 1861.152142,
         points: [
-            { points: 1, min: 1, max: 10 },  // 1st - 87th percentile
-            { points: 2, min: 11, max: 41 }, // 88th - 99th percentile
-            { points: 3, min: 42, max: 93 }  // 100th percentile
+            { points: 1, min: 1, max: 10, holders: 513 },  // 1st - 87th percentile
+            { points: 2, min: 11, max: 41, holders: 71 }, // 88th - 99th percentile
+            { points: 3, min: 42, max: 93, holders: 1 }  // 100th percentile
         ],
     },
     {
@@ -158,9 +146,9 @@ const distributionData = [
         numOfHolders: 780,
         percTotalSupply: 0.25,
         points: [
-            { points: 1, min: 1, max: 1 },
-            { points: 2, min: 2, max: 4 },
-            { points: 3, min: 5, max: 148 }
+            { points: 1, min: 1, max: 1, holders: 275 },
+            { points: 2, min: 2, max: 4, holders: 200 },
+            { points: 3, min: 5, max: 148, holders: 52 }
         ],
         tpp: 1992.409867
     },
@@ -171,9 +159,9 @@ const distributionData = [
         percTotalSupply: 0.025,
         tpp: 1660.079051,
         points: [
-            { points: 1, min: 1, max: 1 },   // 1st - 25th percentile
-            { points: 2, min: 2, max: 5 }, // 26th - 75th percentile
-            { points: 3, min: 6, max: 89 } // 76th - 100th percentile
+            { points: 1, min: 1, max: 1, holders: 23 },   // 1st - 25th percentile
+            { points: 2, min: 2, max: 5, holders: 6 }, // 26th - 75th percentile
+            { points: 3, min: 6, max: 89, holders: 4 } // 76th - 100th percentile
         ],
     },
     {
@@ -183,9 +171,9 @@ const distributionData = [
         percTotalSupply: 0.02,
         tpp: 1423.728814, // 0.02%
         points: [
-            { points: 1, min: 1, max: 1 }, // 1st - 76th percentile
-            { points: 2, min: 2, max: 4 }, // 77th - 95th percentile
-            { points: 3, min: 5, max: 15 }, // 96th - 100th percentile
+            { points: 1, min: 1, max: 1, holders: 35 }, // 1st - 76th percentile
+            { points: 2, min: 2, max: 4, holders: 9 }, // 77th - 95th percentile
+            { points: 3, min: 5, max: 15, holders: 2 }, // 96th - 100th percentile
         ],
     },
     {
@@ -195,9 +183,9 @@ const distributionData = [
         percTotalSupply: 1.25,
         tpp: 1577.524038,
         points: [
-            { points: 1, min: 1, max: 1 },   // 1st - 46th 
-            { points: 2, min: 2, max: 9 },   // 47th - 93rd 
-            { points: 3, min: 10, max: 132 } // 94th - 100th 
+            { points: 1, min: 1, max: 1, holders: 965 },   // 1st - 46th 
+            { points: 2, min: 2, max: 9, holders: 968 },   // 47th - 93rd 
+            { points: 3, min: 10, max: 132, holders: 126 } // 94th - 100th 
         ],
     },
     {
@@ -207,9 +195,9 @@ const distributionData = [
         percTotalSupply: 0.1,
         tpp: 1660.079051,
         points: [
-            { points: 1, min: 1, max: 1 },   // 1st - 25th  
-            { points: 2, min: 2, max: 9 }, // 26th - 75th 
-            { points: 3, min: 10, max: 10 } // 76th - 100th  
+            { points: 1, min: 1, max: 1, holders: 88 },   // 1st - 25th  
+            { points: 2, min: 2, max: 9, holders: 33 }, // 26th - 75th 
+            { points: 3, min: 10, max: 10, holders: 33 } // 76th - 100th  
         ],
     },
 ]
@@ -244,7 +232,7 @@ async function processHeadstashDistributions() {
     let addressCommunities = {};
     let communities = [];
 
-    for (let distribution of distributionData) {
+    for (let distribution of HEADSTASH_DISTRIBUTION_DATA) {
         try {
             // Read the CSV file for the current community
             const csvData = await readCsvFile(distribution.csv);
@@ -381,4 +369,4 @@ function createCommunityPointsSummaryCsv(addressCommunities, communities) {
     });
 }
 
-export { processHeadstashDistributions, distributionData }
+export { processHeadstashDistributions, HEADSTASH_DISTRIBUTION_DATA }

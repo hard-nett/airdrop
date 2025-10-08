@@ -16,9 +16,9 @@
 
 ## Distribution
 
-36% - Vested Airdrops\
+34% - Vested Airdrops\
 50% - Treasury\
-24% - Foundation
+16% - Foundation
 
 ## Minting Schedule
 
@@ -90,13 +90,3 @@ Reward(R)= func(p, a, b, min, max)
 ```
 
 ## Vesting
-
-**General Wallets:**
-
-- 6 months linear vesting
-**Foundation Ownership (24% of Terp Supply) :**
-
-- 10% unlocked initially
-- 5% unlocked 12 months following first unlock event
-- 5% unlocked every 12 months, until 50 % of Foundation Tokens have been fully vested
-- 25% unlocked after 72 months from 50% of inital Foundation DAO tokens

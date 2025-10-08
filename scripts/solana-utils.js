@@ -2,7 +2,15 @@ import fs from 'fs';
 import csv from 'csv-parser';
 
 const SAC_OUTPUT_CSV = '../headstash/communities/sac.csv';
-const processSacNFTdata = async (data) => {
+const processSacNFTdata = async (file) => {
+    let data = fs.readFile(file, 'utf8', (err, data) => {
+        if (err) {
+            console.error(err);
+        } else {
+            data
+        }
+    });
+
     const stringCounts = {};
 
     // Parse the JSON data

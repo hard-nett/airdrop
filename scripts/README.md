@@ -3,13 +3,13 @@
 These are helping scripts for un
 This script checks for and sums any duplicate allocation together to generate a csv file that does not contain duplicate addresses.
 
-| Command   | Description|Files Created |
-|------------|----------| -- |
-| `node main.js -1`| Processes data from eligible projects holder distributions, based on expected distribution parameters defined.|
-| `node main.js -2`| Process genesis allocations (BCNA & ATOM) based on points & percentiles |
-| `node main.js -3`| Process headstash allocations based on points & percentiles  |
-| `node main.js -4`| Process distribution from an exported state   |
- 
+| Command   | Description | Files Created |
+|-----------|-------------|---------------|
+| `node main.js -1` | Runs full workflow to generate accurate genesis distribution | `scripts-data/final-output.csv`, `points-distribution.csv`, `total-points.csv` |
+| `node main.js -2` | Prepares accurate allocations from genesis snapshots (`gaia.csv`, `bcna_delegators.csv`) | `scripts-data/final-output.csv`, `points-distribution.csv`, `total-points.csv` |
+| `node main.js -3` | Analyzes exported state (`morocco-1`) to split accounts into active/inactive | `accounts-active.json`, `accounts-inactive.json` |
+| `node main.js -4` | Compares expected vs. actual genesis allocations, flags discrepancies | Log output, discrepancy reports |
+| `node main.js -5` | Summarizes differences between old and new distribution | Summary files in `scripts-data/` |
 
 |----------|----------|----------| |
 
@@ -26,7 +26,6 @@ This script checks for and sums any duplicate allocation together to generate a 
 - calculate desired points for percentile range & desired token per point
 
 ### Step 3: Addition To Scripts
-
 
 ```js
     {

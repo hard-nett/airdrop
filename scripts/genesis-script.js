@@ -7,7 +7,7 @@ import csv from 'csv-parser';
 import { bech32 } from 'bech32'
 import { readCsvFile } from './utils.js';
 
-import { RAW_SNAPSHOT_FILES, GENESIS_DISTRIBUTION_FILE, INACTIVE_ACCOUNT_FILE, ACTIVE_ACCOUNTS_FILE, PATCHED_DISTRIBUTION_FILE, GAIA_PERC_SUPPLY, TOTAL_SUPPLY,BCNA_PERC_SUPPLY, TOTAL_POINTS_FILE, POINTS_SUMMARY_FILE } from './constants.js';
+import { GAIA_DELEGATORS, BCNA_DELEGATORS, GENESIS_DISTRIBUTION_FILE, INACTIVE_ACCOUNT_FILE, ACTIVE_ACCOUNTS_FILE, PATCHED_DISTRIBUTION_FILE, GAIA_PERC_SUPPLY, TOTAL_SUPPLY, BCNA_PERC_SUPPLY, TOTAL_POINTS_FILE, POINTS_SUMMARY_FILE } from './constants.js';
 
 // Point system based on balance percentiles for Gaia and BCNA
 const atomPoints = [
@@ -80,8 +80,8 @@ function countAddresses(balances, distribution, exclude = {}) {
 
 // Aggregate and process CSV files
 async function processGenesisDistribution() {
-    let gaiaData = await readCsvFile(RAW_SNAPSHOT_FILES[1]);
-    let bcnaData = await readCsvFile(RAW_SNAPSHOT_FILES[0]);
+    let gaiaData = await readCsvFile(GAIA_DELEGATORS);
+    let bcnaData = await readCsvFile(BCNA_DELEGATORS);
 
     let result = [];
 

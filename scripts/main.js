@@ -2,9 +2,9 @@ import fs from 'fs';
 
 import { processSacNFTdata, encodeAddrs } from "./solana-utils.js";
 import { processGenesisState, calculateTokenDifference, summarizeAllResults, summarizeScavengerHunt } from './exported-state.js';
-import { processHeadstashDistributions } from './headstash-scripts.js';
+import { processHeadstashDistributions, HEADSTASH_DISTRIBUTION_DATA } from './headstash-scripts.js';
 import { processGenesisDistribution, checkAddresses } from './genesis-script.js';
-
+import { fairPercentileRanges } from './calculations.js'
 import { SAC_INPUT_CSV_PATH, SAC_OUTPUT_CSV_PATH, SAC_JSON_PATH } from './constants.js';
 
 // Process command line arguments
@@ -28,19 +28,15 @@ if (args.length < 1) {
 } else if (args[0] === '-6') {
     summarizeAllResults();
     summarizeScavengerHunt();
+} else if (args[0] === '-hs') {
+    fairPercentileRanges(HEADSTASH_DISTRIBUTION_DATA)
 } else if (args[0] === '-7') {
-    processHeadstashDistributions().catch(console.error);
-} else if (args[0] === '-8') {
     // reads json of solana NFT holder snapshot, creates csv with # of tokens unique addrs hold
-    fs.readFile(SAC_JSON_PATH, 'utf8', (err, data) => {
-        if (err) {
-            console.error(err);
-        } else {
-            processSacNFTdata(data);
-        }
-    });
+    processSacNFTdata(SAC_JSON_PATH);
     // base64-encodes solana addresses in format that will be used to verify offline signature
     encodeAddrs(SAC_INPUT_CSV_PATH, SAC_OUTPUT_CSV_PATH);
+    processHeadstashDistributions().catch(console.error);
+} else if (args[0] === '-8') {
 } else {
     console.error('Invalid option.');
 }
