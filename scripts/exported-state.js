@@ -2,7 +2,6 @@ import fs from 'fs';
 import csv from 'csv-parser';
 
 import { readCsvFile, readJsonFile } from './utils.js';
-import { mergedPoints, } from './genesis-script.js';
 
 import { LIVE_NETWORK_EXPORT_FILE, SUMMARY_OUTPUT, TOTAL_SUPPLY, SCAVENGER_HUNT_FILE, TERPOG_FILE, NETWORK_GENESIS_FILE, TOKEN_DIFF_OUTPUT, GENESIS_DISTRIBUTION_FILE, INACTIVE_ACCOUNT_FILE, ACTIVE_ACCOUNTS_FILE, PATCHED_DISTRIBUTION_FILE, BCNA_PERC_SUPPLY, TOTAL_POINTS_FILE, POINTS_SUMMARY_FILE } from './constants.js';
 

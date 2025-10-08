@@ -1,5 +1,5 @@
 
-import { readCsvFile } from "./utils.js";
+import { readCsvFile, readYamlFile } from "./utils.js";
 import readline from 'readline';
 import { HEADSTASH_YAML } from './constants.js'
 import fs from 'fs';
@@ -26,10 +26,10 @@ async function loadProjectAddresses(csvPath) {
         amount: r.amount
     }));
 }
-export const fairPercentileRanges = async (distributionData) => {
-    // Load and parse all projects
+export const fairPercentileRanges = async (yamlFile) => {
+    const distributionData = await readYamlFile(yamlFile);
     const projects = await Promise.all(
-        distributionData.map(async (proj) => {
+        Object.values(distributionData.projects).map(async (proj) => {
             const records = await loadProjectAddresses(proj.csv);
             const holders = records
                 .map((r) => ({
@@ -122,14 +122,26 @@ export const fairPercentileRanges = async (distributionData) => {
             twoPerc = decimalValue;
         }
 
+        // Calculate number of holders in each point tier
+        const threePointCutoffIdx = Math.floor(threePerc * total);
+        const twoPointCutoffIdx = Math.floor(twoPerc * total);
+
+        const numThreePointHolders = threePointCutoffIdx + 1; // +1 because 0-indexed
+        const numTwoPointHolders = twoPointCutoffIdx - threePointCutoffIdx;
+        const numOnePointHolders = total - twoPointCutoffIdx - 1;
+
         // Save configuration
         configResults[name] = {
-            threePointsUpTo: threePerc,
-            twoPointsUpTo: twoPerc,
-            onePointUpTo: 1.0,
+            threePointsUpTo: { value: threePerc, holders: numThreePointHolders },
+            twoPointsUpTo: { value: twoPerc, holders: numTwoPointHolders },
+            onePointUpTo: {
+                value: 1.0,
+                holders: numOnePointHolders
+            },
             totalHolders: total,
         };
 
+        await updateHeadstashYaml(configResults, name);
         console.log(` ✅ ${name} configured: 3pts ≤ ${threePerc * 100}%, 2pts ≤ ${twoPerc * 100}%, 1pt rest\n`);
     }
 
@@ -137,37 +149,35 @@ export const fairPercentileRanges = async (distributionData) => {
     console.log("📋 Full configuration results:");
     console.log(configResults);
     // update yaml file with points distirbution details
-    let res = await updateHeadstashYaml(configResults);
+
     return;
 };
 
 
-export const updateHeadstashYaml = async (configResults) => {
-    // Read existing YAML file
-    const fileContent = fs.readFileSync(HEADSTASH_YAML, 'utf8');
-    const doc = parse(fileContent);
+export const updateHeadstashYaml = async (configResults, name) => {
+    const doc = await readYamlFile(HEADSTASH_YAML)
 
+    // Find the specific project by name in configResults
+    const config = configResults[name];
+    if (!config) {
+        console.warn(` ⚠️ Project "${name}" not found in config results`);
+        return;
+    }
 
-    Object.keys(configResults).forEach((projectName) => {
-        const config = configResults[projectName];
+    // Find project by name in the YAML under `projects`
+    const project = doc.projects?.find(p => p.name === name);
+    if (project) {
+        project.points = {
+            threePointsUpTo: config.threePointsUpTo,
+            twoPointsUpTo: config.twoPointsUpTo,
+            onePointUpTo: config.onePointUpTo,
+            totalHolders: config.totalHolders
+        };
+        console.log(` 📥 Updated ${name} points distribution in headstash.yaml`);
+    } else {
+        console.warn(` ⚠️ Project "${name}" not found in headstash.yaml`);
+    }
 
-        // Find project by name in the YAML under `projects`
-        const project = doc.projects?.find(p => p.name === projectName);
-        if (project) {
-            project.points = {
-                threePointsUpTo: config.threePointsUpTo,
-                twoPointsUpTo: config.twoPointsUpTo,
-                onePointUpTo: config.onePointUpTo,
-                totalHolders: config.totalHolders
-            };
-            console.log(` 📥 Updated ${projectName} points distribution in headstash.yaml`);
-        } else {
-            console.warn(` ⚠️ Project "${projectName}" not found in headstash.yaml`);
-        }
-    });
-
-    // Write updated YAML back to file
-    fs.writeFileSync(yamlPath, stringify(doc), 'utf8');
-    console.log(' ✅ headstash.yaml updated with new points distribution');
-
-}
+    fs.writeFileSync(HEADSTASH_YAML, stringify(doc), 'utf8');
+    console.log(`✅ headstash.yaml updated with new points distribution for "${name}"`);
+};

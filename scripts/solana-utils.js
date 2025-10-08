@@ -1,23 +1,17 @@
 import fs from 'fs';
+import { readFile } from 'fs/promises';
 import csv from 'csv-parser';
+import { SAC_ENCODED_FILE } from './constants.js';
 
-const SAC_OUTPUT_CSV = '../headstash/communities/sac.csv';
 const processSacNFTdata = async (file) => {
-    let data = fs.readFile(file, 'utf8', (err, data) => {
-        if (err) {
-            console.error(err);
-        } else {
-            data
-        }
-    });
+    console.log(file)
 
     const stringCounts = {};
 
     // Parse the JSON data
-    const jsonData = JSON.parse(data);
-
+    const data = await readFile(file, 'utf8'); // ✅ Properly await
     // Count the occurrences of each string
-    jsonData.forEach((string) => {
+    JSON.parse(data).forEach((string) => {
         if (stringCounts[string]) {
             stringCounts[string]++;
         } else {
@@ -29,14 +23,14 @@ const processSacNFTdata = async (file) => {
     const sortedStringCounts = Object.entries(stringCounts).sort((a, b) => b[1] - a[1]);
 
     // Create the output data string
-    const outputData = "String,Count\n" + sortedStringCounts.map(([string, count]) => `${string},${count}`).join('\n') + '\n';
+    const outputData = "addr,amount\n" + sortedStringCounts.map(([string, count]) => `${string},${count}`).join('\n') + '\n';
 
     // Write the result to a new CSV file
-    fs.writeFile(SAC_OUTPUT_CSV, outputData, 'utf8', (err) => {
+    fs.writeFile(SAC_ENCODED_FILE, outputData, 'utf8', (err) => {
         if (err) {
             console.error(err);
         } else {
-            console.log(`Output written to:  ${SAC_OUTPUT_CSV}`);
+            console.log(`Output written to:  ${SAC_ENCODED_FILE}`);
         }
     });
 };
@@ -49,7 +43,7 @@ const encodeAddrs = async (inputFile, outputFile) => {
     inputStream
         .pipe(csv({ mapHeaders: ({ header }) => header.trim() }))
         .on('data', (row) => {
-            const addr = row.Addr;
+            const addr = row.addr;
             const encodedAddr = Buffer.from(addr).toString('base64');
             outputStream.write(`${encodedAddr},${row.Amount},${row.Points},${row.Coins}\n`);
         })

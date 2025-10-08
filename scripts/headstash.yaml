@@ -1,0 +1,273 @@
+projects:
+  - name: buddah-bears
+    csv: ../headstash/communities/buddah-bears/buddah-bears.csv
+    chain_type: cosmos
+    category: headstash
+    allocation_percentage: 0.015
+    tpp: 1762.237762
+    points:
+      threePointsUpTo:
+        value: 0.01
+        holders: 25
+      twoPointsUpTo:
+        value: 0.07
+        holders: 147
+      onePointUpTo:
+        value: 1
+        holders: 2281
+      totalHolders: 2453
+  - name: cannabuddies
+    csv: ../headstash/communities/cannabuddies/cannabuddies.csv
+    chain_type: cosmos
+    category: headstash
+    allocation_percentage: 0.00125
+    tpp: 1595.744681
+    points:
+      threePointsUpTo:
+        value: 0.03
+        holders: 8
+      twoPointsUpTo:
+        value: 0.31
+        holders: 66
+      onePointUpTo:
+        value: 1
+        holders: 164
+      totalHolders: 238
+  - name: carta-beta-gang
+    csv: ../headstash/communities/carta-beta-gang/carta-beta-gang.csv
+    chain_type: cosmos
+    category: headstash
+    allocation_percentage: 0.0006
+    tpp: 1431.818182 // 0.06% 
+    points:
+      threePointsUpTo:
+        value: 0.01
+        holders: 2
+      twoPointsUpTo:
+        value: 0.11
+        holders: 16
+      onePointUpTo:
+        value: 1
+        holders: 139
+      totalHolders: 157
+  - name: chronic-token
+    csv: ../headstash/communities/chronic-token/chronic-token.csv
+    chain_type: cosmos
+    category: headstash
+    allocation_percentage: 0.02
+    tpp: 4615.384615
+    points:
+      threePointsUpTo:
+        value: 0.01
+        holders: 13
+      twoPointsUpTo:
+        value: 0.15
+        holders: 176
+      onePointUpTo:
+        value: 1
+        holders: 1066
+      totalHolders: 1255
+  - name: crypto-canna-club
+    csv: ../headstash/communities/crypto-canna-club/crypto-canna-club.csv
+    chain_type: cosmos
+    category: headstash
+    allocation_percentage: 0.03
+    tpp: 2080.924855
+    points:
+      threePointsUpTo:
+        value: 0.02
+        holders: 89
+      twoPointsUpTo:
+        value: 0.16
+        holders: 616
+      onePointUpTo:
+        value: 1
+        holders: 3700
+      totalHolders: 4405
+  - name: cryptowizards
+    csv: ../headstash/communities/cryptowizards/cryptowizards.csv
+    chain_type: cosmos
+    category: headstash
+    allocation_percentage: 0.0002
+    tpp: 1150.684932 
+    points:
+      threePointsUpTo:
+        value: 0.03
+        holders: 2
+      twoPointsUpTo:
+        value: 0.16
+        holders: 7
+      onePointUpTo:
+        value: 1
+        holders: 46
+      totalHolders: 55
+  - name: galacktic-gang
+    csv: ../headstash/communities/galacktic-gang/galacktic-gang.csv
+    chain_type: cosmos
+    category: headstash
+    allocation_percentage: 0.015
+    tpp: 1688.102894
+    points:
+      threePointsUpTo:
+        value: 0.02
+        holders: 52
+      twoPointsUpTo:
+        value: 0.19
+        holders: 436
+      onePointUpTo:
+        value: 1
+        holders: 2080
+      totalHolders: 2568
+  - name: heady-pipe-society
+    csv: ../headstash/communities/heady-pipe-society/heady-pipe-society.csv
+    chain_type: cosmos
+    category: headstash
+    allocation_percentage: 0.0025
+    tpp: 1852.941176
+    points:
+      threePointsUpTo:
+        value: 0.08
+        holders: 2
+      twoPointsUpTo:
+        value: 0.43
+        holders: 8
+      onePointUpTo:
+        value: 1
+        holders: 13
+      totalHolders: 23
+  - name: hippie-life-krew
+    csv: ../headstash/communities/hippie-life-krew/hippie-life-krew.csv
+    chain_type: cosmos
+    category: headstash
+    allocation_percentage: 0.0025
+    tpp: 2147.239264
+    points:
+      threePointsUpTo:
+        value: 0.09
+        holders: 31
+      twoPointsUpTo:
+        value: 0.29
+        holders: 69
+      onePointUpTo:
+        value: 1
+        holders: 242
+      totalHolders: 342
+  - name: monster-buds
+    csv: ../headstash/communities/monster-buds/monster-buds.csv
+    chain_type: cosmos
+    category: headstash
+    allocation_percentage: 0.015
+    tpp: 1861.152142
+    points:
+      threePointsUpTo:
+        value: 0.06
+        holders: 204
+      twoPointsUpTo:
+        value: 0.2
+        holders: 474
+      onePointUpTo:
+        value: 1
+        holders: 2707
+      totalHolders: 3385
+  - name: rebud
+    csv: ../headstash/communities/rebud/rebud.csv
+    chain_type: cosmos
+    category: headstash
+    allocation_percentage: 0.0034999999999999996
+    tpp: 1861.152142
+    points:
+      threePointsUpTo:
+        value: 0.12
+        holders: 71
+      twoPointsUpTo:
+        value: 0.32
+        holders: 117
+      onePointUpTo:
+        value: 1
+        holders: 397
+      totalHolders: 585
+  - name: secret-sesh
+    csv: ../headstash/communities/secret-sesh/secret-sesh.csv
+    chain_type: cosmos
+    category: headstash
+    allocation_percentage: 0.0025
+    tpp: 1992.409867
+    points:
+      threePointsUpTo:
+        value: 0.05
+        holders: 27
+      twoPointsUpTo:
+        value: 0.48
+        holders: 226
+      onePointUpTo:
+        value: 1
+        holders: 274
+      totalHolders: 527
+  - name: shurlok
+    csv: ../headstash/communities/shurlok/shurlok.csv
+    chain_type: cosmos
+    category: headstash
+    allocation_percentage: 0.00025
+    tpp: 1660.079051
+    points:
+      threePointsUpTo:
+        value: 0.03
+        holders: 1
+      twoPointsUpTo:
+        value: 0.3
+        holders: 9
+      onePointUpTo:
+        value: 1
+        holders: 23
+      totalHolders: 33
+  - name: special-k
+    csv: ../headstash/communities/special-k/special-k.csv
+    chain_type: cosmos
+    category: headstash
+    allocation_percentage: 0.0002
+    tpp: 1423.728814
+    points:
+      threePointsUpTo:
+        value: 0.02
+        holders: 1
+      twoPointsUpTo:
+        value: 0.23
+        holders: 10
+      onePointUpTo:
+        value: 1
+        holders: 35
+      totalHolders: 46
+  - name: stoned-ape-club
+    csv: ../headstash/communities/stoned-ape-club/stoned-ape-club.csv
+    chain_type: cosmos
+    category: headstash
+    allocation_percentage: 0.0125
+    tpp: 1577.524038
+    points:
+      threePointsUpTo:
+        value: 0.06
+        holders: 124
+      twoPointsUpTo:
+        value: 0.32
+        holders: 535
+      onePointUpTo:
+        value: 1
+        holders: 1400
+      totalHolders: 2059
+  - name: wake-and-bake
+    csv: ../headstash/communities/wake-and-bake/wake-and-bake.csv
+    chain_type: cosmos
+    category: headstash
+    allocation_percentage: 0.001
+    tpp: 1660.079051
+    points:
+      threePointsUpTo:
+        value: 0.21
+        holders: 33
+      twoPointsUpTo:
+        value: 0.42
+        holders: 32
+      onePointUpTo:
+        value: 1
+        holders: 89
+      totalHolders: 154

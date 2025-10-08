@@ -35,7 +35,7 @@ Will take the snapshot distributions `gaia.csv` & `bcna_delegators.csv`, which w
 
 **This is our basis for determining what is an accurate distribution.**
 
-A `points_distribution.csv` file will be generated during this function, which displays the points allocated for each projects percentile range. Also, a `total-points.csv` file is generated that gives us a count of the total points, tokens per point based on desired % of supply, and the total amount of tokens actually to be distributed.
+A `points-distribution.csv` file will be generated during this function, which displays the points allocated for each projects percentile range. Also, a `total-points.csv` file is generated that gives us a count of the total points, tokens per point based on desired % of supply, and the total amount of tokens actually to be distributed.
 
 #### Interchain Supporter Multiplier
 

@@ -1,5 +1,14 @@
 import fs from 'fs';
 import csv from 'csv-parser';
+import { parse, stringify } from 'yaml'
+
+// Read Yaml file, parses into JSON object
+const readYamlFile = async (filename) => {
+    // Read existing YAML file
+    const fileContent = fs.readFileSync(filename, 'utf8');
+    return parse(fileContent);
+};
+
 
 // Read JSON files
 const readJsonFile = async (filename) => {
@@ -14,7 +23,7 @@ const readJsonFile = async (filename) => {
     });
 };
 
-// Function to read a CSV file
+// Read CSV file
 function readCsvFile(filePath) {
     return new Promise((resolve, reject) => {
         const csvData = [];
@@ -26,6 +35,5 @@ function readCsvFile(filePath) {
             .on('error', (error) => { reject(error) });
     });
 }
-
-export { readCsvFile, readJsonFile }
+export { readCsvFile, readJsonFile, readYamlFile }
 

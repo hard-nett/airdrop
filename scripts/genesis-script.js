@@ -5,35 +5,16 @@
 import fs from 'fs';
 import csv from 'csv-parser';
 import { bech32 } from 'bech32'
-import { readCsvFile } from './utils.js';
+import { readCsvFile, readYamlFile } from './utils.js';
 
-import { GAIA_DELEGATORS, BCNA_DELEGATORS, GENESIS_DISTRIBUTION_FILE, INACTIVE_ACCOUNT_FILE, ACTIVE_ACCOUNTS_FILE, PATCHED_DISTRIBUTION_FILE, GAIA_PERC_SUPPLY, TOTAL_SUPPLY, BCNA_PERC_SUPPLY, TOTAL_POINTS_FILE, POINTS_SUMMARY_FILE } from './constants.js';
+import { GAIA_DELEGATORS, BCNA_DELEGATORS, GENESIS_YAML_FILE, GENESIS_DISTRIBUTION_FILE, INACTIVE_ACCOUNT_FILE, ACTIVE_ACCOUNTS_FILE, PATCHED_DISTRIBUTION_FILE, GAIA_PERC_SUPPLY, TOTAL_SUPPLY, BCNA_PERC_SUPPLY, TOTAL_POINTS_FILE, POINTS_SUMMARY_FILE } from './constants.js';
 
-// Point system based on balance percentiles for Gaia and BCNA
-const atomPoints = [
-    { points: 1, min: 1, max: 56290873.26, tpp: 119.131693 }, // 1st - 74th percentile
-    { points: 2, min: 56290873.26, max: 581059663.70, tpp: 119.131693 }, // 75th - 95th percentile
-    { points: 3, min: 581059663.70, max: 11695142809644.00, tpp: 119.131693 } // 96th - 100th percentile
-];
-
-const bcnaPoints = [
-    { points: 3, min: 0, max: 56104789.25, tpp: 5790.90909 }, // 0th - 25th percentile
-    { points: 6, min: 56104789.25, max: 3835224107.75, tpp: 5790.90909 }, // 26th - 75th percentile
-    { points: 9, min: 3835224107.75, max: 32910049646754.00, tpp: 5790.90909 } // 76th - 100th percentile
-];
-
-export const mergedPoints = [
-    { points: 4, bcna: 3, atom: 1, tpp: 1477.51019575 },
-    { points: 5, bcna: 3, atom: 2, tpp: 1205.8344952 },
-    { points: 6, bcna: 3, atom: 3, tpp: 1024.7173615 },
-    { points: 7, bcna: 6, atom: 1, tpp: 1671.564267 },
-    { points: 8, bcna: 6, atom: 2, tpp: 1477.510195 },
-    { points: 9, bcna: 6, atom: 3, tpp: 1326.579251 },
-    { points: 10, bcna: 9, atom: 1, tpp: 1749.185896 },
-    { points: 11, bcna: 9, atom: 2, tpp: 1600.999150 },
-    { points: 12, bcna: 9, atom: 3, tpp: 1477.510195 },
-]
-
+function createDistribution(ranges) {
+    return ranges.reduce((acc, range) => {
+        acc[range.points] = 0;
+        return acc;
+    }, {});
+}
 
 
 function getPoints(balance, pointsList) {
@@ -77,16 +58,38 @@ function countAddresses(balances, distribution, exclude = {}) {
     return count;
 }
 
+function findBlend(blends, ...projectNames) {
+    const blendObj = blends?.find(b =>
+        Array.isArray(b.blend?.projects) &&
+        projectNames.every(p => b.blend.projects.includes(p)) &&
+        b.blend.projects.length === projectNames.length // exact match (optional)
+    );
+    return blendObj?.blend || null;
+}
 
 // Aggregate and process CSV files
 async function processGenesisDistribution() {
+    let data = await readYamlFile(GENESIS_YAML_FILE)
+    // get atomPoints
+    // Assuming `data` is the parsed YAML object
+    const gaiaProject = data.projects.find(p => p.name === 'gaia');
+    const bcnaProject = data.projects.find(p => p.name === 'bcna');
+
+    if (!gaiaProject) throw new Error('gaia project not found in config');
+    if (!bcnaProject) throw new Error('bcna project not found in config');
+
+    const gaiaPoints = gaiaProject.points_ranges;
+    const bcnaPoints = bcnaProject.points_ranges;
+    const mergedPoints = findBlend(data.project_blends, 'gaia', 'bcna');
+
+
     let gaiaData = await readCsvFile(GAIA_DELEGATORS);
     let bcnaData = await readCsvFile(BCNA_DELEGATORS);
 
     let result = [];
 
     // Step 1: Calculate Gaia & BCNA based on balances
-    let gaiaBalances = processBalanceData(gaiaData, atomPoints);
+    let gaiaBalances = processBalanceData(gaiaData, gaiaPoints);
     let bcnaBalances = processBalanceData(bcnaData, bcnaPoints);
 
 
@@ -97,9 +100,9 @@ async function processGenesisDistribution() {
     let totalBcnaAddrs = 0;
 
     // objects to count # of addr in each point range
-    let gaiaPointsDistribution = { 1: 0, 2: 0, 3: 0 };
-    let bcnaPointsDistribution = { 3: 0, 6: 0, 9: 0 };
-    let mergedPointsDistribution = { 4: 0, 5: 0, 6: 0, 7: 0, 8: 0, 9: 0, 10: 0, 11: 0, 12: 0 };
+    const gaiaPointsDistribution = createDistribution(gaiaPoints);
+    const bcnaPointsDistribution = createDistribution(bcnaPoints);
+    const mergedPointsDistribution = createDistribution(mergedPoints);
 
     // Count standalone Gaia and BCNA addresses (non-overlapping)
     totalGaiaAddrs = countAddresses(gaiaBalances, gaiaPointsDistribution, bcnaBalances);
@@ -129,7 +132,7 @@ async function processGenesisDistribution() {
                 }
             }
 
-            let gaiaPointValue = atomPoints.find(ap => ap.points === gaiaBalance.points);
+            let gaiaPointValue = gaiaPoints.find(ap => ap.points === gaiaBalance.points);
             let gaiaTokens = gaiaPointValue ? gaiaBalance.points * gaiaPointValue.tpp : 0;
 
             let bcnaPointValue = bcnaPoints.find(bp => bp.points === bcnaBalance.points);
@@ -153,7 +156,7 @@ async function processGenesisDistribution() {
         } else {
             // Add to result
             // For non-merged addresses
-            let pointValue = atomPoints.find(ap => ap.points === gaiaBalance.points);
+            let pointValue = gaiaPoints.find(ap => ap.points === gaiaBalance.points);
             let tokens = pointValue ? gaiaBalance.points * pointValue.tpp : 0;
 
             result.push({
