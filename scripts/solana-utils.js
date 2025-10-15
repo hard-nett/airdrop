@@ -33,6 +33,8 @@ const processSacNFTdata = async (file) => {
             console.log(`Output written to:  ${SAC_ENCODED_FILE}`);
         }
     });
+    // base64-encodes solana addresses in format that will be used to verify offline signature
+
 };
 
 // base64 encode solana addresses

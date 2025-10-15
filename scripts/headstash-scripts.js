@@ -4,6 +4,7 @@
 // 3. if solana wallet, base64 encode wallet address 
 import fs from 'fs';
 import path from 'path'
+import { applyNormalizationToAllProjects } from './calculations.js';
 import { readCsvFile, readYamlFile } from './utils.js';
 import { HEADSTASH_YAML, HEADSTASH_FINAL_TALLY } from './constants.js'
 
@@ -14,13 +15,20 @@ import { HEADSTASH_YAML, HEADSTASH_FINAL_TALLY } from './constants.js'
 // step 4: if address is not eth address, we need to base64 encode the address (as it is a solana public address)
 // step 5: create new 1 new csv with final tally 
 
-function determinePointDistribution(pointsConfig, percentile) {
-    // percentile is a decimal: 0.0 to 1.0
-    if (percentile <= pointsConfig.threePointsUpTo.value) {
+function determinePointDistribution(pointsConfig, walletAmount) {
+    // Ensure walletAmount is a number
+    const amount = parseFloat(walletAmount) || 0;
+
+    // Get cutoffs (these are actual token balances)
+    const threeCut = parseFloat(pointsConfig.threePointsUpTo.cutoffAmount) || 0;
+    const twoCut = parseFloat(pointsConfig.twoPointsUpTo.cutoffAmount) || 0;
+
+    // Compare balance directly
+    if (amount >= threeCut) {
         return 3;
-    } else if (percentile <= pointsConfig.twoPointsUpTo.value) {
+    } else if (amount >= twoCut) {
         return 2;
-    } else if (percentile <= pointsConfig.onePointUpTo.value) {
+    } else if (amount > 0) {
         return 1;
     }
     return 0;
@@ -44,30 +52,27 @@ async function processHeadstashDistributions(yamlFile) {
     const data = await readYamlFile(yamlFile);
     // create percentile ranges
     // await fairPercentileRanges(data);
+    // await applyNormalizationToAllProjects();
 
-    for (let distribution of data.projects) {
+    for (let project of data.projects) {
         try {
             // Read the CSV file for the current community
-            const csvData = await readCsvFile(distribution.csv);
-
+            const csvData = await readCsvFile(project.csv);
+            console.log(`Processing CSV for: ${project.name}`)
             // Process the CSV data
             csvData.forEach((row) => {
                 // Get the address and amount from the current row
                 let address = row.addr;
-                console.log(row.amount)
                 let amount = parseInt(row.amount);
-                console.log(`amount ${amount}`, amount)
-                // Determine the point distribution for the current row
-                let points = determinePointDistribution(distribution.points, amount);
-                console.log(`points ${points}`, points)
-                // Calculate the token allocation for the current row
-                let tokens = points * distribution.tpp;
-                console.log(`tokens ${tokens}`, tokens)
-                // Check if the address is an Ethereum address or a Solana public address
+                let points = determinePointDistribution(project.points, amount);
+                let tokens = points * project.tpp;
                 if (!isEthereumAddress(address)) {
                     address = encodeSolanaAddress(address);
                 }
-
+                console.log(`addr ${address}`)
+                console.log(`amount ${amount}`, amount)
+                console.log(`points ${points}`, points)
+                console.log(`tokens ${tokens}`, tokens)
                 // Add the tokens to the final tally
                 if (address in finalTally) {
                     finalTally[address] += tokens;
@@ -79,24 +84,24 @@ async function processHeadstashDistributions(yamlFile) {
                 if (!addressCommunities[address]) {
                     addressCommunities[address] = {};
                 }
-                if (!addressCommunities[address][distribution.csv]) {
-                    addressCommunities[address][distribution.csv] = 0;
+                if (!addressCommunities[address][project.csv]) {
+                    addressCommunities[address][project.csv] = 0;
                 }
-                addressCommunities[address][distribution.csv] += points;
+                addressCommunities[address][project.csv] += points;
 
                 // Add the community to the list of communities
-                if (!communities.includes(distribution.csv)) {
-                    communities.push(distribution.csv);
+                if (!communities.includes(project.csv)) {
+                    communities.push(project.csv);
                 }
             });
         } catch (error) {
-            console.error(`Error processing distribution: ${error}`);
+            console.error(`Error processing project: ${error}`);
         }
     }
 
     // Create a new CSV file with the final tally
     try {
-
+        console.log('Creating Final tally CSV...');
         await createFinalTallyCsv(finalTally, addressCommunities, communities);
         console.log('Final tally CSV file created successfully!');
     } catch (error) {
@@ -136,6 +141,7 @@ function createFinalTallyCsv(finalTally, addressCommunities, communities) {
         });
 
         try {
+            console.log('Creating Community points summary CSV...');
             await createCommunityPointsSummaryCsv(addressCommunities, communities);
             console.log('Community points summary CSV file created successfully!');
         } catch (error) {

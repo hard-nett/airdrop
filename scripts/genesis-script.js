@@ -267,7 +267,7 @@ function checkAddresses() {
                     const expectedAllocation = gaiaAllocation + bcnaAllocation;
                     const originalAllocation = parseFloat(account.original_vesting_amount);
                     if (isNaN(originalAllocation)) {
-                        console.error(`Failed to parse original_vesting_amount for address: ${address}, value:`, account.original_vesting_amount);
+                        console.error(`Failed to parse original_vesting_amount for address: ${address}, percentile:`, account.original_vesting_amount);
                         process.exit(1); // Exit with error
                     }
                     const scaledOriginal = originalAllocation / 1_000_000;

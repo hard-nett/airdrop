@@ -35,5 +35,37 @@ function readCsvFile(filePath) {
             .on('error', (error) => { reject(error) });
     });
 }
-export { readCsvFile, readJsonFile, readYamlFile }
+
+
+// Convert percentileValues to Markdown table
+function toMarkdownTable(data) {
+    if (!data || Object.keys(data).length === 0) return 'No data';
+
+    let rows;
+
+    if (Array.isArray(data)) {
+        rows = data;
+    } else {
+        // Convert { "1%": { ... } } → [ { percentile: "1%", ... } ]
+        rows = Object.entries(data).map(([key, value]) => ({
+            percentile: key,
+            ...value
+        }));
+    }
+
+    const headers = Object.keys(rows[0]);
+    const separator = headers.map(() => '---');
+
+    return [
+        '| ' + headers.join(' | ') + ' |',
+        '| ' + separator.join(' | ') + ' |',
+        ...rows.map(row => '| ' + headers.map(h => String(row[h] ?? '')).join(' | ') + ' |')
+    ].join('\n');
+}
+
+function escapeRegExp(string) {
+    return string.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); // Escape special regex chars
+}
+
+export { readCsvFile, readJsonFile, readYamlFile, toMarkdownTable, escapeRegExp }
 

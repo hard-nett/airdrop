@@ -6,6 +6,7 @@ import { processHeadstashDistributions } from './headstash-scripts.js';
 import { processGenesisDistribution, checkAddresses } from './genesis-script.js';
 import { fairPercentileRanges, applyNormalizationToAllProjects } from './calculations.js'
 import { SAC_ENCODED_FILE, SAC_JSON_PATH, HEADSTASH_YAML } from './constants.js';
+import { readYamlFile } from './utils.js'
 // import { generateYamlConfig } from './headstash-scripts.js'
 
 // Process command line arguments
@@ -30,15 +31,20 @@ if (args.length < 1) {
     summarizeAllResults();
     summarizeScavengerHunt();
 } else if (args[0] === '-hs') {
-    fairPercentileRanges(HEADSTASH_YAML)
+    const data = await readYamlFile(HEADSTASH_YAML);
+    await fairPercentileRanges(data);
+    await applyNormalizationToAllProjects();
+    await processSacNFTdata(SAC_JSON_PATH);
+    await encodeAddrs(SAC_ENCODED_FILE, SAC_ENCODED_FILE);
+    await processHeadstashDistributions(HEADSTASH_YAML).catch(console.error);
 } else if (args[0] === '-7') {
-    // reads json of solana NFT holder snapshot, creates csv with # of tokens unique addrs hold
-    processSacNFTdata(SAC_JSON_PATH);
-    // base64-encodes solana addresses in format that will be used to verify offline signature
-    encodeAddrs(SAC_ENCODED_FILE, SAC_ENCODED_FILE);
-    processHeadstashDistributions(HEADSTASH_YAML).catch(console.error);
+    await processHeadstashDistributions(HEADSTASH_YAML).catch(console.error);
 } else if (args[0] === '-8') {
     applyNormalizationToAllProjects();
+} else if (args[0] === '-9') {
+    // reads json of solana NFT holder snapshot, creates csv with # of tokens unique addrs hold
+    await processSacNFTdata(SAC_JSON_PATH);
+    await encodeAddrs(SAC_ENCODED_FILE, SAC_ENCODED_FILE);
 } else {
     console.error('Invalid option.');
 }

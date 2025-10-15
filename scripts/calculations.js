@@ -1,10 +1,16 @@
 
-import { readCsvFile, readYamlFile } from "./utils.js";
+import { readCsvFile, readYamlFile, toMarkdownTable, escapeRegExp } from "./utils.js";
 import readline from 'readline';
 import { HEADSTASH_YAML, BASE_ALLOCATION } from './constants.js'
 import fs from 'fs';
-import path from 'path'
+import path, { dirname } from 'path'
 import { parse, stringify } from 'yaml'
+import { fileURLToPath } from 'url';
+
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
+
 
 // Helper to prompt input
 const ask = (query) => {
@@ -80,9 +86,32 @@ export const fairPercentileRanges = async (distributionData) => {
             };
         }
 
-        // ✅ Print the nice table you liked
-        console.log(`\n📊 ${name} - 3% percentile ranges:`);
+        // print percentile range md table to readme of project folder 
+        // ✅ Print the nice table you liked. will be in same folder as csv file
+        console.log(`\n📊 ${name} - percentile ranges:`);
         console.table(percentileValues);
+
+        const readmePath = path.join(__dirname, '..', 'headstash', 'communities', name, 'README.md');
+        const newTable = toMarkdownTable(percentileValues);
+        const header = `## ${name} - Percentile Ranges`;
+        // Read and update README.md
+        let readmeContent = '';
+        if (fs.existsSync(readmePath)) {
+            readmeContent = fs.readFileSync(readmePath, 'utf8');
+        }
+
+        // Regex to match from `## ...` to the next heading (or end of file)
+        const regex = new RegExp(`(^|\\n)${escapeRegExp(header)}\\s*\\n[^\\n]*(.*?)(?=\\n## |\\n\\s*\\n|$)`, 's');
+        const replacement = `\n${header}\n\n${newTable}`;
+        const updatedContent = readmeContent.match(regex)
+            ? readmeContent.replace(regex, replacement)
+            : readmeContent + `\n${header}\n\n${newTable}\n`;
+
+        // Ensure directory exists
+        fs.mkdirSync(path.dirname(readmePath), { recursive: true });
+        fs.writeFileSync(readmePath, updatedContent, 'utf8');
+
+
 
         // Interactive cutoff configuration
         console.log(`\n🎯 Now setting point tiers for ${name}...`);
@@ -130,13 +159,28 @@ export const fairPercentileRanges = async (distributionData) => {
         const numThreePointHolders = threePointCutoffIdx + 1; // +1 because 0-indexed
         const numTwoPointHolders = twoPointCutoffIdx - threePointCutoffIdx;
         const numOnePointHolders = total - twoPointCutoffIdx - 1;
+        // Inside fairPercentileRanges(), after:
+
+        // Save the actual token amount thresholds
+        const threePointCutoffAmount = holders[threePointCutoffIdx]?.amount;
+        const twoPointCutoffAmount = holders[twoPointCutoffIdx]?.amount;
+
 
         // Save configuration
         configResults[name] = {
-            threePointsUpTo: { value: threePerc, holders: numThreePointHolders },
-            twoPointsUpTo: { value: twoPerc, holders: numTwoPointHolders },
+            threePointsUpTo: {
+                percentile: threePerc,
+                cutoffAmount: threePointCutoffAmount,
+                holders: numThreePointHolders
+            },
+            twoPointsUpTo: {
+                percentile: twoPerc,
+                cutoffAmount: twoPointCutoffAmount,
+                holders: numTwoPointHolders
+            },
             onePointUpTo: {
-                value: 1.0,
+                percentile: 1.0,
+                cutoffAmount: 0,
                 holders: numOnePointHolders
             },
             totalHolders: total,
@@ -148,6 +192,7 @@ export const fairPercentileRanges = async (distributionData) => {
 
     // Final result
     console.log("📋 Full configuration results:");
+
     console.log(configResults);
     return;
 };
@@ -162,7 +207,22 @@ export const updateHeadstashYaml = async (configResults, name) => {
         console.warn(` ⚠️ Project "${name}" not found in config results`);
         return;
     }
-    internalWriteHeadstashYaml(doc,config)
+
+    // Find project by name in the YAML under `projects`
+    const project = doc.projects?.find(p => p.name === name);
+    if (project) {
+        project.points = {
+            threePointsUpTo: config.threePointsUpTo,
+            twoPointsUpTo: config.twoPointsUpTo,
+            onePointUpTo: config.onePointUpTo,
+            totalHolders: config.totalHolders
+        };
+        console.log(` 📥 Updated ${name} points distribution in headstash.yaml`);
+    } else {
+        console.warn(` ⚠️ Project "${name}" not found in headstash.yaml`);
+    }
+    fs.writeFileSync(HEADSTASH_YAML, stringify(doc), 'utf8');
+    console.log(`✅ headstash.yaml updated with new points distribution for "${name}"`);
 };
 
 /**

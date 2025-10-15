@@ -137,17 +137,17 @@ const summarizeAllResults = async () => {
         // allocation_delta: {
         //     description: 'Difference between intended and actual airdrop distribution',
         //     additional_required: {
-        //         value: totalAdditional,
+        //         percentile: totalAdditional,
         //         display: `${totalAdditional.toFixed(6)} TERP`,
         //         note: 'TERP that should have been distributed but was not'
         //     },
         //     excess_overdistributed: {
-        //         value: totalExcess,
+        //         percentile: totalExcess,
         //         display: `${totalExcess.toFixed(6)} TERP`,
         //         note: 'Over-allocated TERP not clawed back'
         //     },
         //     net_impact: {
-        //         value: totalAdditional - totalExcess,
+        //         percentile: totalAdditional - totalExcess,
         //         display: `${(totalAdditional - totalExcess).toFixed(6)} TERP`,
         //         note: 'Net shortfall (+) or surplus (-)'
         //     }
