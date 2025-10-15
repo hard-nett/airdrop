@@ -7,22 +7,6 @@ import path from 'path'
 import { readCsvFile, readYamlFile } from './utils.js';
 import { HEADSTASH_YAML, HEADSTASH_FINAL_TALLY } from './constants.js'
 
-// generate headstash yaml
-// export function generateYamlConfig() {
-//     const config = {
-//         projects: HEADSTASH_DISTRIBUTION_DATA.map(project => ({
-//             name: project.name,
-//             csv: project.csv,
-//             chain_type: "cosmos",
-//             category: "headstash",
-//             allocation_percentage: project.percTotalSupply / 100,
-//             points: []
-//         }))
-//     };
-//     fs.writeFileSync(HEADSTASH_YAML, stringify(config), 'utf8');
-//     console.log(`YAML config written to ${HEADSTASH_YAML}`);
-// }
-
 
 // step 1: determine point distribution for each communinty
 // step 2: determine tokens to allocate for address based on tpp  
@@ -58,6 +42,8 @@ async function processHeadstashDistributions(yamlFile) {
     let communities = [];
 
     const data = await readYamlFile(yamlFile);
+    // create percentile ranges
+    // await fairPercentileRanges(data);
 
     for (let distribution of data.projects) {
         try {

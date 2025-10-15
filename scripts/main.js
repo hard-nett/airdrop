@@ -4,7 +4,7 @@ import { processSacNFTdata, encodeAddrs } from "./solana-utils.js";
 import { processGenesisState, calculateTokenDifference, summarizeAllResults, summarizeScavengerHunt } from './exported-state.js';
 import { processHeadstashDistributions } from './headstash-scripts.js';
 import { processGenesisDistribution, checkAddresses } from './genesis-script.js';
-import { fairPercentileRanges } from './calculations.js'
+import { fairPercentileRanges, applyNormalizationToAllProjects } from './calculations.js'
 import { SAC_ENCODED_FILE, SAC_JSON_PATH, HEADSTASH_YAML } from './constants.js';
 // import { generateYamlConfig } from './headstash-scripts.js'
 
@@ -37,6 +37,8 @@ if (args.length < 1) {
     // base64-encodes solana addresses in format that will be used to verify offline signature
     encodeAddrs(SAC_ENCODED_FILE, SAC_ENCODED_FILE);
     processHeadstashDistributions(HEADSTASH_YAML).catch(console.error);
-} else if (args[0] === '-8') { } else {
+} else if (args[0] === '-8') {
+    applyNormalizationToAllProjects();
+} else {
     console.error('Invalid option.');
 }

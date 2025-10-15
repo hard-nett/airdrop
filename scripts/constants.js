@@ -3,6 +3,7 @@
 const TOTAL_SUPPLY = 420000000;
 const GAIA_PERC_SUPPLY = 0.061152;
 const BCNA_PERC_SUPPLY = 0.01911;
+const BASE_ALLOCATION = 67000000;
 
 // YAML files
 const HEADSTASH_YAML = "./headstash.yaml";
@@ -53,4 +54,5 @@ export {
     BCNA_PERC_SUPPLY,
     GAIA_PERC_SUPPLY,
     TOTAL_POINTS_FILE,
+    BASE_ALLOCATION,
 };
