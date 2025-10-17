@@ -1,7 +1,8 @@
 projects:
   - name: buddah-bears
     csv: ../headstash/communities/buddah-bears/buddah-bears.csv
-    chain_type: cosmos
+    snapshot_date: 22-10-11
+    chain_type: evm
     category: headstash
     allocation_percentage: 0.11351805970149254
     tpp: 3664.20563303
@@ -24,7 +25,8 @@ projects:
         logScaling: 5471305
   - name: cannabuddies
     csv: ../headstash/communities/cannabuddies/cannabuddies.csv
-    chain_type: cosmos
+    snapshot_date: 24-11-18
+    chain_type: evm
     category: headstash
     allocation_percentage: 0.03535937313432836
     tpp: 3664.20563303
@@ -47,7 +49,8 @@ projects:
         logScaling: 3838767
   - name: carta-beta-gang
     csv: ../headstash/communities/carta-beta-gang/carta-beta-gang.csv
-    chain_type: cosmos
+    snapshot_date: 24-11-19
+    chain_type: evm
     category: headstash
     allocation_percentage: 0.028718776119402985
     tpp: 3664.20563303
@@ -70,7 +73,8 @@ projects:
         logScaling: 3548663
   - name: chronic-token
     csv: ../headstash/communities/chronic-token/chronic-token.csv
-    chain_type: cosmos
+    snapshot_date: 22-10-11
+    chain_type: evm
     category: headstash
     allocation_percentage: 0.08119662686567164
     tpp: 3664.20563303
@@ -93,7 +97,8 @@ projects:
         logScaling: 5001812
   - name: crypto-canna-club
     csv: ../headstash/communities/crypto-canna-club/crypto-canna-club.csv
-    chain_type: cosmos
+    snapshot_date: 22-10-11
+    chain_type: evm
     category: headstash
     allocation_percentage: 0.15212098507462687
     tpp: 3664.20563303
@@ -116,7 +121,8 @@ projects:
         logScaling: 5881538
   - name: cryptowizards
     csv: ../headstash/communities/cryptowizards/cryptowizards.csv
-    chain_type: cosmos
+    snapshot_date: 24-11-18
+    chain_type: evm
     category: headstash
     allocation_percentage: 0.016997985074626867
     tpp: 3664.20563303
@@ -139,7 +145,8 @@ projects:
         logScaling: 2821600
   - name: galacktic-gang
     csv: ../headstash/communities/galacktic-gang/galacktic-gang.csv
-    chain_type: cosmos
+    snapshot_date: 22-10-11
+    chain_type: evm
     category: headstash
     allocation_percentage: 0.1161485223880597
     tpp: 3664.20563303
@@ -162,7 +169,8 @@ projects:
         logScaling: 5503407
   - name: heady-pipe-society
     csv: ../headstash/communities/heady-pipe-society/heady-pipe-society.csv
-    chain_type: cosmos
+    snapshot_date: 24-11-18
+    chain_type: evm
     category: headstash
     allocation_percentage: 0.010992089552238807
     tpp: 3664.20563303
@@ -185,7 +193,8 @@ projects:
         logScaling: 2227680
   - name: hippie-life-krew
     csv: ../headstash/communities/hippie-life-krew/hippie-life-krew.csv
-    chain_type: cosmos
+    snapshot_date: 23-06-16
+    chain_type: evm
     category: headstash
     allocation_percentage: 0.04238665671641791
     tpp: 3664.20563303
@@ -208,7 +217,8 @@ projects:
         logScaling: 4092000
   - name: monster-buds
     csv: ../headstash/communities/monster-buds/monster-buds.csv
-    chain_type: cosmos
+    snapshot_date: 22-10-11
+    chain_type: evm
     category: headstash
     allocation_percentage: 0.13335076119402986
     tpp: 3664.20563303
@@ -231,7 +241,8 @@ projects:
         logScaling: 5696964
   - name: rebud
     csv: ../headstash/communities/rebud/rebud.csv
-    chain_type: cosmos
+    snapshot_date: 24-01-23
+    chain_type: evm
     category: headstash
     allocation_percentage: 0.05543628358208955
     tpp: 3664.20563303
@@ -254,7 +265,8 @@ projects:
         logScaling: 4467425
   - name: secret-sesh
     csv: ../headstash/communities/secret-sesh/secret-sesh.csv
-    chain_type: cosmos
+    snapshot_date: 22-10-11
+    chain_type: evm
     category: headstash
     allocation_percentage: 0.05261644776119403
     tpp: 3664.20563303
@@ -277,7 +289,8 @@ projects:
         logScaling: 4394369
   - name: shurlok
     csv: ../headstash/communities/shurlok/shurlok.csv
-    chain_type: cosmos
+    snapshot_date: 24-11-26
+    chain_type: evm
     category: headstash
     allocation_percentage: 0.013166582089552238
     tpp: 3664.20563303
@@ -300,7 +313,8 @@ projects:
         logScaling: 2471828
   - name: special-k
     csv: ../headstash/communities/special-k/special-k.csv
-    chain_type: cosmos
+    snapshot_date: 24-11-18
+    chain_type: evm
     category: headstash
     allocation_percentage: 0.015545149253731343
     tpp: 3664.20563303
@@ -323,7 +337,8 @@ projects:
         logScaling: 2698789
   - name: stoned-ape-club
     csv: ../headstash/communities/stoned-ape-club/stoned-ape-club.csv
-    chain_type: cosmos
+    snapshot_date: 24-10-24
+    chain_type: solana
     category: headstash
     allocation_percentage: 0.10400262686567165
     tpp: 3664.20563303
@@ -343,7 +358,8 @@ projects:
         logScaling: 5348628
   - name: wake-and-bake
     csv: ../headstash/communities/wake-and-bake/wake-and-bake.csv
-    chain_type: cosmos
+    snapshot_date: 24-11-18
+    chain_type: evm
     category: headstash
     allocation_percentage: 0.028443074626865673
     tpp: 3664.20563303

@@ -7,3 +7,6 @@ genesis/scripts-data/*.csv
 genesis/scripts-data/*.json
 headstash/scripts-data/*.csv
 headstash/scripts-data/*.json
+
+target
+zk-crates/submodules/*

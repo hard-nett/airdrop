@@ -2,9 +2,9 @@ import fs from 'fs';
 
 import { processSacNFTdata, encodeAddrs } from "./solana-utils.js";
 import { processGenesisState, calculateTokenDifference, summarizeAllResults, summarizeScavengerHunt } from './exported-state.js';
-import { processHeadstashDistributions } from './headstash-scripts.js';
+import { processHeadstashDistributions, generateMerkleInput } from './headstash-scripts.js';
 import { processGenesisDistribution, checkAddresses } from './genesis-script.js';
-import { fairPercentileRanges, applyNormalizationToAllProjects } from './calculations.js'
+import { fairPercentileRanges, applyNormalizationToAllProjects, generateOverviewReadme } from './calculations.js'
 import { SAC_ENCODED_FILE, SAC_JSON_PATH, HEADSTASH_YAML } from './constants.js';
 import { readYamlFile } from './utils.js'
 // import { generateYamlConfig } from './headstash-scripts.js'
@@ -45,6 +45,11 @@ if (args.length < 1) {
     // reads json of solana NFT holder snapshot, creates csv with # of tokens unique addrs hold
     await processSacNFTdata(SAC_JSON_PATH);
     await encodeAddrs(SAC_ENCODED_FILE, SAC_ENCODED_FILE);
+} else if (args[0] === '-10') {
+    generateMerkleInput()
+} else if (args[0] === '-11') {
+    generateOverviewReadme()
+
 } else {
     console.error('Invalid option.');
 }

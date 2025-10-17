@@ -1,7 +1,7 @@
 
-import { readCsvFile, readYamlFile, toMarkdownTable, escapeRegExp } from "./utils.js";
+import { readCsvFile, readYamlFile, toMarkdownTable, escapeRegExp, toOverviewMarkdownTable } from "./utils.js";
 import readline from 'readline';
-import { HEADSTASH_YAML, BASE_ALLOCATION } from './constants.js'
+import { HEADSTASH_YAML, BASE_ALLOCATION, OVERVIEW_README } from './constants.js'
 import fs from 'fs';
 import path, { dirname } from 'path'
 import { parse, stringify } from 'yaml'
@@ -353,6 +353,38 @@ export const internalWriteHeadstashYaml = async (doc, projectsData) => {
     fs.writeFileSync(HEADSTASH_YAML, stringify(doc), 'utf8');
     console.log('Normalization applied to all projects in headstash.yaml');
 }
+
+
+export async function generateOverviewReadme() {
+    try {
+        const data = await readYamlFile(HEADSTASH_YAML);
+
+        if (!data?.projects?.length) {
+            console.error('❌ No projects found in YAML.');
+            return;
+        }
+
+        const table = toOverviewMarkdownTable(data.projects);
+        const sectionHeader = '## Airdrop Cycle 2: Cannabis Culture Communities';
+
+        let mdContent = '';
+        if (fs.existsSync(OVERVIEW_README)) {
+            mdContent = fs.readFileSync(OVERVIEW_README, 'utf8');
+        }
+
+        // Regex to match from `## Airdrop Cycle 2...` to the next heading of level 2 or higher (`## ` or start of file)
+        const regex = new RegExp(`(^|\\n)(${escapeRegExp(sectionHeader)}\\s*\\n)([^\\n]*(?:\\n(?!## )[^\\n]*)*)(?=\\n## |$)`, 's');
+        const replacement = `\n${sectionHeader}\n\n${table}`;
+        const updatedContent = regex.test(mdContent)
+            ? mdContent.replace(regex, replacement)
+            : mdContent + `\n${sectionHeader}\n\n${table}\n`;
+
+        fs.writeFileSync(OVERVIEW_README, updatedContent, 'utf8');
+        console.log('✅ Markdown table generated and injected into', OVERVIEW_README);
+    } catch (err) {
+        console.error('❌ Error generating overview:', err.message);
+    }
+};
 
 // validate:
 // community points summary reflects what is in headstash.yaml

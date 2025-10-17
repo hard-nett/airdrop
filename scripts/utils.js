@@ -63,9 +63,74 @@ function toMarkdownTable(data) {
     ].join('\n');
 }
 
+function toOverviewMarkdownTable(projects) {
+    const headers = [
+        'Project',
+        '# of Addresses',
+        'Date Of Snapshot',
+        'Est. Total TERP',
+        'Average Token Per Point',
+        '% of headstash allocation'
+    ];
+    const separator = ['---', '---', '---', '---', '---', '---'];
+
+    // Sort projects by name for consistent output
+    projects.sort((a, b) => a.name.localeCompare(b.name));
+
+    const rows = projects.map(p => {
+        const csvPath = p.csv.replace('../', './'); // Normalize path for URL
+        const readmePath = csvPath.replace(/\/[^\/]+\.csv$/, '/README.md'); // Replace csv with README
+        const projectLink = `[${p.name.replace(/-/g, ' ')}](${readmePath})`;
+
+        // Format date: yy-mm-dd → MMM Do, YYYY (with proper ordinal suffixes)
+        const [year, month, day] = p.snapshot_date.split('-');
+        const date = new Date(`20${year}`, month - 1, parseInt(day, 10)); // Ensure day is int
+
+        const formattedDate = isNaN(date.getTime())
+            ? 'N/A'
+            : date.toLocaleDateString('en-US', {
+                year: 'numeric',
+                month: 'short',
+                day: 'numeric'
+            }).replace(/\b(\d+)(?=\b)/, (match) => {
+                const num = parseInt(match, 10);
+                const suffix = ['th', 'st', 'nd', 'rd'][(num % 10) - 1] || 'th';
+                // Handle teens (11th, 12th, 13th) — special case
+                if (num > 10 && num < 20) return num + 'th';
+                return num + suffix;
+            });
+        // Calculate est total TERP = tpp * totalHolders
+        const estTotalTERP = p.tpp && p.points.totalHolders ? (p.tpp * p.points.totalHolders).toFixed(2) : '';
+
+        // Avg Token Per Point = tpp
+        const avgTPP = p.tpp ? p.tpp.toFixed(6) : '';
+
+        // % of total supply
+        const percentSupply = p.allocation_percentage ? `${(p.allocation_percentage * 100).toFixed(2)}%` : '';
+
+        return [
+            projectLink,
+            `\`${p.points.totalHolders || 'N/A'}\``,
+            formattedDate,
+            estTotalTERP ? `\`${estTotalTERP} TERP\`` : '',
+            `\`${avgTPP}\``,
+            percentSupply ? `\`${percentSupply}\`` : ''
+        ].join(' | ');
+    });
+
+    return [
+        '| ' + headers.join(' | ') + ' |',
+        '| ' + separator.join(' | ') + ' |',
+        ...rows.map(row => '| ' + row + ' |'),
+        '| |`' +  projects.reduce((sum, p) => sum + p.points.totalHolders, 0) + '`| | `' + projects.reduce((sum, p) => sum + (p.tpp * p.points.totalHolders || 0), 0).toFixed(6) + ' TERP & THIOL` |||',
+        ''
+    ].join('\n');
+}
+
+
 function escapeRegExp(string) {
     return string.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); // Escape special regex chars
 }
 
-export { readCsvFile, readJsonFile, readYamlFile, toMarkdownTable, escapeRegExp }
+export { readCsvFile, toOverviewMarkdownTable, readJsonFile, readYamlFile, toMarkdownTable, escapeRegExp }
 

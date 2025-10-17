@@ -6,7 +6,7 @@ const BCNA_PERC_SUPPLY = 0.01911;
 const BASE_ALLOCATION = 67000000;
 
 // YAML files
-const HEADSTASH_YAML = "./headstash.yaml";
+const HEADSTASH_YAML = "../headstash.yaml";
 const GENESIS_YAML_FILE = "../headstash/scripts-data/final_tally.csv";
 
 // Exported files
@@ -30,6 +30,8 @@ const TERPOG_FILE = "../genesis/terp_og.csv";
 const BCNA_DELEGATORS = "../genesis/bcna_delegators.csv";
 const GAIA_DELEGATORS = "../genesis/gaia.csv";
 const HEADSTASH_FINAL_TALLY = "../headstash/scripts-data/final_tally.csv";
+const SINSEMILLA_JSON_FILE = "../zk-crates/data/genesis_sinsemilla.json";
+const OVERVIEW_README = "../README.md";
 
 export {
     TOTAL_SUPPLY,
@@ -55,4 +57,6 @@ export {
     GAIA_PERC_SUPPLY,
     TOTAL_POINTS_FILE,
     BASE_ALLOCATION,
+    SINSEMILLA_JSON_FILE,
+    OVERVIEW_README,
 };

@@ -14,7 +14,6 @@
 |90th| 2 | 2 | 6 | 769 |
 |100th| 3 | 7 | 790 | 223 |
 
-
 ## buddah-bears - Percentile Ranges
 
 | percentile | rank | totalHolders | requiredAmount |

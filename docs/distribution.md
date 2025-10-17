@@ -1,18 +1,8 @@
-# Distribution
+# Distribution Overview
 
 ---
 
-## Overview
-
 ## Supply
-
-### TERP
-
-- **Inital Supply:** 420,000,000 TERP
-
-### PERSY
-
-- **Initial Supply:** 710,000,000 PERSY
 
 ## Distribution
 
@@ -20,15 +10,15 @@
 50% - Treasury\
 16% - Foundation
 
-## Minting Schedule
-
 ### TERP
 
-No minting or inflation schedule set
+- **Inital Supply:** 420,000,000 TERP\
+- **Minting Schedule**: No minting or inflation schedule set
 
 ### PERSY
 
-93% first year, 1/3rd less each following year (Model based off of Osmosis Zones Thirdening Schedule)
+- **Initial Supply:** 710,000,000 PERSY
+- **Minting Schedule**: 93% first year, 1/3rd less each following year (Model based off of Osmosis Zones Thirdening Schedule)
 
 | year 0  |  710,000,000.00  | 93.00% | 660,300,000 |   |
 |---------|:----------------:|:------:|:-----------:|---|
@@ -75,18 +65,16 @@ No minting or inflation schedule set
 | year 41 | 6,754,109,353.24 |  0.00% |     379     |   |
 | year 42 | 6,754,109,731.96 |  0.00% |     252     |   |
 
-## Airdrop [Link](https://github.com/terpnetwork/airdrop)
+## [Airdrop](https://github.com/terpnetwork/airdrop)
 
 **Calculations:**
 
 piecewise linear function:
 
-```
+```math
 Reward(R)= func(p, a, b, min, max)
 
     =a ; if p < min
     =b ; if p > max 
     =a + ((b-a) * (p-min)/(max-min)) ; otherwise 
 ```
-
-## Vesting

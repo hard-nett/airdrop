@@ -3,11 +3,14 @@
 // 2. identify and merge any address that exist in multiple community distributions 
 // 3. if solana wallet, base64 encode wallet address 
 import fs from 'fs';
-import path from 'path'
+import { fileURLToPath } from 'url';
+import path, { dirname } from 'path'
 import { applyNormalizationToAllProjects } from './calculations.js';
 import { readCsvFile, readYamlFile } from './utils.js';
-import { HEADSTASH_YAML, HEADSTASH_FINAL_TALLY } from './constants.js'
+import { HEADSTASH_FINAL_TALLY, SINSEMILLA_JSON_FILE } from './constants.js'
 
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
 
 // step 1: determine point distribution for each communinty
 // step 2: determine tokens to allocate for address based on tpp  
@@ -66,18 +69,19 @@ async function processHeadstashDistributions(yamlFile) {
                 let amount = parseInt(row.amount);
                 let points = determinePointDistribution(project.points, amount);
                 let tokens = points * project.tpp;
+                const microTokens = Math.floor(tokens * 1_000_000); // integer in micro-denom
                 if (!isEthereumAddress(address)) {
                     address = encodeSolanaAddress(address);
                 }
                 console.log(`addr ${address}`)
                 console.log(`amount ${amount}`, amount)
                 console.log(`points ${points}`, points)
-                console.log(`tokens ${tokens}`, tokens)
+                console.log(`tokens ${microTokens}`)
                 // Add the tokens to the final tally
                 if (address in finalTally) {
-                    finalTally[address] += tokens;
+                    finalTally[address] += microTokens;
                 } else {
-                    finalTally[address] = tokens;
+                    finalTally[address] = microTokens;
                 }
 
                 // Add the community to the address's communities
@@ -114,7 +118,7 @@ async function processHeadstashDistributions(yamlFile) {
 // Function to create the final tally CSV file
 function createFinalTallyCsv(finalTally, addressCommunities, communities) {
     return new Promise(async (resolve, reject) => {
-        let csvContent = "addr,points";
+        let csvContent = "addr,allocation";
         for (let community of communities) {
             csvContent += `,${path.basename(community)}`;
         }
@@ -190,4 +194,68 @@ function createCommunityPointsSummaryCsv(addressCommunities, communities) {
     });
 }
 
-export { processHeadstashDistributions, }
+/**
+ * Generates Sinsemilla-compatible merkle tree input
+ * - Reads final_tally.csv (with 'addr' and 'allocation' columns)
+ * - Assigns equal amounts of uterp and uthiol = allocation value
+ */
+const generateMerkleInput = async () => {
+    const csvPath = path.join(__dirname, HEADSTASH_FINAL_TALLY);
+    const outputPath = path.join(__dirname, SINSEMILLA_JSON_FILE);
+
+    try {
+        const rows = await readCsvFile(csvPath);
+        console.log(`✅ Loaded ${rows.length} rows from ${csvPath}`);
+
+        const result = {};
+
+        for (const row of rows) {
+            const address = row.addr?.trim();
+            const allocation = row.allocation?.trim();
+
+            if (!address) {
+                console.warn(`⚠️ Missing address, skipping row:`, row);
+                continue;
+            }
+
+            const amount = allocation && !isNaN(allocation) ? allocation : '0';
+
+            if (amount === '0') {
+                // Optional: skip zero allocations
+                // Or include them with 0 amount
+                console.log(`➡️ Address ${address} has 0 allocation`);
+            }
+
+            // TODO: allow defining tokens and their amounts
+            result[address] = [
+                {
+                    name: "uterp",
+                    amount // This is a string
+                },
+                {
+                    name: "uthiol",
+                    amount // Same amount for uthiol
+                }
+            ];
+        }
+        // Sort addresses lexicographically for deterministic order
+        const sortedResult = {};
+        Object.keys(result)
+            .sort()
+            .forEach((key) => {
+                sortedResult[key] = result[key];
+            });
+
+        // Write output
+        fs.writeFileSync(outputPath, JSON.stringify(result, null, 2), 'utf8');
+        console.log(`✅ Merkle input written to ${outputPath}`);
+        console.log(`💡 File ready for Sinsemilla merkle tree generation`);
+
+        return result;
+    } catch (error) {
+        console.error(`❌ Error generating merkle input:`, error.message);
+        throw error;
+    }
+};
+
+export { processHeadstashDistributions, generateMerkleInput }
