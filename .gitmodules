@@ -1,0 +1,18 @@
+[submodule "zk-crates/submodules/zcash-devtool"]
+	path = zk-crates/submodules/zcash-devtool
+	url = https://github.com/zcash/zcash-devtool
+[submodule "zk-crates/submodules/dao-contracts"]
+	path = zk-crates/submodules/dao-contracts
+	url = https://github.com/DA0-DA0/dao-contracts/
+[submodule "zk-crates/submodules/halo2-secp"]
+	path = zk-crates/submodules/halo2-secp
+	url = https://github.com/personaelabs/halo2-secp
+[submodule "zk-crates/submodules/orchard"]
+	path = zk-crates/submodules/orchard
+	url = https://github.com/zcash/orchard
+[submodule "zk-crates/submodules/zk-nullifier-sig"]
+	path = zk-crates/submodules/zk-nullifier-sig
+	url = https://github.com/plume-sig/zk-nullifier-sig/
+[submodule "egui"]
+	path = egui
+	url = https://github.com/emilk/egui

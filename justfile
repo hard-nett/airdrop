@@ -1,6 +1,7 @@
 #!/bin/sh
 
 headstash_generate:
+    cd scripts && node main.js -10
 
 # generates all genesis headstash data, using final output
 genesis_sinsemilla:
