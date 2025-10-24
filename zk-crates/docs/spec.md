@@ -6,10 +6,10 @@
 #### Context
 
 Our current airdrop framework, `The Headstash Contract` powers distribution by mapping ECDSA addresses not native to the chain (ETH,SOL,etc) as eligible to claim a specific list of tokens. In order to claim, users need to verify they are owners of any eligible addresses. This is done by generating a signature with the eligible address keys, from a message that includes the address native to the chain that the user will use to broadcast the message to claim their allocations.
-$$
-\sigma = \text{Sign}_{\text{sk}_{\text{eligible}}}\big( H(m) \big), \quad \text{where } \text{addr}_{\text{native}} \in m
 
-$$
+```math
+\sigma = \text{Sign}_{\text{sk}_{\text{eligible}}}\big( H(m) \big), \quad \text{where } \text{addr}_{\text{native}} \in m
+```
 **This creates an on-chain association between the eligible address, and the claiming address, which we want to prevent.**
 
 In order to prevent this association between verifying ownership & claiming tokens, there are 3 major obstacles:
@@ -216,11 +216,13 @@ ___
 
 To prevent double-spends, each note must have a unique, deterministic nullifier derivable only by the owner. For the genesis claim (first redemption), derive `nf_secret` from the eligible address and a secret known only to the user:
 
-$$
+ 
 
+```math
 \text{nf} = \text{PRF}_{\text{nk}}(\rho) \quad \text{where } \rho = H(\text{addr\_eligible} \parallel \text{nonce})
 
-$$
+```
+ 
 
 - `nk` is the nullifier-deriving key (part of the user’s private keys)
 - `nonce` is a user-generated secret. This ensures the nullifier is:
@@ -233,10 +235,9 @@ This ensures the nullifier is:
 
 For subsequent claims (spending output notes), use:
 
-$$
-
+```math 
  \text{nf} = \text{PRF}_{\text{nk}}(\rho)
-$$
+```
 where `ρ` is taken directly from the input note.
 
 ___
@@ -275,10 +276,9 @@ ___
 
 Use a Sinsemilla-based commitment for efficiency in Halo2:
 
-$$
+```math 
   \text{cm} = \text{SinsemillaCommit}(\text{repr}(d), \text{repr}(pk_d), v, ρ, ψ, rcm)
-$$
-
+```
 The commitment must bind all critical note components to ensure integrity and privacy.
 
 ___
