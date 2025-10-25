@@ -10,13 +10,14 @@ Our current airdrop framework, `The Headstash Contract` powers distribution by m
 ```math
 \sigma = \text{Sign}_{\text{sk}_{\text{eligible}}}\big( H(m) \big), \quad \text{where } \text{addr}_{\text{native}} \in m
 ```
+
 **This creates an on-chain association between the eligible address, and the claiming address, which we want to prevent.**
 
 In order to prevent this association between verifying ownership & claiming tokens, there are 3 major obstacles:
 
 ### Q: How Does Someone Prove They Own An Eligible Wallet Without Revealing Their Signature?
 
-- **proof of ownership within the note.** Signature made by eligible wallet of the hash of the destination wallet.
+- **proof of ownership within the note.** This is similar to the existing proof of ownership described above, however we must use zk-proof optimize implementation as constraining a ecdsa signature within a circuit is computationally expensive.
 
 ### Q: How can someone prevent leaking where their claimed funds end up, if the total amount & distributions allocated are public?
 
@@ -91,35 +92,53 @@ The signature is then defined as `(z,s,g^r,c,nul)`
 
 ### Zk-Prooving
 
-We will use version two defined of the PLUME implementation, but modified to retain privcacy of the nullifer
+We will use version two defined of the PLUME implementation, but modified to retain privcacy of the nullifer. specifically, since preventing doublespends of PLUME nullifiers is not required, as we are using it for proof of ownership constraints. Since the PLUME nullifier is a private input, we need to ensure `c` is accurately constructed,requireing us to define the public and private inputs as:
 
-- **Public Inputs:** `nul`,`c`,`g^r`,`z`
-- **Private Inputs:** `pk`,`r`,`s`,`H(m,g^sk)`
+#### Public Inputs
 
-> NOTE: since we justy seed ownership proof, rather than uniqueness (i.e prevent doublespend), we can modify this implementation to require the nullifier `nul` to be a private input to the circuit. We want to ensure c is accurately constructed, meaning we will have to include a posiedon hash constraint in the circuit.
+| # | Input | Category | Type / Format | Description | Remarks |
+|---|-------|----------|---------------|-------------|--------|
+| **1** | `c` | Public | **FP** (field element) |   | **Generated with Posiedon Hashing** |
+| **2** | `g^r` | Public | **G1** (group element on the curve) |   |   |
+| **3** | `z` | Public | **G1** (group element) |   |   |
+| **4** | `m` | Public | **32‑byte array** (`[u8;32]`) |  |   |
 
-> TODO: generate table higlighting when /where each component is generated/constructed
->
+#### Private Inputs
+
+| # | Input | Category | Type / Format | Description | Remarks |
+|---|-------|----------|---------------|-------------|--------|
+| **5** | `nul` | Private | **FP** (field element) |   |   |
+| **6** | `pk` | Private | **G1** (group element) | Owner’s public key (kept private inside the circuit to hide the actual key). | Allows the circuit to prove possession of the corresponding secret key `sk`. |
+| **7** | `sk` | Private | **Scalar** (`Fr`) | Secret key of the owner. | Never leaves the prover; only used to compute `pk` and the nullifier internally. |
+| **8** | `r` | Private | **Scalar** (`Fr`) | Randomness used for blinding (`g^r`). | Must be freshly sampled for each proof. |
+| **9** | `s` | Private | **Scalar** (`Fr`) |   |   |
+
+### Notes
+
+- **Public inputs** are the values that appear in the proof’s public‑input vector and must be supplied to the verifier.  
+- **Private inputs** are witness data supplied only to the prover; the circuit checks that they correctly relate to the public inputs without revealing them.  
+
 #### Circuit Arithmetic
 
-1. Compute `h = htc([m,sec1(pk)])`
-2. Compute `pk = g^sk`
-3. Compute `g^s * pk^-c`
-4. Compute `g^r`
-5. Compute `h^s * nul^-c`
+1. Compute $h = HTC([m,sec1(pk)])$
+2. Compute $pk = g^{sk}$
+3. Compute $left = g^s * pk^{-c}$
+4. Compute $ right = g^r$
+5. Compute $h^s * nul^{-c}$
 
 #### Circuit Constraints
 
-- `g^s * pk^-c = g^r`
-- `h^s * nul^-c = z`
+- $g^{s} * pk^{-c} = g^{r}$
+- $h^{s} * nul^{-c} = z$
 
 #### Additional Verification
 
 In addition to verifying the zk-SNARK, the PLUME verifier performs the following check.
 
-`c == H(nul,g^r,h^r)`
+$c == H(nul,g^r,h^r)$
 
-> <center> DEMO: to demonstrate the lifecycle of generating & verifying a plume signature:
+> <center>
+> DEMO: to demonstrate the lifecycle of generating & verifying a plume signature:
 >
 > `cargo test --package zk-crates --bin plume_demo --  --show-output`</center>
 
@@ -127,17 +146,12 @@ In addition to verifying the zk-SNARK, the PLUME verifier performs the following
 
 We make use of the sinsemilla merkle tree implementation for powering effecient note commitment and distirbution inclusion. We will utilize both the `HashDomain` and the `CommitDomain` for two distinct purposes:
 
-| Component | Current description | **What to add / rename** |
-|-----------|--------------------|--------------------------|
-| **Public eligibility/inclusion leaf** | `leaf = H_leaf(addr,token_name, token_amount)` | Explicitly state that this leaf is a **HashDomain** commitment *only* (binding, no hiding). |
-| **Private note commitment** | `cm = Commit(d, pk_d, v, ρ, ψ, rcm)` | Rename to `cm = CommitDomain.Commit(d, pk_d, v, ρ, ψ, rcm)`.  Mention that `CommitDomain` provides *binding + hiding* (Sinsemilla‑based Pedersen‑style commitment). |
-
 ### 1. Genesis Distribution Tree: `HashDomain`
 
 **This is the static, starting state of the headstash before any claims happen.**
-Its purpose is to allow a user to prove a specific address `addr_eligible` is eligible to claim a certain allocation `v` without revealing which specific address it is. Each leaf is a commitment to the `HashDomain`, as an eligible recipients balance for a single token balance. A leaf is computed using the sinsemilla hashing function as:
+Its purpose is to allow a user to prove a specific address `addr_eligible` is eligible to claim a certain allocation `v` without revealing which specific address it is. Each leaf is a commitment to the `HashDomain`,that is public & binding an eligible recipients balance for a single token balance. A leaf is computed using the sinsemilla hashing function as:
 
-$$\mathrm{leaf} = H_{\mathrm{leaf}}(\mathrm{addr} \parallel \mathrm{token\_name} \parallel \mathrm{token\_amount})$$
+$$\mathrm{leaf} = H_{\mathrm{leaf}}(\mathrm{addr} \parallel \mathrm{token\_name} \parallel \mathrm{token\_amount} \parallel  \mathrm{fixed\_denomination\_index} )$$
 
 > <center>  DEMO: our script used to generate this is invokable via the command:
 >
@@ -145,7 +159,8 @@ $$\mathrm{leaf} = H_{\mathrm{leaf}}(\mathrm{addr} \parallel \mathrm{token\_name}
 
 ### 2. Note Commitment Tree: `CommitDomain`
 
-This tree is dynamic and is the core state of the private ledger. It is constantly updated with every claim transaction. It serves to record the existance of all unspent notes (UTXOs) in a way that allows users to prove a note exists without revealing its contents. Each leaf is a **note commitment `cm`.** A commitment is computed from all the fields of a note (`d`,`pk_d`,`v`,`p`,`ψ`,`rcm`) using a binding and hiding commitment scheme (Sinsemilla in our example)
+This tree is dynamic and is the core state of the private ledger. It is constantly updated with every claim transaction. It serves to record the existance of all unspent notes (UTXOs) in a way that allows users to prove a note exists without revealing its contents. Each leaf is a **note commitment `cm`.** A commitment is computed from all the fields of a note using a binding and hiding commitment scheme (Sinsemilla `CommitDomain` in our example):
+
 $$\mathrm{cm} = \mathrm{Commit}(d, \mathrm{pk}_d, v, \rho, \psi, \mathrm{rcm})$$
 
 > Our genesis tree is non-interactive, derived from the sinsemilla `HashDomain`, but we want to have our note commitments retain same functionality as zcash orchard protocol, which uses the `CommitDomain` for the note-commitments.
@@ -163,14 +178,17 @@ notes function as private UTXOs (Unspent Transaction Outputs) that represent cla
 
 ```json
 {
-  "d": "diversifier",         // public; used to derive diversified address
-  "pk_d": "diversified transmission key", // public; derived as ivk * G + d
+  "m_canon": "canonical_addr",         // public; canonical_addr that will be receiving claimed funds
+  "m": "message", // public; derived as H(m_canon)
   "v": "amount",              // private; value being claimed (e.g., 100 uterp)
   "ρ": "rho",                 // private; used in nullifier derivation (input to PRF)
-  "ψ": "psi",                 // private; randomness for note commitment
+  "ψ": "psi",                 // private; randomness for note commitment (can also be used for PLUMEs `r`)
   "rcm": "commitment randomness", // private; blinds the note commitment
   "addr_eligible": "A",       // private; original eligible address
-  "nf_rand": "p"              // private; randomness for nullifier derivation
+  "nf_rand": "p",              // private; randomness for nullifier derivation
+  "plume_nul": "nul", // private; nullifier of plume signature
+  "plume_c": "c", // public; commitment to PLUME private randomness inputs & nullifier
+  "plume_s": "s" // private; commitment to PLUME secret key & randomness
 }
 ```
 
@@ -178,9 +196,9 @@ notes function as private UTXOs (Unspent Transaction Outputs) that represent cla
 > specifically:
 >
 > - `d` & `pk_d` can be replaced to be the public key that will recieve the claimed assets. This pubkey hash is also `m` for PLUME, and is a public input.
-> - we need to integrate PLUME inputs for notes, specifically:
->   - `nul` - as a private input to mimize post-quantum breaking
->   - `r` should be devised from same randomness as note commitments
+> - we also integrate PLUME inputs for notes, specifically:
+>   - `nul` -  private; to mimize post-quantum breaking
+>   - `r` public; should be devised from same randomness as note commitments
 >   - `c` needs to be inlcuded in note
 >   - `g` should be a known constant in circuit (not needed to include in note)
 >   - `z` can be computed as circuit knows `g` and `r` is already public input
@@ -193,36 +211,18 @@ notes function as private UTXOs (Unspent Transaction Outputs) that represent cla
 - `cv` (value commitment, for amount balancing)
 - `pk_d` and `d` (diversified address components)
 
-### Note Notation Details
-
-| Notation                              | Purpose                                                                                                                                                                                                                                             | Derivation                                                                                                                                                                                                                                                                                                                                        | Usage                                                                                                                                                           |     |
-| ------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- | --- |
-| `d` (Diversifier)                     | public value that allows a user to generate multiple unique addresses from a single key set.                                                                                                                                                        | Generated randomly by the user when creating a new note. 11-byte value (as in Zcash)                                                                                                                                                                                                                                                              | Combined with the incoming viewing key `ivk` to derive `pk_d`. It is included in the note commitment to bind it to the note.                                    |     |
-| `pk_d` (Diversified Transmission Key) | This is the public key that serves as the recipient address for the claimed tokens.  It is derived from the user's incoming viewing key `ivk` and the diversifier (d). **This is the key that will receive the public tokens from a note instance** | **`pk_d = ivk * G + d`**, where:<br>- `ivk` is an incoming viewing key (a private key derived from the user's spending key)<br>- `G` is the generator point of the elliptic curve (e.g., Pallas or Vesta in Halo2).<br>-`d` is the diversifier, often represented as a point on the curve via a hash-to-curve function (e.g., `DiversifyHash(d)`) | `pk_d` provides a canonical way for users claim partial amounts of their balance to multiple address under their control, improving the privacy set post claim. |     |
-| `v` *(Amount)*                        | The value of tokens being claimed in a note. Always a portion of the total allocation from `addr_eligible`                                                                                                                                          | Always will be a Fixed-Denomination, to improve privacy throughout the set.<br><br>1_000_000_000 == 1,000<br>100_000_000 == 100<br>10_000_000 == 10<br>1_000_000 == 1                                                                                                                                                                             | Publicly exposed so contract verifying proof can transfer `v` to address `pk_d`                                                                                 |     |
-| `ρ` (Rho)                             | A private value used as input to the pseudo-random function `PRF` for nullifier derivation. It ensures that each nullifier is unique and unlinkable to the note.                                                                                    |  For the genesis note (first claim), `p` is derived from `addr_eligible` and a user generated nonce. For subsequent notes, `p` is generated randomly                                                                                                                                                                                              | `ρ` as an input to the derivation of `ψ` and `rcm`        |     |
-| ψ (Psi)                               | Randomness to add to the note commitment to ensure it is hiding                                                                                                                                                                                     | Generated randomly by the user using a secure random number generator when creating the note. Should be unique per note                                                                                                                                                                                                                           |                                                                                                                                                                 |     |
-| `rcm` (Commitment Randomness)         | Ensure note commitment `cm` is computationally binding & hiding. It prevents anyone from guessing the note contents from `cm`                                                                                                                       | Generated randomly by user, similarly to ψ.                                                                                                                                                                                                                                                                                                       |                                                                                                                                                                 |     |
-| `nf_rand`                             | Additional randomness used in nullifier derivation to increase security and prevent collisions                                                                                                                                                      | Generated randomly by the user for each note.                                                                                                                                                                                                                                                                                                     |                                                                                                                                                                 |     |
-
-___
-
 ### Note Commitments
 
-- is what is disclosed publicly during claiming, by appending to the Note Commitment Tree
-- allows the origin of the claiming address to be private
+Note Commitments `cm` are what is disclosed publicly during claiming, by appending to the Note Commitment Tree. They are derived from the private and public inputs of a note, allowing the origin of the claiming address to be private.
 
 ### Nullifiers (Anti Double Spend)
 
 To prevent double-spends, each note must have a unique, deterministic nullifier derivable only by the owner. For the genesis claim (first redemption), derive `nf_secret` from the eligible address and a secret known only to the user:
 
- 
-
 ```math
 \text{nf} = \text{PRF}_{\text{nk}}(\rho) \quad \text{where } \rho = H(\text{addr\_eligible} \parallel \text{nonce})
 
 ```
- 
 
 - `nk` is the nullifier-deriving key (part of the user’s private keys)
 - `nonce` is a user-generated secret. This ensures the nullifier is:
@@ -235,10 +235,23 @@ This ensures the nullifier is:
 
 For subsequent claims (spending output notes), use:
 
-```math 
+```math
  \text{nf} = \text{PRF}_{\text{nk}}(\rho)
 ```
+
 where `ρ` is taken directly from the input note.
+
+### Note Notation Details
+
+| Notation | Purpose | Derivation | Usage |
+|---|---|---|---|
+| `d` (Diversifier) | Public value that allows a user to generate multiple unique addresses from a single key set. | Generated randomly by the user when creating a new note. 11‑byte value (as in Zcash). | Combined with the incoming viewing key `ivk` to derive `pk_d`. It is included in the note commitment to bind it to the note. |
+| `pk_d` (Diversified Transmission Key) | The public key that serves as the recipient address for the claimed tokens. **This is the key that will receive the public tokens from a note instance.** | **`pk_d = ivk * G + d`**, where:<br>‑ `ivk` = incoming viewing key (a private key derived from the user's spending key)<br>‑ `G` = generator point of the elliptic curve (e.g., Pallas or Vesta in Halo2)<br>‑ `d` = the diversifier, often represented as a point on the curve via a hash‑to‑curve function (e.g., `DiversifyHash(d)`). | `pk_d` provides a canonical way for users to claim partial amounts of their balance to multiple addresses under their control, improving privacy post‑claim. |
+| `v` *(Amount)* | The value of tokens being claimed in a note. Always a portion of the total allocation from `addr_eligible`. | Fixed‑denomination values to improve privacy across the set:<br>‑ `1_000_000_000` = 1 000<br>‑ `100_000_000` = 100<br>‑ `10_000_000` = 10<br>‑ `1_000_000` = 1 | Publicly exposed so the contract verifying the proof can transfer `v` to address `pk_d`. |
+| `ρ` (Rho) | Private value used as input to the pseudo‑random function `PRF` for nullifier derivation. Ensures each nullifier is unique and unlinkable to the note. | For the genesis note (first claim), `ρ` is derived from `addr_eligible` and a user‑generated nonce. For subsequent notes, `ρ` is generated randomly. | Used as an input to the derivation of `ψ` and `rcm`. |
+| `ψ` (Psi) | Randomness added to the note commitment to ensure it is hiding. | Generated randomly by the user using a secure random number generator when creating the note; must be unique per note. | — |
+| `rcm` (Commitment Randomness) | Guarantees the note commitment `cm` is computationally binding & hiding from guessing the note contents from `cm`. | Generated randomly by the user, similarly to `ψ`. | — |
+| `nf_rand` | Additional randomness used in nullifier derivation to increase security and prevent collisions. | Generated randomly by the user for each note. | — |
 
 ___
 
@@ -276,9 +289,10 @@ ___
 
 Use a Sinsemilla-based commitment for efficiency in Halo2:
 
-```math 
+```math
   \text{cm} = \text{SinsemillaCommit}(\text{repr}(d), \text{repr}(pk_d), v, ρ, ψ, rcm)
 ```
+
 The commitment must bind all critical note components to ensure integrity and privacy.
 
 ___
