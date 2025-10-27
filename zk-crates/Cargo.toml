@@ -14,6 +14,7 @@ halo2_gadgets = { path = "./submodules/halo2/halo2_gadgets",  version = "0.3.1",
 halo2_proofs = { path = "./submodules/halo2/halo2_proofs", version = "0.3.1" ,features = ["test-dev-graph","gadget-traces", "dev-graph"]  } 
 sinsemilla = "0.1.0"
 ff = "0.13"
+ff_ce = {package="ff_ce" , version= "0.11", features = ["derive"]}
 pasta_curves = "0.5"
 lazy_static = "1"
 base64 = "0.22.1"
@@ -41,3 +42,9 @@ zip32 = { version = "0.2.0", default-features = false }
 # No-std support
 core2 = { version = "0.3", default-features = false, features = ["alloc"] }
 rayon = "1.11.0"
+babyjubjub-rs = { version = "0.0.11", default-features = false, features = ["aarch64"] }
+num-bigint = "0.4.6"
+poseidon-rs = "0.0.8"
+bip39 = "2.2.0"
+hkdf = "0.12.4"
+secp256k1 = "0.31.1"

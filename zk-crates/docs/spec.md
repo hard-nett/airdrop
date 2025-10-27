@@ -403,3 +403,6 @@ A  cosmwasm smart contract will be paired with a wavs instance, which we expect 
 - <https://www.rfc-editor.org/rfc/rfc9380.html>
 = <https://eprint.iacr.org/2017/1108.pdf>
 - <https://github.com/stealthdrop/stealthdrop>
+<!-- used for (baby)jubjub understanding -->
+- <https://zips.z.cash/zip-0216>
+- <https://medium.com/zokrates/efficient-ecc-in-zksnarks-using-zokrates-bd9ae37b8186>
