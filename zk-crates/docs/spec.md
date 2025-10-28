@@ -34,7 +34,7 @@ In order to prevent this association between verifying ownership & claiming toke
 > When someone is claiming, they will be revealing how much and to whom the claimed tokens are going to *(along with the other crucial components like nullifiers & note commitments)*.
 >
 > **2. Viewing key magic is very limited**
-> We do not use diversifiers, viewing-keys & spending-keys as defined in zcashs protocols, which is how note-commitments and nullifiers are
+> We do not use diversifiers, viewing-keys & spending-keys as defined in multiple Zcash protocols, which is how note-commitments and nullifiers are
 > derived. We instead implement a simplified implementation of this that satisfies our requirements, without sacraficing any of the privacy
 > guarantees that are available with use of halo2 circuits.
 >
@@ -152,39 +152,20 @@ We will use version two defined of the PLUME implementation, but modified to ret
 
 ### Option 2: HKDF + BabyJubJub
 
-Our second option is to make use of deterministic HMAC- Key Deriving Function, to derive a keypair on the Baby-Jubjub curve from the sk of an eligible_addr. This keypair can then be used to sign a hash of relevant components within a note being spent, which in turn will allow us to implement constraints within the circuit that will
+Our second option is to make use of deterministic HMAC- Key Deriving Function, to derive a keypair on the Baby-Jubjub curve from the `elig_sk`.  This keypair can then be used to sign `m`, being a hash of relevant components within a note being spent, which in turn will allow us to implement constraints within the circuit that will power both proof of ownership & nullifier derivation.
 
-1. Prover (AKA owner of an `eligible_addr`):
+**Step 1: `elig_addr` Owner Generates Proof of Ownership Components:**
 
-- generates challenge being signed `m`, where `m == H(amount||denom||fixed_denom_index)`
--
+- generates challenge being signed `m`, where `m == H(amount||denom||fdi||elig_sk)`
+- derives `jub_sk` from the HKDF `HKDF(elig_sk, dst_jub_hkdf) mod ℓ_jub`
 - computes the baby-jubjub public key `jub_pk = jub_sk * G_jub`
-- signs `m` with the baby-jubjub key, generating `sig_jub`
+- signs `m` with the `jub_sk`, generating `sig_jub`
 
-2. Prover Generates Proof:
+**Step 2: `elig_addr` Owner Generates Proof**
 
 - reconstructs `m` from the given inputs
 - verifies `sig_jub` against `m` and the supplied `jub_pk`.
 - verifies the HKDF used `elig_sk` as an input to derive `jub_sk`
-
-#### 1. Public Inputs (exposed to the verifier)
-
-| Symbol | Description | Remarks |
-|--------|-------------|---------|
-| `jub_pk` | Baby‑JubJub public key (`jub_sk·G_jub`). | Two field elements `x` & `y` (each 256 bits). |
-| `dst_jub_hkdf` | Domain‑separation string for the HKDF (e.g. `"Headstash-HKDF-BabyJubJub-v1"`). | Hard‑coded constant; the circuit treats it as a public byte array so the same value must be used off‑chain. |
-| `amount` | Token amount being claimed. |   |
-| `denom` | Denomination / token identifier. |   |
-
-#### 2. Private Witnesses (never leave the prover)
-
-| Symbol | Description | Used inside the circuit for … |
-|--------|-------------|--------------------------------|
-| `elig_sk` | Secret key of the *eligible* address (the original ECDSA/secp256k1 or other native key). | Input to HKDF to derive `jub_sk`. |
-| `sig_jub` | Baby‑JubJub EdDSA signature on the message `m`. Represented as `(R, S)` where `R` is a point (x, y) and `S` a scalar. | Verified against `jub_pk` and `m`. |
-| `m` | Message hash `H(amount‖denom‖fixed_denom_index)`. | Re‑computed inside the circuit to bind the signature to the public monetary fields. |
-| `fixed_denom_index` | Index of the fixed‑denom note that is being spent. | **Private** because it leaks information about the note spender in the message hash `m`. |
-| `jub_sk` *(derived, not supplied)* | Baby‑JubJub secret key = `HKDF(elig_sk, dst_jub_hkdf) mod ℓ_jub`. | Internally derived; the circuit asserts the derivation is correct. |
 
 #### 3. Verification Flow (circuit constraints)
 
@@ -205,87 +186,94 @@ These two constraints will ensure with certainty that nullifiers and note-commit
 
 ### Note Structure: PLUME authorization
 
-| Symbol | Meaning | Type | Public / Private | Derivation (deterministic) |
-|--------|---------|------|------------------|----------------------------|
-| `g` | Curve generator (constant) | `G1` | **Public** | Hard‑coded in the circuit |
-| `recipient` | reciepient address of funds | `stripped bech32 addr` | **Public** | public as funds are going to this destination |
-| `amount` | | | **Public** | |
-| `denom` | | | **Public** | |
-| `fixed_denom_index` | | | **Private** | needs to be private as it will leak privacy, reducing anonimity set |
-| `m` | Message hash `H(amount‖denom‖fixed_denom_index)` | `bytes[32]` | **Private** | needs to be private to prevent derivation, leaking privacy |
-| `elig_pk` | eligible public key |  | **Private** | |
-| `r` | rho |  | **Private** | randomness used to derive challenge |
-| `h` | `HTC([m, sec1(elig_pk)])` (hash‑to‑curve) | `G1` | **Private** (computed in‑circuit) | Deterministic because `m` and `pk` are inputs |
-| `z` | `h^r` | `G1` | **Public** |   |
-| `g^r` | `g` raised to the prover’s random scalar `r` | `G1` | **Public** | `r` is a private scalar but `g^r` is published |
-| `plume_nul` | `h^elig_sk` – “PLUME nullifier” | `FP` | **Private** | `sk` (private) × `h` (deterministic) |
-| `c` | Challenge `H([nul, g^r, z])` (PLUME V2) | `FP` | **Public** | All three arguments are deterministic |
-| `s` | `r + sk·c` (private scalar) | `Fr` | **Private** | Computed from `r`, `sk`, `c` – never leaves the prover |
+| Symbol   | Meaning                                      | Type            | Public / Private / Constant / Output | Derivation (deterministic)                                            |
+|----------|----------------------------------------------|-----------------|--------------------------------------|------------------------------------------------------------------------|
+| `g`      | Curve generator                              | `G1`            | **Constant** | Hard‑coded in the circuit                                              |
+| `elig_pk`| eligible public key                          |                 | **Private**  |                                                                        |
+| `elig_sk`| eligible secret key                          |                 | **Private**  |                                                                        |
+| `fdi`    | fixed‑denom‑index.                           | `u16`           | **Private**  | needs to be private as it will leak privacy, reducing anonimity set |
+| `m`      | `H(amount‖denom‖fdi‖elig_sk)`                 | `bytes[32]`     | **Private**  | needs to be private to prevent derivation, leaking privacy          |
+| `r`      | rho                                          |                 | **Private**  | randomness used to derive challenge                                   |
+| `h`      | `HTC([m, sec1(elig_pk)])`                    | `G1`            | **Private**  | Deterministic because `m` and `pk` are inputs                         |
+| `plume_nul`| `h^elig_sk` – “PLUME nullifier”            | `FP`            | **Private**  | `sk` (private) × `h` (deterministic)                                   |
+| `s`      | `r + sk·c` (private scalar)                  | `Fr`            | **Private**  | Computed from `r`, `sk`, `c` – never leaves the prover                |
+| `c`      | Challenge `H([plume_nul, g^r, z])` (PLUME V2)| `FP`            | **Public**   | All three arguments are deterministic                                 |
+| `g^r`    | `g` raised to the prover’s random scalar `r` | `G1`            | **Public**   | `r` is a private scalar but `g^r` is published                        |
+| `z`      | `h^r`                                        | `G1`            | **Public**   |                                                                        |
+| `recp`   | reciepient address of funds                  | `CanonicalAddr` | **Public**   | public as funds are going to this destination                         |
+| `amount` | token amount                                 |                 | **Public**   |                                                                        |
+| `denom`  | token denomination                           |                 | **Public**   |                                                                        |
+| `note_nul`| nullifier                                   |                 | **Output**   |                                                                        |
+| `note_cm`| note-commitment                              |                 | **Output**   |                                                                        |
+
+#### JSON Format
+
+```json
+{
+  // ----- Private (witness) -----
+  "elig_pk":  "G1",                 // g^sk (kept private inside circuit)
+  "elig_sk":  "Fr",                 // eligible secret key (never leaves prover)
+  "fdi":      "u16",        // which fixed‑denom leaf is spent (private)
+  "m":        "bytes[32]",          // H(amount‖denom‖index)
+  "r":        "Fr",                 // prover‑chosen randomness
+  "h":        "G1",                 // HTC([m, sec1(pk)])
+  "plume_nul":"FP",                 // h^sk
+  "s":        "Fr",                 // r + sk·c
+
+  // ----- Public (exposed to verifier) -----
+  "c":        "FP",                 // PLUME challenge (Poseidon hash)
+  "g_r":      "G1",                 // g^r
+  "z":        "G1",                 // h^r
+  "recp":     "CanonicalAddr",      // recipient
+  "amount":   "u64",                // token amount (public, but part of m)
+  "denom":    "u32",                // token denom (public, but part of m)
+  "note_nul": "FP",                 // nullifier (public output)
+  "note_cm":  "G1",                 // note commitment (public output)
+}
+```
 
 ### Note Structure: HKDF + BabyJubJub verification
 
- | Symbol | Meaning | Type | Public / Private | Derivation |
-|--------|---------|------|------------------|------------|
-| `amount` | | | **Public** | |
-| `denom` | | | **Public** | |
-| `recipient` | reciepient address of funds | `stripped bech32 addr` | **Public** | public as funds are going to this destination |
-| `fixed_denom_index` | | | **Private** | |
-| `m` | Message hash `H(amount‖denom‖fixed_denom_index)` | `bytes[32]` | **Private** | needs to be private to prevent derivation, leaking privacy |
-| `dst_jub_hkdf` | Domain‑separation string (e.g. `"Headstash-HKDF-BabyJubJub-v1"`) | `bytes[]` | **Public** | Hard‑coded |
-| `elig_sk` | Secret key of the *eligible* address (ECDSA/secp256k1) | `Fr` | **Private** | Supplied by prover |
-| `jub_sk` | Baby‑JubJub secret = `HKDF(elig_sk, dst_jub_hkdf) mod ℓ_jub` | `Fr` | **Private (derived)** | Deterministic HKDF |
-| `jub_pk` | `jub_sk·G_jub` (public key) | `G1` | **Public** | Computed from derived `jub_sk` |
-| `sig_jub` | Full signature `(R,S)` | `struct` | **Public** (`R`) + **Private** (`S`) | `R` is public, `S` stays private (the circuit verifies it) |
+| Symbol         | Meaning.                                 | Type                   | Public / Private / Constant / Output| Derivation |
+|----------------|------------------------------------------|------------------------|----------------------------------|------------|
+| `dst_jub_hkdf` | Domain-separation string                 | `bytes[]`              | **Constant**                     | Hard-coded  |
+| `G_jub`        | JubJub Curve Generator.                  |                        | **Constant**                     | Hard-coded  |
+| `m`            | `H(amount‖denom‖fdi‖elig_sk)`            | `bytes[32]`            | **Private**                      | Needs to be private to prevent derivation, leaking privacy |
+| `elig_sk`      | `elig_addr` secret key                   | `Fr`                   | **Private**                      | Supplied by prover|
+| `jub_sk`       | `HKDF(elig_sk, dst_jub_hkdf) mod ℓ_jub`  | `Fr`                   | **Private (derived)**            | Deterministic HKDF |
+| `sig_jub`      | Full signature `(R,S)`                   | `struct`               | **Public** (`R`) + **Private** (`S`) | `R` is public, `S` stays private (the circuit verifies it) |
+| `fdi`          | fixed_denomination_idex                  | `u16`                  | **Private**                      | Used internally, not revealed |
+| `amount`       | Amount being transferred                 | `u128`                 | **Public**                       | Input to hash `m`|
+| `denom`        | Denomination of the asset                | `string`               | **Public**                       | Input to hash `m`|
+| `recp`    | Recipient address of funds                    | `stripped bech32 addr` | **Public**                       | Public as funds are going to this destination |
+| `jub_null`     | `jub_null = k·G_jub` (where `k = H(m, jub_sk)`) | `G1`            | **Public**                       | Deterministic because `k` is derived from `m` & `jub_sk`|
+| `jub_pk`       | `jub_sk·G_jub` (public key)              | `G1`                   | **Public**                       | Computed from derived `jub_sk`         |
+| `ψ` (Psi) | Randomness added to the note commitment to ensure it is hiding. | Generated randomly by the user using a secure random number generator when creating the note; must be unique per note. | — |
+| `note_cm`      | note commitment    `H(jub_null‖recp)`    |                   | **Output**                      |   |
+
+> q: are we deriving nullifiers and note commitments so that we prevent any possibility of doublespend?
+> a: we attempt to with use of the `jub_null`. The jubjub keypair is deterministic based on `elig_sk`, `m` is deterministic based on uniqueness powered by fixed_denom_index + the elig_sk, resulting in `jub_null` being deterministic & unique per note do to `k` hashing `m` & `jub_sk`. 
 
 **Public outputs during a claim:**
-
-- `cm` (note commitment, added to the Merkle tree)
-- `nf` (nullifier, added to the nullifier set to prevent double-spending)
-- `amount` (amount)
-- `denom` (denom of token)
-- `pk_d` and `d` (diversified address components)
+- `note_cm`
+- `jub_null`
+- `amount` 
+- `denom`
+- `recp`
 
 ### Note Commitments
 
-Note Commitments `cm` are what is disclosed publicly during claiming, by appending to the Note Commitment Tree. They are derived from the private and public inputs of a note, allowing the origin of the claiming address to be private.
+Note Commitments `cm` are what is disclosed publicly during claiming, by appending to the Note Commitment Tree. They are derived from the private and public inputs of a note, allowing the origin of the claiming address to be private. note commitments are derived from both deterministic and non-deterministic inputs of a note, as we do not use note-commitments for preventing double spends (this is what nullifiers are for). 
 
 ### Nullifiers (Anti Double Spend)
 
-To prevent double-spends, each note must have a unique, deterministic nullifier derivable only by the owner. For the genesis claim (first redemption), derive `nf_secret` from the eligible address and a secret known only to the user:
-
-```math
-% old. need to update to satisfy new requirements
-% \text{nf} = \text{PRF}_{\text{nk}}(\rho) \quad \text{where } \rho = H(\text{addr\_eligible} \parallel \text{nonce})
-```
-
-- `nk` is the nullifier-deriving key (part of the user’s private keys)
-- `nonce` is a user-generated secret. This ensures the nullifier is:
+To prevent double-spends, each note must have a unique, deterministic nullifier derivable only by the owner.
 
 This ensures the nullifier is:
 
 - Unique per note.
 - Unlinkable to the eligible address or note commitment.
 - Only computable by the note owner.
-
-For subsequent claims (spending output notes), use:
-
-```math
- \text{nf} = \text{PRF}_{\text{nk}}(\rho)
-```
-
-where `ρ` is taken directly from the input note.
-
-### Note Notation Details
-
-| Notation | Purpose | Derivation | Usage |
-|---|---|---|---|
-| `pk_d` (Diversified Transmission Key) | The public key that serves as the recipient address for the claimed tokens. **This is the key that will receive the public tokens from a note instance.** | **`pk_d = ivk * G + d`**, where:<br>‑ `ivk` = incoming viewing key (a private key derived from the user's spending key)<br>‑ `G` = generator point of the elliptic curve (e.g., Pallas or Vesta in Halo2)<br>‑ `d` = the diversifier, often represented as a point on the curve via a hash‑to‑curve function (e.g., `DiversifyHash(d)`). | `pk_d` provides a canonical way for users to claim partial amounts of their balance to multiple addresses under their control, improving privacy post‑claim. |
-| `v` *(Amount)* | The value of tokens being claimed in a note. Always a portion of the total allocation from `addr_eligible`. | Fixed‑denomination values to improve privacy across the set:<br>‑ `1_000_000_000` = 1 000<br>‑ `100_000_000` = 100<br>‑ `10_000_000` = 10<br>‑ `1_000_000` = 1 | Publicly exposed so the contract verifying the proof can transfer `v` to address `pk_d`. |
-| `ρ` (Rho) | Private value used as input to the pseudo‑random function `PRF` for nullifier derivation. Ensures each nullifier is unique and unlinkable to the note. | For the genesis note (first claim), `ρ` is derived from `addr_eligible` and a user‑generated nonce. For subsequent notes, `ρ` is generated randomly. | Used as an input to the derivation of `ψ` and `rcm`. |
-| `ψ` (Psi) | Randomness added to the note commitment to ensure it is hiding. | Generated randomly by the user using a secure random number generator when creating the note; must be unique per note. | — |
-| `rcm` (Commitment Randomness) | Guarantees the note commitment `cm` is computationally binding & hiding from guessing the note contents from `cm`. | Generated randomly by the user, similarly to `ψ`. | — |
-| `nf_rand` | Additional randomness used in nullifier derivation to increase security and prevent collisions. | Generated randomly by the user for each note. | — |
-
 ___
 
 ## Sinsemilla Merkle Trees
