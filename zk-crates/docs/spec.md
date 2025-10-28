@@ -3,7 +3,7 @@
 >
 > **GOAL: Allow eligible headstash members to use zk-proofs to claim partial amounts of their rewards over time.**
 
-#### Context
+## Context
 
 Our current airdrop framework, `The Headstash Contract` powers distribution by mapping ECDSA addresses not native to the chain (ETH,SOL,etc) as eligible to claim a specific list of tokens. In order to claim, users need to verify they are owners of any eligible addresses. This is done by generating a signature with the eligible address keys, from a message that includes the address native to the chain that the user will use to broadcast the message to claim their allocations.
 
@@ -21,7 +21,7 @@ In order to prevent this association between verifying ownership & claiming toke
 
 ### Q: How can someone prevent leaking where their claimed funds end up, if the total amount & distributions allocated are public?
 
-- **note commitments.** Partial claims of genesis allocations, by revealing note commitments derived from input notes, which create fresh output notes.
+- **note commitments.** Partial claims of genesis allocations via fixed denomination notes. This allows eligble claimers to designate unique addresses for receiving allocations over a span of time rather than immediately.
 
 ### Q: How are users prevented from claiming more funds then they are allocated?
 
@@ -34,26 +34,29 @@ In order to prevent this association between verifying ownership & claiming toke
 > When someone is claiming, they will be revealing how much and to whom the claimed tokens are going to *(along with the other crucial components like nullifiers & note commitments)*.
 >
 > **2. Viewing key magic is very limited**
-> We still need a design around how a user who may have spent some, but not all of their allocation can view their remaining balance, without ever revealing it publicly. We must do this in a trustless way, without introducing actions that may leak information, such as storage-access-patterns or others.
+> We do not use diversifiers, viewing-keys & spending-keys as defined in zcashs protocols, which is how note-commitments and nullifiers are
+> derived. We instead implement a simplified implementation of this that satisfies our requirements, without sacraficing any of the privacy
+> guarantees that are available with use of halo2 circuits.
 >
 ## Requirements
 
 - **Keys: Self-Custody Key Management Systems**
 - **Randomness Generators**
-- **Private Proof Of Ownership - PLUME**
-- **Sinsemilla Merkle Tree**
+- **Private Proof Of Ownership - PLUME or Baby-JubJub**
+- **Sinsemilla Merkle Trees**
 - **Notes & Note Commitments (UTXO)**
 - **Nullifier Use**
 - **Verifiable Service in TEE**
 
 ## Keys
 
-We have two main types of keys involved in this process.
+We have 3 main types of keys involved in this process.
 
 1. Eligible Keys
 2. Redemption Keys
+3. HKDF keys
 
-Eligible keys are the keypair that has a public allocation set for them, and is they key that we must keep any signature or hash derived from it private, in order to retain privacy. Redemption keys are the keys that will be recieving the public allocations claimed by the eligilbe keys.
+Eligible keys are the keypair that has a public allocation set for them, and is they key that we must keep any signature or hash derived from it private, in order to retain privacy. Redemption keys are the keys that will be recieving the public allocations claimed by the eligible keys. HKDF keys are keys that are deterministically derived from private inputs of a circuit. HKDF keys are specifically used to make our proof of ownership step effecient & feasable in-circuit.
 
 > NOTE: zcash orchard protocol implements very complex (but useful) key derivation for viewing, authorization, and privacy retention purposes. Our scope does not require the use of viewing or authorization keys, as the end results of tokens claimed will be public. A large portion of the modifications from the orchard protocol altering how note-commitments & nullifiers are derived, as they rely heavily on the use of the key structure used by zcash orchard protocol.
 
@@ -61,18 +64,27 @@ Eligible keys are the keypair that has a public allocation set for them, and is 
 
 In order to make it impossible to retroatively derive randomness used during the note-commitment generation (which in theory would be possible if an adversary had access to a device, the timestamp of when randomness was generated, its theoretically possible to recreate the randomness source), we want to enable user-derived input as an additional seed to the PRNG process.
 
-> <center> DEMO: our script used to generate randomness can be invoked via :
+> <center>
+>
+> DEMO: our script used to generate randomness can be invoked via :
 >
 > `cargo run --package zk-crates --bin generate_randomness`</center>
+>
 
-## Ownership Verification - PLUME signature proofs
+## Ownership Verification
 
-Our circuit needs to effecietly verify a note being claimed has been authorized to do so by the eligilbe address, without revealing this address itself. In order to do this, we will leverage the design specification of [ERC-7524](https://eips.ethereum.org/EIPS/eip-7524). This will allow users to produce two components, one deterministic & one non-deterministic, allowing us to use the determinstic on as a nullifier.
+Its crucial that our circuit has an feasable way to verify that the `eligible_addr` is authorizing the spend of a specific note. normal signature verification for secp256k1 curves are computationally heavy, & generate extremely large proof sizes not compatible with on-chain gas limits & a nice UX. We provide two alternatives for implementing this, both optimized for in-circuit verification so that we maintain the privacy integrity expected.
+
+> NOTE: for either implementation,  we must make use of a deterministic value derived from this step, to make use of as an input in the PRF for a notes nullifier and note commitment. This ensures that notes are
+
+### Option 1: PLUME signature proofs
+
+The first option is to implement the [ERC-7524](https://eips.ethereum.org/EIPS/eip-7524) spec in circuit. This will allow users to produce two components, one deterministic & one non-deterministic, allowing us to use the determinstic on as an input in the PRF for note-commitments and nullifiers.
 
 ### Minimal Requirements
 
 - `g` - generator (aka the base point) of the curve
-- `m` - 32-byte message
+- `m` - 32-byte message (will be defined as `m == H(amount||denom||fixed_denom_index)` )
 - `(sk,pk)` - keypair
 - `sec1(pk)` - SEC1 defined compressed public key (33 bytes)
 
@@ -113,7 +125,7 @@ We will use version two defined of the PLUME implementation, but modified to ret
 | **8** | `r` | Private | **Scalar** (`Fr`) | Randomness used for blinding (`g^r`). | Must be freshly sampled for each proof. |
 | **9** | `s` | Private | **Scalar** (`Fr`) |   |   |
 
-### Notes
+#### PLUME constraint notes
 
 - **Public inputs** are the values that appear in the proof’s public‑input vector and must be supplied to the verifier.  
 - **Private inputs** are witness data supplied only to the prover; the circuit checks that they correctly relate to the public inputs without revealing them.  
@@ -131,84 +143,106 @@ We will use version two defined of the PLUME implementation, but modified to ret
 - $g^{s} * pk^{-c} = g^{r}$
 - $h^{s} * nul^{-c} = z$
 
-#### Additional Verification
-
-In addition to verifying the zk-SNARK, the PLUME verifier performs the following check.
-
-$c == H(nul,g^r,h^r)$
+> what value should be used as the PRF input from the plume components so that we can assert that note-commitment and nullifiers concretely prevent double-spending of notes? They should not include and randomness source as this will lead to non-deterministic results of the nullifier & note-commitment.
 
 > <center>
 > DEMO: to demonstrate the lifecycle of generating & verifying a plume signature:
 >
 > `cargo test --package zk-crates --bin plume_demo --  --show-output`</center>
 
-## Sinsemilla Merkle Trees
+### Option 2: HKDF + BabyJubJub
 
-We make use of the sinsemilla merkle tree implementation for powering effecient note commitment and distirbution inclusion. We will utilize both the `HashDomain` and the `CommitDomain` for two distinct purposes:
+Our second option is to make use of deterministic HMAC- Key Deriving Function, to derive a keypair on the Baby-Jubjub curve from the sk of an eligible_addr. This keypair can then be used to sign a hash of relevant components within a note being spent, which in turn will allow us to implement constraints within the circuit that will
 
-### 1. Genesis Distribution Tree: `HashDomain`
+1. Prover (AKA owner of an `eligible_addr`):
 
-**This is the static, starting state of the headstash before any claims happen.**
-Its purpose is to allow a user to prove a specific address `addr_eligible` is eligible to claim a certain allocation `v` without revealing which specific address it is. Each leaf is a commitment to the `HashDomain`,that is public & binding an eligible recipients balance for a single token balance. A leaf is computed using the sinsemilla hashing function as:
+- generates challenge being signed `m`, where `m == H(amount||denom||fixed_denom_index)`
+-
+- computes the baby-jubjub public key `jub_pk = jub_sk * G_jub`
+- signs `m` with the baby-jubjub key, generating `sig_jub`
 
-$$\mathrm{leaf} = H_{\mathrm{leaf}}(\mathrm{addr} \parallel \mathrm{token\_name} \parallel \mathrm{token\_amount} \parallel  \mathrm{fixed\_denomination\_index} )$$
+2. Prover Generates Proof:
 
-> <center>  DEMO: our script used to generate this is invokable via the command:
->
-> `cargo run --bin create_merkle -- data/sinsemilla_json.json`</center>
+- reconstructs `m` from the given inputs
+- verifies `sig_jub` against `m` and the supplied `jub_pk`.
+- verifies the HKDF used `elig_sk` as an input to derive `jub_sk`
 
-### 2. Note Commitment Tree: `CommitDomain`
+#### 1. Public Inputs (exposed to the verifier)
 
-This tree is dynamic and is the core state of the private ledger. It is constantly updated with every claim transaction. It serves to record the existance of all unspent notes (UTXOs) in a way that allows users to prove a note exists without revealing its contents. Each leaf is a **note commitment `cm`.** A commitment is computed from all the fields of a note using a binding and hiding commitment scheme (Sinsemilla `CommitDomain` in our example):
+| Symbol | Description | Remarks |
+|--------|-------------|---------|
+| `jub_pk` | Baby‑JubJub public key (`jub_sk·G_jub`). | Two field elements `x` & `y` (each 256 bits). |
+| `dst_jub_hkdf` | Domain‑separation string for the HKDF (e.g. `"Headstash-HKDF-BabyJubJub-v1"`). | Hard‑coded constant; the circuit treats it as a public byte array so the same value must be used off‑chain. |
+| `amount` | Token amount being claimed. |   |
+| `denom` | Denomination / token identifier. |   |
 
-$$\mathrm{cm} = \mathrm{Commit}(d, \mathrm{pk}_d, v, \rho, \psi, \mathrm{rcm})$$
+#### 2. Private Witnesses (never leave the prover)
 
-> Our genesis tree is non-interactive, derived from the sinsemilla `HashDomain`, but we want to have our note commitments retain same functionality as zcash orchard protocol, which uses the `CommitDomain` for the note-commitments.
+| Symbol | Description | Used inside the circuit for … |
+|--------|-------------|--------------------------------|
+| `elig_sk` | Secret key of the *eligible* address (the original ECDSA/secp256k1 or other native key). | Input to HKDF to derive `jub_sk`. |
+| `sig_jub` | Baby‑JubJub EdDSA signature on the message `m`. Represented as `(R, S)` where `R` is a point (x, y) and `S` a scalar. | Verified against `jub_pk` and `m`. |
+| `m` | Message hash `H(amount‖denom‖fixed_denom_index)`. | Re‑computed inside the circuit to bind the signature to the public monetary fields. |
+| `fixed_denom_index` | Index of the fixed‑denom note that is being spent. | **Private** because it leaks information about the note spender in the message hash `m`. |
+| `jub_sk` *(derived, not supplied)* | Baby‑JubJub secret key = `HKDF(elig_sk, dst_jub_hkdf) mod ℓ_jub`. | Internally derived; the circuit asserts the derivation is correct. |
 
-#### How its Built
+#### 3. Verification Flow (circuit constraints)
 
-0. The tree starts empty, with the root being the root also being the genesis distribution tree root.
-1. When a user makes a claim (either genesis or spending an existing note), their transaction output includes a new note commitment `cm_new`
-2. The smart contract verifies the zk-proof and, if valid, inserts `cm_new` into the next available leaf position in this tree.
-3. The contract then computes and stores the new root of this tree (root_notes_current).
+- **a. HKDF Derivation:** derives the baby-jubjub secret `jub_sk` using the known `dst_jub_hkdf` from the `elig_sk`.
+- **b. Public‑key Consistency:** Computes `jub_pk_calc = jub_sk·G_jub` and enforce `jub_pk_calc == jub_pk`.
+- **c. Message Hash:** Re‑compute the messages `calculated_m = H( amount || denom || fixed_denom_index )`, and enforce `calculated_m == m`.
+- **c. Signature Verification (EdDSA on BabyJubJub):**`sig_jub` on `m` using `jub_pk`
 
 ## Notes
 
-notes function as private UTXOs (Unspent Transaction Outputs) that represent claims to portions of the airdropped tokens. Each note contains sensitive data that must remain private, except for certain public components used for verification and transaction processing.
+notes function as private UTXOs (Unspent Transaction Outputs) that represent claims to portions of the airdropped tokens. Each note contains sensitive data that must remain private, except for certain public components used for verification and transaction processing. We have generated a predetermined set of notes for users, classified by fixed-denomination amounts. we must derive our note-commitments & nullifiers from completely deterministic sources, such that it is impossible to alter one of the PRF inputs, that will result in the ability to reuse a note that has been spent. We can do this by expecting the resulting signature/nullifier from the owernship verification step as an input source in a PRF. This way, the circuit can constrain the nullifer & note-commitment with certainty.
 
-```json
-{
-  "m_canon": "canonical_addr",         // public; canonical_addr that will be receiving claimed funds
-  "m": "message", // public; derived as H(m_canon)
-  "v": "amount",              // private; value being claimed (e.g., 100 uterp)
-  "ρ": "rho",                 // private; used in nullifier derivation (input to PRF)
-  "ψ": "psi",                 // private; randomness for note commitment (can also be used for PLUMEs `r`)
-  "rcm": "commitment randomness", // private; blinds the note commitment
-  "addr_eligible": "A",       // private; original eligible address
-  "nf_rand": "p",              // private; randomness for nullifier derivation
-  "plume_nul": "nul", // private; nullifier of plume signature
-  "plume_c": "c", // public; commitment to PLUME private randomness inputs & nullifier
-  "plume_s": "s" // private; commitment to PLUME secret key & randomness
-}
-```
+- **note-commitment and nullifier derivation**: we need to ensure that note-commitments and nullifiers are impossible to be doublespent, given that we are not using nullifier-keys. specifically, our genesis merkle tree is created by generating leaves for each eligible address total possible fixed denominations. We included an index for all duplicate fixed denomination amounts (ie; if there was 4 1000 TERP fixed denomnination, each leaf without an index would have an identical hash). This allows us to then make use of the signature we are generating from the eligible address as the source of randomness that will derive nullifiers and note-commitment values, so that we can zk-verify that:
+  - a. our signature is generated from `m == H(amount||denom||index)` by the `sk` of the `eligible_addr`
+  - b. the note commitment `nc` (and in result the nullifier) is derived using this signature as the randomness input
 
-> NOTE: we must update the definition of a note to include the inputs needed for PLUME signature verification, and also simply the use of diverisfier and transmission keys
-> specifically:
->
-> - `d` & `pk_d` can be replaced to be the public key that will recieve the claimed assets. This pubkey hash is also `m` for PLUME, and is a public input.
-> - we also integrate PLUME inputs for notes, specifically:
->   - `nul` -  private; to mimize post-quantum breaking
->   - `r` public; should be devised from same randomness as note commitments
->   - `c` needs to be inlcuded in note
->   - `g` should be a known constant in circuit (not needed to include in note)
->   - `z` can be computed as circuit knows `g` and `r` is already public input
->   - `s` added as private input to note as derived from `sk` which is never provided as input to circuit
+These two constraints will ensure with certainty that nullifiers and note-commitments cannot be forged for doublespends.
+
+### Note Structure: PLUME authorization
+
+| Symbol | Meaning | Type | Public / Private | Derivation (deterministic) |
+|--------|---------|------|------------------|----------------------------|
+| `g` | Curve generator (constant) | `G1` | **Public** | Hard‑coded in the circuit |
+| `recipient` | reciepient address of funds | `stripped bech32 addr` | **Public** | public as funds are going to this destination |
+| `amount` | | | **Public** | |
+| `denom` | | | **Public** | |
+| `fixed_denom_index` | | | **Private** | needs to be private as it will leak privacy, reducing anonimity set |
+| `m` | Message hash `H(amount‖denom‖fixed_denom_index)` | `bytes[32]` | **Private** | needs to be private to prevent derivation, leaking privacy |
+| `elig_pk` | eligible public key |  | **Private** | |
+| `r` | rho |  | **Private** | randomness used to derive challenge |
+| `h` | `HTC([m, sec1(elig_pk)])` (hash‑to‑curve) | `G1` | **Private** (computed in‑circuit) | Deterministic because `m` and `pk` are inputs |
+| `z` | `h^r` | `G1` | **Public** |   |
+| `g^r` | `g` raised to the prover’s random scalar `r` | `G1` | **Public** | `r` is a private scalar but `g^r` is published |
+| `plume_nul` | `h^elig_sk` – “PLUME nullifier” | `FP` | **Private** | `sk` (private) × `h` (deterministic) |
+| `c` | Challenge `H([nul, g^r, z])` (PLUME V2) | `FP` | **Public** | All three arguments are deterministic |
+| `s` | `r + sk·c` (private scalar) | `Fr` | **Private** | Computed from `r`, `sk`, `c` – never leaves the prover |
+
+### Note Structure: HKDF + BabyJubJub verification
+
+ | Symbol | Meaning | Type | Public / Private | Derivation |
+|--------|---------|------|------------------|------------|
+| `amount` | | | **Public** | |
+| `denom` | | | **Public** | |
+| `recipient` | reciepient address of funds | `stripped bech32 addr` | **Public** | public as funds are going to this destination |
+| `fixed_denom_index` | | | **Private** | |
+| `m` | Message hash `H(amount‖denom‖fixed_denom_index)` | `bytes[32]` | **Private** | needs to be private to prevent derivation, leaking privacy |
+| `dst_jub_hkdf` | Domain‑separation string (e.g. `"Headstash-HKDF-BabyJubJub-v1"`) | `bytes[]` | **Public** | Hard‑coded |
+| `elig_sk` | Secret key of the *eligible* address (ECDSA/secp256k1) | `Fr` | **Private** | Supplied by prover |
+| `jub_sk` | Baby‑JubJub secret = `HKDF(elig_sk, dst_jub_hkdf) mod ℓ_jub` | `Fr` | **Private (derived)** | Deterministic HKDF |
+| `jub_pk` | `jub_sk·G_jub` (public key) | `G1` | **Public** | Computed from derived `jub_sk` |
+| `sig_jub` | Full signature `(R,S)` | `struct` | **Public** (`R`) + **Private** (`S`) | `R` is public, `S` stays private (the circuit verifies it) |
 
 **Public outputs during a claim:**
 
 - `cm` (note commitment, added to the Merkle tree)
 - `nf` (nullifier, added to the nullifier set to prevent double-spending)
-- `cv` (value commitment, for amount balancing)
+- `amount` (amount)
+- `denom` (denom of token)
 - `pk_d` and `d` (diversified address components)
 
 ### Note Commitments
@@ -220,8 +254,8 @@ Note Commitments `cm` are what is disclosed publicly during claiming, by appendi
 To prevent double-spends, each note must have a unique, deterministic nullifier derivable only by the owner. For the genesis claim (first redemption), derive `nf_secret` from the eligible address and a secret known only to the user:
 
 ```math
-\text{nf} = \text{PRF}_{\text{nk}}(\rho) \quad \text{where } \rho = H(\text{addr\_eligible} \parallel \text{nonce})
-
+% old. need to update to satisfy new requirements
+% \text{nf} = \text{PRF}_{\text{nk}}(\rho) \quad \text{where } \rho = H(\text{addr\_eligible} \parallel \text{nonce})
 ```
 
 - `nk` is the nullifier-deriving key (part of the user’s private keys)
@@ -245,7 +279,6 @@ where `ρ` is taken directly from the input note.
 
 | Notation | Purpose | Derivation | Usage |
 |---|---|---|---|
-| `d` (Diversifier) | Public value that allows a user to generate multiple unique addresses from a single key set. | Generated randomly by the user when creating a new note. 11‑byte value (as in Zcash). | Combined with the incoming viewing key `ivk` to derive `pk_d`. It is included in the note commitment to bind it to the note. |
 | `pk_d` (Diversified Transmission Key) | The public key that serves as the recipient address for the claimed tokens. **This is the key that will receive the public tokens from a note instance.** | **`pk_d = ivk * G + d`**, where:<br>‑ `ivk` = incoming viewing key (a private key derived from the user's spending key)<br>‑ `G` = generator point of the elliptic curve (e.g., Pallas or Vesta in Halo2)<br>‑ `d` = the diversifier, often represented as a point on the curve via a hash‑to‑curve function (e.g., `DiversifyHash(d)`). | `pk_d` provides a canonical way for users to claim partial amounts of their balance to multiple addresses under their control, improving privacy post‑claim. |
 | `v` *(Amount)* | The value of tokens being claimed in a note. Always a portion of the total allocation from `addr_eligible`. | Fixed‑denomination values to improve privacy across the set:<br>‑ `1_000_000_000` = 1 000<br>‑ `100_000_000` = 100<br>‑ `10_000_000` = 10<br>‑ `1_000_000` = 1 | Publicly exposed so the contract verifying the proof can transfer `v` to address `pk_d`. |
 | `ρ` (Rho) | Private value used as input to the pseudo‑random function `PRF` for nullifier derivation. Ensures each nullifier is unique and unlinkable to the note. | For the genesis note (first claim), `ρ` is derived from `addr_eligible` and a user‑generated nonce. For subsequent notes, `ρ` is generated randomly. | Used as an input to the derivation of `ψ` and `rcm`. |
@@ -255,23 +288,120 @@ where `ρ` is taken directly from the input note.
 
 ___
 
+## Sinsemilla Merkle Trees
+
+We make use of the sinsemilla merkle tree implementation for powering effecient note commitment and distirbution inclusion. We will utilize both the `HashDomain` and the `CommitDomain` for two distinct purposes:
+
+### 1. Genesis Distribution Tree: `HashDomain`
+
+**This is the static, starting state of the headstash before any claims happen.**
+Its purpose is to allow a user to prove a specific address `addr_eligible` is eligible to claim a certain allocation `v` without revealing which specific address it is. Each leaf is a commitment to the `HashDomain`,that is public & binding an eligible recipients balance for a single token balance. A leaf is computed using the sinsemilla hashing function as:
+
+```math
+\begin{aligned}
+\text{Leaf}_{i,j}
+   &= H_{\text{leaf}}\!\Bigl(
+        \underbrace{\text{addr}_{i}}_{\text{public address}}
+        \;\parallel\;
+        \underbrace{\text{token\_name}_{j}}_{\text{token identifier}}
+        \;\parallel\;
+        \underbrace{\text{token\_amount}_{i,j}}_{\text{amount for addr}_{i}}
+        \;\parallel\;
+        \underbrace{\text{fixed\_denomination\_index}_{j}}_{\text{index}}
+      \Bigr) \\[6pt]
+\text{Root}
+   &= H_{\text{root}}\!\Bigl(
+        \{\,\text{Leaf}_{i,j}\mid
+          \text{addr}_{i}\in\text{Elig},
+          \text{token\_name}_{j}\in\mathcal{T}\,\}
+      \Bigr)
+\end{aligned}
+```
+
+<center>
+
+| Symbol | Meaning |
+|--------|---------|
+| $$\text{Elig}$$ | Set of all public addresses receiving tokens |
+| $$\mathcal{T}$$ | Set of token names being distributed |
+| $$\text{addr}_{i}$$ | The *i*‑th address in `Elig` |
+| $$\text{token\_name}_{j}$$ | The *j*‑th token name in $\mathcal{T}$ |
+| $$\text{token\_amount}_{i,j}$$ | Amount of token *j* sent to address *i* |
+| $$\text{fixed\_denomination\_index}_{j}$$ | Fixed denomination index for token *j* |
+| $$H_{\text{leaf}}$$ | Hash function that creates a leaf from the concatenated fields |
+| $$H_{\text{root}}$$ | (Merkle‑tree) hash that aggregates all leaves into the root |
+
+</center>
+
+> <center>  DEMO: our script used to generate this is invokable via the command:
+>
+> `cargo run --bin create_merkle -- data/sinsemilla_json.json`</center>
+
+### 2. Note Commitment Tree: `CommitDomain`
+
+This tree is dynamic and is the core state of the private ledger. It is constantly updated with every claim transaction. Each claim by a user will generate a note-commitment. Each time a user is spending a note generated in the genesis distribution tree, the note-commitment will be appended to a top-level layer in the merkle tree, preventing any association between the geneiss leaf of the note being spent. A commitment is computed from all the fields of a note using a binding and hiding commitment scheme (Sinsemilla `CommitDomain` in our example):
+
+```math
+% old, need to update
+% \mathrm{cm} = \mathrm{Commit}(d, \mathrm{pk}_d, v, \rho, \psi, \mathrm{rcm})
+```
+
+> Our genesis tree is non-interactive, derived from the sinsemilla `HashDomain`, but we want to have our note commitments retain same functionality as zcash orchard protocol, which uses the `CommitDomain` for the note-commitments.
+
+<!-- > q: **do we need the merkle tree for note-commitments?** yes. our merkle tree will require spends of allocations always being one layer deep, and splitting of notes into sub-notes, as there are always a predetermined number of notes (due to using fixed denominations). -->
+<!-- >
+> q: **how can we implement a system that allows note-splitting from the original genesis distribution leaves?** If a user decides that they want to split a fixed-denomination note into additional, fixed-denomination sub-notes, we must be able to:
+>
+> - a. ensure the original notes will be percieved as consumed
+> - b.ensure the sum total of the sub-notes are never more than what the parent note value was
+> - c.allow for infinite recursiveness of subnotes up until the smallest fixed denomination possible
+>
+> -->
+<!-- 
+### Splitting Notes
+
+A user may want to split a note such that:
+
+- a parent note nullifier is created,marking the note as 'spent'
+- a new child note(s) whose values sum to the parent value are created
+
+```txt
+Note Commitment Tree (CommitDomain)
+├─ Position 0: First claimed genesis note
+├─ Position 1: Second claimed genesis note  
+├─ Position 2: Split from position 0 (child note 1)
+├─ Position 3: Split from position 0 (child note 2)
+├─ Position 4: Third claimed genesis note
+├─ Position 5: Split from position 2 (grandchild note)
+└─ ... continues growing
+```
+
+ The only time we allow appending to existing index in the tree is if the user decides to split a note into further sub-notes, using fixed-denominations that sub up to the parent notes value. whenever a sub-note is spent, it would be treated as if it was one of the top-level genesis notes, and the note-commitment would be appended to the top layer of the merkle tree, extending the total anonymity set of the note-commitments. We want to ensure that the path is kept private between all of the sub-notes and parent notest to prevent association -->
+
+### How its Built
+
+0. The tree starts empty, with the root being the root also being the genesis distribution tree root.
+1. When a user makes a claim (either genesis or spending an existing note), their transaction output includes a new note commitment `cm_new`
+2. The smart contract verifies the zk-proof and, if valid, inserts `cm_new` into the next available leaf position in this tree.
+3. The contract then computes and stores the new root of this tree (root_notes_current).
+
 ## Genesis Bootstrapping
 
-To bootstrap the first claim without a prior input note:
+### 1. Genesis Distribution Tree Construction
 
-### 1. Genesis Note Construction
+First, the tree is constructed by separating separating all distributions into the smallest amount of fixed denomination notes, for each token allocated (The Headstash Airdrop distributes TERP & THIOL, so there is a set of leaves for each address due to their allocation including 2 tokens.). We generate leaves in an non-interactive manner using the pre-known public information available:
 
-Construct a genesis note for the full allocation, with:
+### Step 2: Deploy Verifiable Proxy Service
 
-- `v` = total_allocation
-- `ρ` = `H(addr_eligilbe || nonce)`
-- `rcm`, `ψ`, `nf_rand` generated randomly.
+This steps involves deploying the verifiable service used to route claiming actions on-chain for proof validation,nullifier & note commitment storage, and also token distributions.
 
-### Step 2: Genesis Commitment
+#### Register Service Owned Address w/ Smart-Account
 
-Compute a commitment `cm_genesis` for this note, but do not insert it into the Merkle tree yet.
+#### Upload/Instantiate Zk-Headstash Contract
 
-### Step 3: User Generates Proof
+#### Create/Seed Tokens To Distribute
+
+### Step 3: Eligible Addresses Generate & Broadcast Proofs for claiming
 
 In the proof circuit, the user proves:
 
@@ -282,20 +412,6 @@ In the proof circuit, the user proves:
 ### Step 4: Output New Note
 
 for the claimed amount (or the full amount if claiming entirely), with its own `cm` and `nf`.
-
-___
-
-### Note Commitment Computation
-
-Use a Sinsemilla-based commitment for efficiency in Halo2:
-
-```math
-  \text{cm} = \text{SinsemillaCommit}(\text{repr}(d), \text{repr}(pk_d), v, ρ, ψ, rcm)
-```
-
-The commitment must bind all critical note components to ensure integrity and privacy.
-
-___
 
 ### Zk Circuit Design
 
@@ -351,7 +467,7 @@ ___
   
 ## Implementation Checklist
 
-- [ ]   Define   Sinsemilla hashing parameters for Merkle trees and commitments.
+- [ ] Define Sinsemilla hashing parameters for Merkle trees and commitments.
 - [ ] Implement Halo2 circuits for:
   - Merkle inclusion proofs
   - Signature verification (erc-7524)
@@ -361,8 +477,9 @@ ___
   - Nullifier set
   - Note commitment tree
   - Token transfers
+  - Wavs service authentication
 - [ ] Develop off-line tools for key generation and proof construction.
-  - [ ] secure random number generator
+  - [x] secure random number generator
   - [x] genesis proof generator
   - [x] genesis fixed amount note generator
 
@@ -372,7 +489,7 @@ ___
 - public inputs
 - halo2 proof
 
-A  cosmwasm smart contract will be paired with a wavs instance, which we expect to have a set of bls12-381 keys as identity and authentication. This contracts must accept and process a proof of ownership of function for the bls12-381 keys, as we will implement support for key aggregation and rotation. This smartt contract will manage the nullifier set as well, in an append-only accepted only from the account managed by the set of wavs operators.
+A cosmwasm smart contract will be paired with a wavs instance, which we expect to have a set of bls12-381 keys as identity and authentication. This contracts must accept and process a proof of ownership of function for the bls12-381 keys, as we will implement support for key aggregation and rotation. This smart contract will manage the nullifier set as well, in an append-only accepted only from the account managed by the set of wavs operators. It will make use of the sudo entrypoint interface required by the x/smart-account module, allowing for a granular approach to implementing this.
 
 ## Verifiable Service Mesh
 
