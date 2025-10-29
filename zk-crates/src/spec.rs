@@ -1,14 +1,15 @@
 use std::ops::Deref;
 
 use ff::{Field, FromUniformBytes, PrimeField};
+use group::{Curve, Group, GroupEncoding, WnafBase, WnafScalar};
 use halo2_gadgets::{poseidon::primitives as poseidon, sinsemilla::primitives as sinsemilla};
 use pasta_curves::arithmetic::CurveExt;
 use pasta_curves::{arithmetic::CurveAffine, pallas};
 use subtle::{ConditionallySelectable, CtOption};
-use group::{Curve, Group, GroupEncoding, WnafBase, WnafScalar};
 
-use crate::constants::KEY_DIVERSIFICATION_PERSONALIZATION;
-
+use crate::constants::{KEY_DERIVATION_DST_JUBJUB, KEY_DIVERSIFICATION_PERSONALIZATION};
+use crate::keys::EligibleSk;
+use crate::value::{MAX_DENOM_LEN, NoteDenom};
 
 const PREPARED_WINDOW_SIZE: usize = 4;
 
@@ -20,7 +21,6 @@ impl PreparedNonIdentityBase {
         PreparedNonIdentityBase(WnafBase::new(base.0))
     }
 }
-
 
 #[derive(Clone, Debug)]
 pub(crate) struct PreparedNonZeroScalar(WnafScalar<pallas::Scalar, PREPARED_WINDOW_SIZE>);
@@ -102,6 +102,82 @@ pub(crate) fn mod_r_p(x: pallas::Base) -> pallas::Scalar {
 pub(crate) fn prf_nf(nk: pallas::Base, rho: pallas::Base) -> pallas::Base {
     poseidon::Hash::<_, poseidon::P128Pow5T3, poseidon::ConstantLength<2>, 3, 2>::init()
         .hash([nk, rho])
+}
+
+pub fn hkdr_jubjub(ak: [u8; 32]) -> jubjub::Scalar {
+    let mut h: [u8; 32] = *blake3::Hasher::new_derive_key(KEY_DERIVATION_DST_JUBJUB)
+        .update(&ak)
+        // .update(&nk)
+        .finalize()
+        .as_bytes();
+
+    // Drop the most significant five bits, so it can be interpreted as a scalar.
+    h[31] &= 0b0000_0111;
+
+    jubjub::Fr::from_repr(h).unwrap()
+}
+
+pub(crate) fn prf_jubjub_m(
+    fdi: pallas::Base,
+    v: pallas::Base,
+    nd: pallas::Base,
+    elig_sk: pallas::Base,
+) -> pallas::Base {
+    poseidon::Hash::<_, poseidon::P128Pow5T3, poseidon::ConstantLength<4>, 3, 2>::init()
+        .hash([fdi, v, nd, elig_sk])
+}
+
+/// Convert a `NoteDenom` into a field element by hashing its byte payload.
+pub(crate) fn denom_to_base(nd: &NoteDenom) -> pallas::Base {
+    let mut inputs = [pallas::Base::zero(); MAX_DENOM_LEN];
+    for (i, &b) in nd.as_bytes()[..nd.len_inner() as usize].iter().enumerate() {
+        // Simple conversion: a byte → the scalar `b` in the field.
+        // `Base::from` is available via the `From<u64>` impl.
+        inputs[i] = pallas::Base::from(b as u64);
+    }
+
+    poseidon::Hash::<
+        _,                    // the circuit (unused here)
+        poseidon::P128Pow5T3, // the permutation parameters
+        poseidon::ConstantLength<MAX_DENOM_LEN>,
+        3, // width = 3 (t = 3)
+        2, // rounds = 2 (full rounds per the spec)
+    >::init()
+    .hash(inputs)
+}
+
+/// Convert a1 secret key (`EligibleSk`) into a `pallas::Base` scalar
+/// using the Poseidon hash. 
+/// 
+/// Used in deriving a notes nullifier.
+pub(crate) fn elig_sk_to_base(esk: &EligibleSk) -> pallas::Base {
+    const DST_TAG: &[u8] = b"jubjub:eligible-sk";
+    let mut tag_inputs = [pallas::Base::zero(); MAX_DENOM_LEN];
+    for (i, &b) in DST_TAG.iter().enumerate() {
+        tag_inputs[i] = pallas::Base::from(b as u64);
+    }
+
+    // One `Base` per byte – this mirrors the handling in `denom_to_base`.
+    let mut key_inputs = [pallas::Base::zero(); MAX_DENOM_LEN];
+    for (i, &b) in esk.0.secret_bytes().iter().enumerate() {
+        key_inputs[i] = pallas::Base::from(b as u64);
+    }
+
+    let mut poseidon_inputs = [pallas::Base::zero(); MAX_DENOM_LEN];
+    let tag_len = DST_TAG.len();
+    poseidon_inputs[..tag_len].copy_from_slice(&tag_inputs[..tag_len]);
+    poseidon_inputs[tag_len..tag_len + 32].copy_from_slice(&key_inputs[..32]);
+    // --------------------------------------------------------------------
+    // 4️⃣  Run Poseidon.
+    // --------------------------------------------------------------------
+    poseidon::Hash::<
+        _, // circuit placeholder (unused here)
+        poseidon::P128Pow5T3,
+        poseidon::ConstantLength<MAX_DENOM_LEN>,
+        3, // width = 3 (t = 3)
+        2, // full rounds per spec
+    >::init()
+    .hash(poseidon_inputs)
 }
 
 /// An integer in [1..q_P].
@@ -204,7 +280,6 @@ pub(crate) fn to_scalar(x: [u8; 64]) -> pallas::Scalar {
     pallas::Scalar::from_uniform_bytes(&x)
 }
 
-
 /// Defined in [Zcash Protocol Spec § 5.4.1.6: DiversifyHash^Sapling and DiversifyHash^Orchard Hash Functions][concretediversifyhash].
 ///
 /// [concretediversifyhash]: https://zips.z.cash/protocol/nu5.pdf#concretediversifyhash
@@ -215,7 +290,6 @@ pub(crate) fn diversify_hash(d: &[u8; 11]) -> NonIdentityPallasPoint {
     // TODO: Replace the unwrap_or_else with a cached fixed point.
     NonIdentityPallasPoint(CtOption::new(g_d, !g_d.is_identity()).unwrap_or_else(|| hasher(&[])))
 }
-
 
 /// Defined in [Zcash Protocol Spec § 5.4.5.5: Orchard Key Agreement][concreteorchardkeyagreement].
 ///

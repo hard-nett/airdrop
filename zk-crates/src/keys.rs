@@ -3,8 +3,10 @@ use core2::io::{self, Read, Write};
 use ff::PrimeField;
 use fpe::ff1::{BinaryNumeralString, FF1};
 use group::GroupEncoding;
+use jubjub::Scalar;
 use pasta_curves::pallas;
 use rand::RngCore;
+use redjubjub::*;
 use std::error::Error;
 use subtle::{Choice, ConditionallySelectable, CtOption};
 use zip32::{AccountId, DiversifierIndex};
@@ -12,8 +14,60 @@ use zip32::{AccountId, DiversifierIndex};
 use crate::prf_expand::PrfExpand;
 use crate::spec::{
     NonIdentityPallasPoint, NonZeroPallasBase, NonZeroPallasScalar, PreparedNonIdentityBase,
-    diversify_hash, extract_p, ka_orchard_prepared, prf_nf, to_base,
+    diversify_hash, extract_p, hkdr_jubjub, ka_orchard_prepared, prf_nf, to_base,
 };
+
+#[derive(Debug, Copy, Clone)]
+pub struct EligibleSk(pub secp256k1::SecretKey);
+
+impl EligibleSk {
+    pub fn from_sk(sk: secp256k1::SecretKey) -> Self {
+        Self(sk)
+    }
+    /// Build an `EligibleSk` from a hex string that represents a 32‑byte SECP‑256k1 secret key.
+    ///
+    /// # Example
+    /// ```rust
+    /// let sk = EligibleSk::new_from_sk("1a2b3c…"); // 64‑char hex
+    /// ```
+    ///
+    /// The function will `panic!` if the string is not a valid 32‑byte hex value.
+    /// Replace the `expect`/`panic!` with proper error handling if you need it.
+
+    pub fn from_hex(hex_str: &str) -> Self {
+        // 1️⃣ Decode the hex string into raw bytes (expect exactly 32 bytes).
+        let bytes: [u8; 32] = hex_str
+            .as_bytes()
+            .try_into()
+            .expect("slice conversion to [u8;32] should never fail");
+
+        // 3️⃣ Convert the byte slice into a `SecretKey`.
+        // `SecretKey::from_slice` returns a Result; we unwrap because the HKDF
+        // mask guarantees the scalar is valid – adjust if you want graceful errors.
+        let secp_sk = secp256k1::SecretKey::from_byte_array(bytes)
+            .expect("invalid secp256k1 secret key material");
+
+        // 4️⃣ Wrap and return.
+        Self(secp_sk)
+    }
+}
+
+#[derive(Debug, Copy, Clone)]
+pub struct JubJubKey(pub redjubjub::SigningKey<Binding>);
+
+impl JubJubKey {
+    pub fn derive_from_elig_sk(elig_sk: EligibleSk) -> Self {
+        let ak: [u8; 32] = *elig_sk.0.as_ref();
+        let scalar: Scalar = hkdr_jubjub(ak);
+        let scalar_bytes: [u8; 32] = scalar.into();
+        let signing_key = SigningKey::<Binding>::try_from(scalar_bytes)
+            .expect("derived scalar must be a valid JubJub signing key");
+        Self(signing_key)
+    }
+}
+
+#[derive(Debug, Copy, Clone)]
+pub struct JubJubSignature(redjubjub::Signature<Binding>);
 
 /// A spending key, from which all key material is derived.
 ///
@@ -136,7 +190,6 @@ impl From<&SpendingKey> for NullifierDerivingKey {
     }
 }
 
-
 // /// A key that provides the capability to derive a sequence of diversifiers.
 // ///
 // /// $\mathsf{dk}$ as defined in [Zcash Protocol Spec § 4.2.3: Orchard Key Components][orchardkeycomponents].
@@ -177,8 +230,6 @@ impl From<&SpendingKey> for NullifierDerivingKey {
 //         DiversifierKey(bytes)
 //     }
 // }
-
-
 
 /// A key that provides the capability to view incoming and outgoing transactions.
 ///
@@ -306,120 +357,120 @@ impl FullViewingKey {
     //     }
     // }
 
-//     /// Defined in [Zcash Protocol Spec § 4.2.3: Orchard Key Components][orchardkeycomponents].
-//     ///
-//     /// [orchardkeycomponents]: https://zips.z.cash/protocol/nu5.pdf#orchardkeycomponents
-//     fn derive_dk_ovk(&self) -> (DiversifierKey, OutgoingViewingKey) {
-//         let k = self.rivk.0.to_repr();
-//         let b = [(&self.ak.0).into(), self.nk.0.to_repr()];
-//         let r = PrfExpand::ORCHARD_DK_OVK.with(&k, &b[0], &b[1]);
-//         (
-//             DiversifierKey(r[..32].try_into().unwrap()),
-//             OutgoingViewingKey(r[32..].try_into().unwrap()),
-//         )
-//     }
+    //     /// Defined in [Zcash Protocol Spec § 4.2.3: Orchard Key Components][orchardkeycomponents].
+    //     ///
+    //     /// [orchardkeycomponents]: https://zips.z.cash/protocol/nu5.pdf#orchardkeycomponents
+    //     fn derive_dk_ovk(&self) -> (DiversifierKey, OutgoingViewingKey) {
+    //         let k = self.rivk.0.to_repr();
+    //         let b = [(&self.ak.0).into(), self.nk.0.to_repr()];
+    //         let r = PrfExpand::ORCHARD_DK_OVK.with(&k, &b[0], &b[1]);
+    //         (
+    //             DiversifierKey(r[..32].try_into().unwrap()),
+    //             OutgoingViewingKey(r[32..].try_into().unwrap()),
+    //         )
+    //     }
 
-//     /// Returns the payment address for this key at the given index.
-//     pub fn address_at(&self, j: impl Into<DiversifierIndex>, scope: Scope) -> Address {
-//         self.to_ivk(scope).address_at(j)
-//     }
+    //     /// Returns the payment address for this key at the given index.
+    //     pub fn address_at(&self, j: impl Into<DiversifierIndex>, scope: Scope) -> Address {
+    //         self.to_ivk(scope).address_at(j)
+    //     }
 
-//     /// Returns the payment address for this key corresponding to the given diversifier.
-//     pub fn address(&self, d: Diversifier, scope: Scope) -> Address {
-//         // Shortcut: we don't need to derive DiversifierKey.
-//         match scope {
-//             Scope::External => KeyAgreementPrivateKey::from_fvk(self),
-//             Scope::Internal => KeyAgreementPrivateKey::from_fvk(&self.derive_internal()),
-//         }
-//         .address(d)
-//     }
+    //     /// Returns the payment address for this key corresponding to the given diversifier.
+    //     pub fn address(&self, d: Diversifier, scope: Scope) -> Address {
+    //         // Shortcut: we don't need to derive DiversifierKey.
+    //         match scope {
+    //             Scope::External => KeyAgreementPrivateKey::from_fvk(self),
+    //             Scope::Internal => KeyAgreementPrivateKey::from_fvk(&self.derive_internal()),
+    //         }
+    //         .address(d)
+    //     }
 
-//     /// Returns the scope of the given address, or `None` if the address is not derived
-//     /// from this full viewing key.
-//     pub fn scope_for_address(&self, address: &Address) -> Option<Scope> {
-//         [Scope::External, Scope::Internal]
-//             .into_iter()
-//             .find(|scope| self.to_ivk(*scope).diversifier_index(address).is_some())
-//     }
+    //     /// Returns the scope of the given address, or `None` if the address is not derived
+    //     /// from this full viewing key.
+    //     pub fn scope_for_address(&self, address: &Address) -> Option<Scope> {
+    //         [Scope::External, Scope::Internal]
+    //             .into_iter()
+    //             .find(|scope| self.to_ivk(*scope).diversifier_index(address).is_some())
+    //     }
 
-//     /// Serializes the full viewing key as specified in [Zcash Protocol Spec § 5.6.4.4: Orchard Raw Full Viewing Keys][orchardrawfullviewingkeys]
-//     ///
-//     /// [orchardrawfullviewingkeys]: https://zips.z.cash/protocol/protocol.pdf#orchardfullviewingkeyencoding
-//     pub fn write<W: std::fmt::Write>(&self, mut writer: W) -> io::Result<()> {
-//         writer.write_all(&self.to_bytes())
-//     }
+    //     /// Serializes the full viewing key as specified in [Zcash Protocol Spec § 5.6.4.4: Orchard Raw Full Viewing Keys][orchardrawfullviewingkeys]
+    //     ///
+    //     /// [orchardrawfullviewingkeys]: https://zips.z.cash/protocol/protocol.pdf#orchardfullviewingkeyencoding
+    //     pub fn write<W: std::fmt::Write>(&self, mut writer: W) -> io::Result<()> {
+    //         writer.write_all(&self.to_bytes())
+    //     }
 
-//     /// Parses a full viewing key from its "raw" encoding as specified in [Zcash Protocol Spec § 5.6.4.4: Orchard Raw Full Viewing Keys][orchardrawfullviewingkeys]
-//     ///
-//     /// [orchardrawfullviewingkeys]: https://zips.z.cash/protocol/protocol.pdf#orchardfullviewingkeyencoding
-//     pub fn read<R: Read>(mut reader: R) -> io::Result<Self> {
-//         let mut data = [0u8; 96];
-//         reader.read_exact(&mut data)?;
+    //     /// Parses a full viewing key from its "raw" encoding as specified in [Zcash Protocol Spec § 5.6.4.4: Orchard Raw Full Viewing Keys][orchardrawfullviewingkeys]
+    //     ///
+    //     /// [orchardrawfullviewingkeys]: https://zips.z.cash/protocol/protocol.pdf#orchardfullviewingkeyencoding
+    //     pub fn read<R: Read>(mut reader: R) -> io::Result<Self> {
+    //         let mut data = [0u8; 96];
+    //         reader.read_exact(&mut data)?;
 
-//         Self::from_bytes(&data).ok_or_else(|| {
-//             io::Error::new(
-//                 io::ErrorKind::InvalidInput,
-//                 "Unable to deserialize a valid Orchard FullViewingKey from bytes",
-//             )
-//         })
-//     }
+    //         Self::from_bytes(&data).ok_or_else(|| {
+    //             io::Error::new(
+    //                 io::ErrorKind::InvalidInput,
+    //                 "Unable to deserialize a valid Orchard FullViewingKey from bytes",
+    //             )
+    //         })
+    //     }
 
-//     /// Serializes the full viewing key as specified in [Zcash Protocol Spec § 5.6.4.4: Orchard Raw Full Viewing Keys][orchardrawfullviewingkeys]
-//     ///
-//     /// [orchardrawfullviewingkeys]: https://zips.z.cash/protocol/protocol.pdf#orchardfullviewingkeyencoding
-//     pub fn to_bytes(&self) -> [u8; 96] {
-//         let mut result = [0u8; 96];
-//         result[0..32].copy_from_slice(&<[u8; 32]>::from(self.ak.0.clone()));
-//         result[32..64].copy_from_slice(&self.nk.0.to_repr());
-//         result[64..96].copy_from_slice(&self.rivk.0.to_repr());
-//         result
-//     }
+    //     /// Serializes the full viewing key as specified in [Zcash Protocol Spec § 5.6.4.4: Orchard Raw Full Viewing Keys][orchardrawfullviewingkeys]
+    //     ///
+    //     /// [orchardrawfullviewingkeys]: https://zips.z.cash/protocol/protocol.pdf#orchardfullviewingkeyencoding
+    //     pub fn to_bytes(&self) -> [u8; 96] {
+    //         let mut result = [0u8; 96];
+    //         result[0..32].copy_from_slice(&<[u8; 32]>::from(self.ak.0.clone()));
+    //         result[32..64].copy_from_slice(&self.nk.0.to_repr());
+    //         result[64..96].copy_from_slice(&self.rivk.0.to_repr());
+    //         result
+    //     }
 
-//     /// Parses a full viewing key from its "raw" encoding as specified in [Zcash Protocol Spec § 5.6.4.4: Orchard Raw Full Viewing Keys][orchardrawfullviewingkeys]
-//     ///
-//     /// [orchardrawfullviewingkeys]: https://zips.z.cash/protocol/protocol.pdf#orchardfullviewingkeyencoding
-//     pub fn from_bytes(bytes: &[u8; 96]) -> Option<Self> {
-//         let ak = SpendValidatingKey::from_bytes(&bytes[..32])?;
-//         let nk = NullifierDerivingKey::from_bytes(&bytes[32..64])?;
-//         let rivk = CommitIvkRandomness::from_bytes(&bytes[64..])?;
+    //     /// Parses a full viewing key from its "raw" encoding as specified in [Zcash Protocol Spec § 5.6.4.4: Orchard Raw Full Viewing Keys][orchardrawfullviewingkeys]
+    //     ///
+    //     /// [orchardrawfullviewingkeys]: https://zips.z.cash/protocol/protocol.pdf#orchardfullviewingkeyencoding
+    //     pub fn from_bytes(bytes: &[u8; 96]) -> Option<Self> {
+    //         let ak = SpendValidatingKey::from_bytes(&bytes[..32])?;
+    //         let nk = NullifierDerivingKey::from_bytes(&bytes[32..64])?;
+    //         let rivk = CommitIvkRandomness::from_bytes(&bytes[64..])?;
 
-//         let fvk = FullViewingKey { ak, nk, rivk };
+    //         let fvk = FullViewingKey { ak, nk, rivk };
 
-//         // If either ivk is 0 or ⊥, this FVK is invalid.
-//         let _: NonZeroPallasBase = Option::from(KeyAgreementPrivateKey::derive_inner(&fvk))?;
-//         let _: NonZeroPallasBase =
-//             Option::from(KeyAgreementPrivateKey::derive_inner(&fvk.derive_internal()))?;
+    //         // If either ivk is 0 or ⊥, this FVK is invalid.
+    //         let _: NonZeroPallasBase = Option::from(KeyAgreementPrivateKey::derive_inner(&fvk))?;
+    //         let _: NonZeroPallasBase =
+    //             Option::from(KeyAgreementPrivateKey::derive_inner(&fvk.derive_internal()))?;
 
-//         Some(fvk)
-//     }
+    //         Some(fvk)
+    //     }
 
-//     /// Derives an internal full viewing key from a full viewing key, as specified in
-//     /// [ZIP32][orchardinternalfullviewingkey]. Internal use only.
-//     ///
-//     /// [orchardinternalfullviewingkey]: https://zips.z.cash/zip-0032#orchard-internal-key-derivation
-//     fn derive_internal(&self) -> Self {
-//         FullViewingKey {
-//             ak: self.ak.clone(),
-//             nk: self.nk,
-//             rivk: self.rivk(Scope::Internal),
-//         }
-//     }
+    //     /// Derives an internal full viewing key from a full viewing key, as specified in
+    //     /// [ZIP32][orchardinternalfullviewingkey]. Internal use only.
+    //     ///
+    //     /// [orchardinternalfullviewingkey]: https://zips.z.cash/zip-0032#orchard-internal-key-derivation
+    //     fn derive_internal(&self) -> Self {
+    //         FullViewingKey {
+    //             ak: self.ak.clone(),
+    //             nk: self.nk,
+    //             rivk: self.rivk(Scope::Internal),
+    //         }
+    //     }
 
-//     /// Derives an `IncomingViewingKey` for this full viewing key.
-//     pub fn to_ivk(&self, scope: Scope) -> IncomingViewingKey {
-//         match scope {
-//             Scope::External => IncomingViewingKey::from_fvk(self),
-//             Scope::Internal => IncomingViewingKey::from_fvk(&self.derive_internal()),
-//         }
-//     }
+    //     /// Derives an `IncomingViewingKey` for this full viewing key.
+    //     pub fn to_ivk(&self, scope: Scope) -> IncomingViewingKey {
+    //         match scope {
+    //             Scope::External => IncomingViewingKey::from_fvk(self),
+    //             Scope::Internal => IncomingViewingKey::from_fvk(&self.derive_internal()),
+    //         }
+    //     }
 
-//     /// Derives an `OutgoingViewingKey` for this full viewing key.
-//     pub fn to_ovk(&self, scope: Scope) -> OutgoingViewingKey {
-//         match scope {
-//             Scope::External => OutgoingViewingKey::from_fvk(self),
-//             Scope::Internal => OutgoingViewingKey::from_fvk(&self.derive_internal()),
-//         }
-//     }
+    //     /// Derives an `OutgoingViewingKey` for this full viewing key.
+    //     pub fn to_ovk(&self, scope: Scope) -> OutgoingViewingKey {
+    //         match scope {
+    //             Scope::External => OutgoingViewingKey::from_fvk(self),
+    //             Scope::Internal => OutgoingViewingKey::from_fvk(&self.derive_internal()),
+    //         }
+    //     }
 }
 
 // /// A key that provides the capability to detect and decrypt incoming notes from the block

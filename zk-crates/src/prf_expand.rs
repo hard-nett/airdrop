@@ -2,7 +2,7 @@ use core::marker::PhantomData;
 
 use blake2b_simd::Params;
 
-const PRF_EXPAND_PERSONALIZATION: &[u8; 16] = b"Zcash_ExpandSeed";
+const PRF_EXPAND_PERSONALIZATION: &[u8; 16] = b"Stash_ExpandSeed";
 
 /// The set of domains in which $PRF^\mathsf{expand}$ is defined.
 ///
