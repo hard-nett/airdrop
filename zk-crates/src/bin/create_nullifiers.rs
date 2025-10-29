@@ -1,5 +1,7 @@
+// cargo run --bin create_nullifier -- <elig_addr> <token-denom> <amount>
+// ex:  cargo run --bin create_nullifiers -- 0x0000000000000000000000000000000000000000 uterp 100
 use bip39::{Language, Mnemonic};
-use cosmwasm_std::{Api, CanonicalAddr};
+use cosmwasm_std::{Api, CanonicalAddr, testing::mock_dependencies};
 use ff::{Field, FromUniformBytes, PrimeField};
 use hkdf::Hkdf;
 use k256::sha2::Sha256;
@@ -10,12 +12,12 @@ use serde_json::Value;
 use zk_crates::{
     address::HeadstashAddr,
     keys::{EligibleSk, FullViewingKey, JubJubKey},
-    note::{Note, RandomSeed, Rho},
+    note::{Note, RandomSeed, Rho, scripts::NoteTemplate},
     value::{NoteDenom, NoteValue},
 };
 
-use std::fs;
 use std::str::FromStr;
+use std::{collections::HashMap, fs};
 use std::{env, error::Error};
 
 pub type BoxError = Box<dyn Error + Send + Sync>;
@@ -45,7 +47,7 @@ fn hkdf_expand(label: &[u8], ikm: &[u8]) -> [u8; 32] {
 fn rho_from_secure_random() -> Rho {
     let mut randomness_64 = [0; 64];
     blake3::Hasher::new()
-        .update(&zk_crates::randomness::ultra_secure_random())
+        .update(&headstash_randomness::ultra_secure_random())
         .finalize_xof()
         .fill(&mut randomness_64);
 
@@ -94,12 +96,12 @@ fn find_fdi(input_path: &str, token: &str, amount: &str) -> Result<u64, BoxError
     .into())
 }
 
-// cargo run --bin create_nullifier -- ./data/notes/<elig_addr> <token-denom> <amount>
-// ex:  cargo run --bin create_nullifiers -- ./data/notes/0x0000000000000000000000000000000000000000.json uterp 100
 fn main() -> Result<(), BoxError> {
-    let (input_path, token_str, amount_str) = get_input_path()?;
+    let (input_file, token_str, amount_str) = get_input_path()?;
+    let input_path = &format!("./data/notes/{}.json", input_file);
     let output_dir = std::path::Path::new("./data/spent-notes");
-    let mut input_data: Value = serde_json::from_str(&std::fs::read_to_string(&input_path)?)?;
+    let output_file = output_dir.join(&format!("{}.json", input_file));
+    // let mut input_data: Value = serde_json::from_str(&std::fs::read_to_string(input_path)?)?;
     let fdi = find_fdi(&input_path, &token_str, &amount_str)?;
 
     let mnemonic = "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about";
@@ -115,21 +117,15 @@ fn main() -> Result<(), BoxError> {
             .map_err(|e| format!("Invalid amount \"{}\": {}", amount_str, e))?,
     );
 
+    let mock_deps = mock_dependencies();
     let recipient = HeadstashAddr::try_from(
-        CanonicalAddr::from(
-            blake3::hash(
-                "DE4BAA02C4855872BBA5464749157D06151ED215C6FD39A07454344DE8D9A2BF".as_bytes(),
-            )
-            .as_bytes(),
-        )
-        .as_ref(),
+        mock_deps
+            .api
+            .addr_canonicalize(&mock_deps.api.addr_make("rick").to_string())
+            .unwrap(),
     )?;
 
-    // determine what fixed-value-note available to spend
-    //  - load available note templates from incoming addr
-    let mut rng = OsRng;
-    let randomness1 = zk_crates::randomness::ultra_secure_random();
-    let randomness2 = zk_crates::randomness::ultra_secure_random();
+    let randomness2 = headstash_randomness::ultra_secure_random();
     let rho = rho_from_secure_random();
     let rseed = RandomSeed::from_bytes(randomness2, &rho).unwrap();
 
@@ -139,7 +135,31 @@ fn main() -> Result<(), BoxError> {
     println!("note.rho(): {:#?}", note.rho());
     println!("note.rseed(): {:#?}", hex::encode(note.rseed().as_bytes()));
     println!("note.value(): {:#?}", note.value().inner());
-    println!("note.nullifier(fvk);: {:#?}", note.nullifier());
+    println!("note.nullifier(): {:#?}", note.nullifier());
+
+    // create new spent note file in output:
+    // Read existing spent notes (if any)
+    let mut spent_notes: HashMap<String, Value> = if output_file.exists() {
+        serde_json::from_str(&fs::read_to_string(&output_file)?)?
+    } else {
+        fs::create_dir_all(&output_dir)?;
+        HashMap::new()
+    };
+    let note_data: NoteTemplate = NoteTemplate::from(note);
+    let composite_key = note_data.composite_key();
+
+    spent_notes.insert(composite_key, note_data.into());
+    fs::write(&output_file, serde_json::to_string_pretty(&spent_notes)?)?;
 
     Ok(())
 }
+
+// TODO:
+// - notecommitment derivation accuracy
+// - nullifier derivation accuracy
+// - document DST & hashing algo constant in spec
+
+// TEST:
+// nullifier should not be impacted by randomness inputs
+// nullifier should change with different elig_sk/elig_pk
+//

@@ -4,23 +4,21 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+headstash-randomness = { path = "../libs/randomness" }
 serde = {version = "1.0.228",features = ["derive"]  } 
 serde_json = "1.0.145"
 lazy_static = "1"
 memuse = { version = "0.2.2", default-features = false }
-winit = "0.30.12"
 core2 = { version = "0.3", default-features = false, features = ["alloc"] }
 rayon = "1.11.0"
 
 ## key related
 ff = "0.13"
-ff_ce = {package="ff_ce" , version= "0.11", features = ["derive"]}
 pasta_curves = "0.5"
 zip32 = { version = "0.2.0", default-features = false }
 k256 = { version = "0.13.4", features = ["hash2curve"] }
 plume_rustcrypto = {path = "./submodules/zk-nullifier-sig/rust-k256"}
 elliptic-curve = { version =  "0.13.8", features = ["hash2curve"] }
-babyjubjub-rs = { version = "0.0.11", default-features = false, features = ["aarch64"] }
 redjubjub = { version = "0.8", default-features = false }
 jubjub = { version = "0.10", default-features = false, features = ["alloc"] }
 bip39 = "2.2.0"
@@ -36,9 +34,8 @@ bitvec = { version = "1", default-features = false }
 cosmwasm-std = { version = "3.0.0"  }
 
 ## randomness-generation
-rand = { version = "0.8", default-features = false }
+rand = "0.8"
 rand_core = { version = "0.6", default-features = false }
-rand_chacha = "0.9.0"
 group = "0.13"
 
 ## hashing/encoding/encryption
@@ -52,4 +49,6 @@ blake3 = "1.8.2"
 sinsemilla = "0.1.0"
 aes = "0.8"
 fpe = { version = "0.6", default-features = false, features = ["alloc"] }
+
+[dev-dependencies]
 

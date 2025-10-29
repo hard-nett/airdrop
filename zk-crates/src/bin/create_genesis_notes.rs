@@ -1,46 +1,10 @@
 // cargo run -- --bin create_genesis_notes ./data/genesis_sinsemilla.json 0x0000000000000000000000000000000000000000
-use serde::Serialize;
+
 use serde_json::{self, Value, json};
 use std::{
     path::Path,
     {env, fs},
 };
-
-// The full note template (private fields are placeholders)
-#[derive(Serialize, Debug, Clone)]
-struct NoteTemplate {
-    m: String,
-    elig_sk: String,
-    jub_sk: String,
-    sig_jub: String,
-    fdi: u64,
-    amount: String,
-    denom: String,
-    recp: String,
-    jub_null: String,
-    jub_pk: String,
-    ψ: String,
-    note_cm: String,
-}
-
-impl From<NoteTemplate> for Value {
-    fn from(nt: NoteTemplate) -> Self {
-        json!({
-            "m":          nt.m,
-            "elig_sk":    nt.elig_sk,
-            "jub_sk":     nt.jub_sk,
-            "sig_jub":    nt.sig_jub,
-            "fdi":        nt.fdi,
-            "amount":     nt.amount,
-            "denom":      nt.denom,
-            "recp":       nt.recp,
-            "jub_null":   nt.jub_null,
-            "jub_pk":     nt.jub_pk,
-            "ψ":          nt.ψ,
-            "note_cm":    nt.note_cm
-        })
-    }
-}
 
 fn get_cli_args() -> Result<(String, String), Box<dyn std::error::Error>> {
     let args: Vec<String> = env::args().collect();
