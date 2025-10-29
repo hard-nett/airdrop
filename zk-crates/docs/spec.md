@@ -17,7 +17,13 @@ In order to prevent this association between verifying ownership & claiming toke
 
 ### Q: How Does Someone Prove They Own An Eligible Wallet Without Revealing Their Signature?
 
-- **proof of ownership within the note.** This is similar to the existing proof of ownership described above, however we must use zk-proof optimize implementation as constraining a ecdsa signature within a circuit is computationally expensive.
+- **proof of ownership + key derivation.** This is similar to the existing proof of ownership described above, however we must use zk-proof optimized implementation as constraining a ecdsa signature within a circuit is computationally expensive.
+
+Specifically, we derive a fresh key-pair that is verifiably derived from the eligible key pair, which lets us perform out-of-circuit signature verification of the notes content, and then in-circuit verification of:
+
+- the derivation of the new keypair
+- the pairing between the original keypairs public and private components
+<!-- - the derivation of the msg signed from the inputs -->
 
 ### Q: How can someone prevent leaking where their claimed funds end up, if the total amount & distributions allocated are public?
 
@@ -74,7 +80,7 @@ Eligible keys are the keypair that has a public allocation set for them, and is 
 | `redjubjub` | `DST_HKDF_JUBJUB` | Domain‑separation tag for the HKDF that produces the JubJub scalar. | *located in constants* |
 | `redjubjub` | `PrivateKey`, `PublicKey` | Types for the RedJubjub key pair (scalar + point). | `type PrivateKey = redjubjub::Fr;` |
 | `hkdf`  | `hkdf_extract` / `hkdf_expand` | Functions used to derive the HKDF‑key material from a secret seed. | `let prk = hkdf::Hkdf::<Sha256>::extract(salt, ikm);` |
-| `blake2b_simd` (or `poseidon`) | `HASH_DST` | Domain‑separation tag for the hash that feeds the HKDF (e.g., note data). | `const HASH_DST: &[u8] = b"ZK-NOTE-HASH";` |
+| `blake3` (or `poseidon`) | `HASH_DST` | Domain‑separation tag for the hash that feeds the HKDF (e.g., note data). | `const HASH_DST: &[u8] = b"ZK-NOTE-HASH";` |
 
 > NOTE: zcash orchard protocol implements very complex (but useful) key derivation for viewing, authorization, and privacy retention purposes. Our scope does not require the use of viewing or authorization keys, as the end results of tokens claimed will be public. A large portion of the modifications from the orchard protocol altering how note-commitments & nullifiers are derived, as they rely heavily on the use of the key structure used by zcash orchard protocol.
 
@@ -82,42 +88,43 @@ Eligible keys are the keypair that has a public allocation set for them, and is 
 
 In order to make it impossible to retroatively derive randomness used during the note-commitment generation (which in theory would be possible if an adversary had access to a device, the timestamp of when randomness was generated, its theoretically possible to recreate the randomness source), we want to enable user-derived input as an additional seed to the PRNG process.
 
-> <center>
->
-> DEMO: our script used to generate randomness can be invoked via :
+> <center> DEMO: our script used to generate randomness can be invoked via :
 >
 > `cargo run --package zk-crates --bin generate_randomness`</center>
->
 
-## Ownership Verification
+## Ownership Verification: HKDF
 
-Its crucial that our circuit has an feasable way to verify that the `eligible_addr` is authorizing the spend of a specific note. normal signature verification for secp256k1 curves are computationally heavy, & generate extremely large proof sizes not compatible with on-chain gas limits & a nice UX. We explored two possible implementing this, both optimized for in-circuit verification so that we maintain the privacy integrity expected.
+Its crucial that our circuit has an feasable way to verify that the `eligible_addr` is authorizing the spend of a specific note. normal signature verification for secp256k1 curves are computationally heavy, & generate extremely large proof sizes not compatible with on-chain gas limits & a nice UX. We explored two possible implementing this, both optimized for in-circuit verification so that we maintain the privacy integrity expected. We will eventually implement both, but for our MVP , the selected option is to make use of **deterministic HMAC- Key Deriving Function**, to derive a keypair on the Jubjub curve from the `elig_sk`.  This keypair can then be used to sign `m`, being a hash of relevant components within a note being spent, which in turn will allow us to implement constraints within the circuit that will power both proof of ownership & nullifier derivation.
 
-> NOTE: for either implementation,  we must make use of a deterministic value derived from this step, to make use of as an input in the PRF for a notes nullifier and note commitment. This ensures that notes are
+### Step 1: Derive Keys
 
-### Selected Option: HKDF + BabyJubJub
-
-Our selected option is to make use of deterministic HMAC- Key Deriving Function, to derive a keypair on the Baby-Jubjub curve from the `elig_sk`.  This keypair can then be used to sign `m`, being a hash of relevant components within a note being spent, which in turn will allow us to implement constraints within the circuit that will power both proof of ownership & nullifier derivation.
-
-**Step 1: `elig_addr` Owner Generates Proof of Ownership Components:**
-
-- generates challenge being signed `m`, where `m == H(amount||denom||fdi||elig_sk)`
 - derives `jub_sk` from the HKDF `HKDF(elig_sk, dst_jub_hkdf) mod ℓ_jub`
 - computes the baby-jubjub public key `jub_pk = jub_sk * G_jub`
+
+### Step 2: Hash & Sign Msg
+
+- generates challenge being signed `m`, where `m == H(amount||denom||fdi||elig_sk)`
 - signs `m` with the `jub_sk`, generating `sig_jub`
 
-**Step 2: `elig_addr` Owner Generates Proof**
+### Step 3: Verification
 
-- reconstructs `m` from the given inputs
+#### Out Of Circuit
+>
+> NOTE: This step is a simple signature verification, out of circuit. This can be implemented either within the smart contract state, or within a verifiable service logic.
+
+- verifies `m` is accurately reconstructed from the given inputs
 - verifies `sig_jub` against `m` and the supplied `jub_pk`.
-- verifies the HKDF used `elig_sk` as an input to derive `jub_sk`
 
-#### 3. Verification Flow (circuit constraints)
+#### In Circuit
 
-- **a. HKDF Derivation:** derives the baby-jubjub secret `jub_sk` using the known `dst_jub_hkdf` from the `elig_sk`.
-- **b. Public‑key Consistency:** Computes `jub_pk_calc = jub_sk·G_jub` and enforce `jub_pk_calc == jub_pk`.
-- **c. Message Hash:** Re‑compute the messages `calculated_m = H( amount || denom || fixed_denom_index )`, and enforce `calculated_m == m`.
-- **c. Signature Verification (EdDSA on BabyJubJub):**`sig_jub` on `m` using `jub_pk`
+- **Eligible Public‑key/Secret-Key Consistency**: constrains `elig_sk` is the counterpart to `elig_pk`
+- **HKDF Derivation**: constrains the HKDF used `elig_sk` as an input to derive `jub_sk`
+- **Derived Public‑key/Secret-Key Consistency:** Computes `jub_pk_calc = jub_sk·G_jub` and enforce `jub_pk_calc == jub_pk`.
+- **Message Hash**: constrains `m` is accurately derived from the known values
+
+### Future Implementations
+
+- **PLUME Nullifier Constraints**: in circuit nullifier verification following the spec described in ERC-7524.
 
 ## Notes
 
@@ -411,6 +418,7 @@ A Verifiable Service mesh of nodes acting an a proxy for broadcasting proofs on 
 - <https://zips.z.cash/zip-0216>
 - <https://medium.com/zokrates/efficient-ecc-in-zksnarks-using-zokrates-bd9ae37b8186>
 - <https://datatracker.ietf.org/doc/html/rfc5869>
+- <https://github.com/dusk-network/jubjub-schnorr>
 
 ### Alt Spec: 👻
 <!-- 
