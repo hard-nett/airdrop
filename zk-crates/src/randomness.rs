@@ -45,7 +45,6 @@ fn get_timing_jitter() -> [u8; 32] {
         // Perform a small unpredictable operation
         std::hint::black_box(42u64.pow(10));
         let elapsed = start.elapsed().unwrap().as_nanos() as u64;
-        println!("{:#?}", elapsed);
         hash_input.extend_from_slice(&elapsed.to_le_bytes());
     }
 

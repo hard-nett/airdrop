@@ -5,13 +5,15 @@ use rand::RngCore;
 use subtle::CtOption;
 
 pub(crate) mod commitment;
+pub use self::commitment::{ExtractedNoteCommitment, NoteCommitment};
 use crate::address::HeadstashAddr;
-use crate::keys::{FullViewingKey, NullifierDerivingKey, SpendingKey};
+use crate::keys::{
+    EligibleSk, FullViewingKey, JubJubKey, JubJubSignature, NullifierDerivingKey, SpendingKey,
+};
 use crate::prf_expand::PrfExpand;
 use crate::spec::{NonZeroPallasScalar, prf_nf, to_base, to_scalar};
-use crate::value::NoteValue;
-
-pub use self::commitment::{ExtractedNoteCommitment, NoteCommitment};
+use crate::value::{NoteDenom, NoteValue};
+use redjubjub::{Binding, SigningKey};
 
 pub(crate) mod nullifier;
 pub use self::nullifier::Nullifier;
@@ -125,16 +127,24 @@ pub struct Note {
     /// The recipient of the funds. is a raw CanonicalAddr
     recipient: HeadstashAddr,
     /// The value of this note.
-    value: NoteValue,
+    v: NoteValue,
+    /// The token denomination of this note
+    nd: NoteDenom,
     /// A unique creation ID for this note.
-    ///
-    /// This is produced from the nullifier of the note that will be spent in the [`Action`] that
-    /// creates this note.
-    ///
-    /// [`Action`]: crate::action::Action
     rho: Rho,
     /// The seed randomness for various note components.
     rseed: RandomSeed,
+    /// The private key of the eligible_addr
+    elig_sk: EligibleSk,
+    /// The private key of the HKDF jubjub keypair
+    jub_sk: JubJubKey,
+    // /// The nullifier of this note
+    // // jub_null: HeadstashAddr,
+    // sig_jub: JubJubSignature,
+    /// fixed_denomination_index of a genesis note (exists for genesis leaf uniqueness)
+    fdi: u64,
+    // /// H(amount‖denom‖fdi‖elig_sk)
+    // m: HeadstashAddr,
 }
 
 // impl PartialEq for Note {
@@ -164,15 +174,24 @@ impl Note {
     /// [Section 4.19]: https://zips.z.cash/protocol/protocol.pdf#saplingandorchardinband
     pub fn from_parts(
         recipient: HeadstashAddr,
-        value: NoteValue,
+        v: NoteValue,
+        nd: NoteDenom,
+        fdi: u64,
+        elig_sk: EligibleSk,
+        jub_sk: JubJubKey,
         rho: Rho,
         rseed: RandomSeed,
     ) -> CtOption<Self> {
         let note = Note {
             recipient,
-            value,
+            v,
             rho,
             rseed,
+            nd,
+            elig_sk,
+            jub_sk,
+            fdi,
+            // m: todo!(),
         };
         CtOption::new(note, note.commitment_inner().is_some())
     }
@@ -186,10 +205,23 @@ impl Note {
         recipient: HeadstashAddr,
         value: NoteValue,
         rho: Rho,
+        nd: NoteDenom,
+        jub_sk: JubJubKey,
+        fdi: u64,
+        elig_sk: EligibleSk,
         mut rng: impl RngCore,
     ) -> Self {
         loop {
-            let note = Note::from_parts(recipient, value, rho, RandomSeed::random(&mut rng, &rho));
+            let note = Note::from_parts(
+                recipient,
+                value,
+                nd,
+                fdi,
+                elig_sk,
+                jub_sk,
+                rho,
+                RandomSeed::random(&mut rng, &rho),
+            );
             if note.is_some().into() {
                 break note.unwrap();
             }
@@ -226,7 +258,7 @@ impl Note {
 
     /// Returns the value of this note.
     pub fn value(&self) -> NoteValue {
-        self.value
+        self.v
     }
 
     /// Returns the rseed value of this note.
@@ -269,20 +301,15 @@ impl Note {
         NoteCommitment::derive(
             g_d,
             self.recipient.to_bytes(),
-            self.value,
+            self.v,
             self.rho.0,
             self.rseed.psi(&self.rho),
             self.rseed.rcm(&self.rho),
         )
     }
 
-    // /// Derives the nullifier for this note.
-    pub fn nullifier(&self, fvk: &FullViewingKey) -> Nullifier {
-        Nullifier::derive(
-            fvk.nk(),
-            self.rho.0,
-            self.rseed.psi(&self.rho),
-            self.commitment(),
-        )
+    /// Derives the nullifier for this note.
+    pub fn nullifier(&self) -> Nullifier {
+        Nullifier::derive(self.fdi, self.v, self.nd, self.elig_sk)
     }
 }
