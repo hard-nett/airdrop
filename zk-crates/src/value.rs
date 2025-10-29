@@ -8,6 +8,7 @@ use pasta_curves::pallas;
 
 /// Maximum note value.
 pub const MAX_NOTE_VALUE: u64 = u64::MAX;
+pub const MAX_DENOM_LEN: usize = 128;
 
 /// The valid range of the scalar multiplication used in ValueCommit^Orchard.
 ///
@@ -29,6 +30,76 @@ impl fmt::Display for OverflowError {
 
 #[cfg(feature = "std")]
 impl std::error::Error for OverflowError {}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct NoteDenom {
+    bytes: [u8; MAX_DENOM_LEN],
+    len: u8, // stored as `u8` because `MAX_DENOM_LEN <= 255`
+}
+
+impl NoteDenom {
+    /// Return the stored string as `&str`.
+    pub fn as_str(&self) -> &str {
+        // SAFETY: we only ever construct a `NoteDenom` from a valid UTF‑8
+        // string (see `FromStr`), so this slice is always valid.
+        let slice = &self.bytes[..self.len as usize];
+        std::str::from_utf8(slice).expect("invalid UTF‑8 in NoteDenom")
+    }
+
+    /// Return the raw bytes (including unused trailing zeros).
+    pub fn as_bytes(&self) -> &[u8] {
+        &self.bytes[..self.len as usize]
+    }
+    /// Return the raw bytes (including unused trailing zeros).
+    pub fn max_len() -> usize {
+        MAX_DENOM_LEN
+    }
+    /// Return the raw bytes (including unused trailing zeros).
+    pub fn len_inner(&self) -> usize {
+        self.len as usize
+    }
+}
+
+impl Default for NoteDenom {
+    fn default() -> Self {
+        Self {
+            bytes: [0u8; MAX_DENOM_LEN],
+            len: 0,
+        }
+    }
+}
+
+// ---------------------------------------------------------------------
+// Pretty‑printing (e.g. with `println!("{:?}", denom)` or `format!`)
+impl fmt::Display for NoteDenom {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.as_str())
+    }
+}
+
+// ---------------------------------------------------------------------
+// Parsing from a CLI string
+impl std::str::FromStr for NoteDenom {
+    type Err = String; // simple error type; change to a custom error if desired
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let bytes = s.as_bytes();
+        if bytes.len() > MAX_DENOM_LEN {
+            return Err(format!(
+                "denomination too long (max {} bytes): {}",
+                MAX_DENOM_LEN, s
+            ));
+        }
+
+        let mut arr = [0u8; MAX_DENOM_LEN];
+        arr[..bytes.len()].copy_from_slice(bytes);
+
+        Ok(NoteDenom {
+            bytes: arr,
+            len: bytes.len() as u8,
+        })
+    }
+}
 
 /// The non-negative value of an individual Orchard note.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -94,7 +165,6 @@ pub enum Sign {
     /// A negative [`ValueSum`].
     Negative,
 }
-
 
 /// A sum of Orchard note values.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
