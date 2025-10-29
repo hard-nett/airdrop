@@ -16,3 +16,6 @@
 [submodule "egui"]
 	path = egui
 	url = https://github.com/emilk/egui
+[submodule "zk-crates/submodules/sapling-crypto"]
+	path = zk-crates/submodules/sapling-crypto
+	url = https://github.com/zcash/sapling-crypto
