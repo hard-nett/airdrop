@@ -5,22 +5,27 @@ use base64::{Engine as _, engine::general_purpose};
 use hex::decode;
 use pasta_curves::Fp;
 use serde_json::{Value, json};
+
+use ff::{Field, PrimeField, PrimeFieldBits};
+use pasta_curves::{arithmetic::CurveAffine, group::Curve, pallas};
+use sinsemilla::HashDomain;
 use std::error::Error;
 use std::{env, fs};
 use zk_crates::constants::fixed_bases::FIXED_AMOUNTS;
 use zk_crates::constants::sinsemilla::{LEAF_PERSONALIZATION, MERKLE_CRH_PERSONALIZATION};
 
-use ff::{Field, PrimeField, PrimeFieldBits};
-use pasta_curves::{arithmetic::CurveAffine, group::Curve, pallas};
-use sinsemilla::HashDomain;
-
 use rayon::prelude::*;
 use std::sync::Mutex;
 
-type BoxError = Box<dyn Error + Send + Sync>;
-
-// Define the domain for MerkleCRH (from Orchard spec)
-// Define a personalization for leaf hashing to ensure domain separation
+pub type BoxError = Box<dyn Error + Send + Sync>;
+pub fn get_input_path() -> Result<String, BoxError> {
+    let args: Vec<String> = env::args().collect();
+    if args.len() != 2 {
+        eprintln!("Usage: {} <input-file>", args[0]);
+        std::process::exit(1);
+    }
+    Ok(args[1].clone())
+}
 
 // Compute the leaf hash for an address-token-amount tuple
 fn leaf_hash(
@@ -85,7 +90,6 @@ fn extend_with_base_field_bits(bits: &mut Vec<bool>, a: pallas::Base) {
 fn build_merkle_tree(leaves: Vec<pallas::Base>) -> Vec<pallas::Base> {
     let mut current = leaves;
     let mut next = Vec::new();
-
     let mut layer = 0;
     while current.len() > 1 {
         // Pad to even length with zero if needed
@@ -93,18 +97,26 @@ fn build_merkle_tree(leaves: Vec<pallas::Base>) -> Vec<pallas::Base> {
             current.push(pallas::Base::ZERO);
         }
 
-        for chunks in current.chunks(2) {
-            let left = chunks[0];
-            let right = chunks[1];
-            let parent = merkle_crh(layer, left, right);
-            next.push(parent);
-        }
+        // Parallelize the pair‑wise hashing
+        // ---------------------------------------------------------
+        let layer_par = layer; // capture layer for closure
+
+        let parents: Vec<pallas::Base> = current
+            .par_chunks(2) // split into 2‑element chunks in parallel
+            .map(|chunk| {
+                let left = chunk[0];
+                let right = chunk[1];
+                merkle_crh(layer_par, left, right)
+            })
+            .collect();
+
+        next.extend(parents);
+        // ---------------------------------------------------------
 
         current = next;
         next = Vec::new();
         layer += 1;
     }
-
     if current.is_empty() {
         vec![pallas::Base::ZERO]
     } else {
@@ -118,7 +130,7 @@ fn gen_token_leaves(
     addr: &str,
     token_name: &str,
     total_amount: u64,
-) -> Result<(Vec<(usize, String)>, Vec<Fp>), BoxError> {
+) -> Result<(Vec<(u64, usize, String)>, Vec<Fp>), BoxError> {
     // ---------- build work list ------------------------------------------------
     let mut work_items: Vec<u64> = Vec::new();
     let mut remainder = total_amount;
@@ -135,7 +147,7 @@ fn gen_token_leaves(
     debug_assert_eq!(remainder, 0, "remainder not zero after denomination split");
 
     // ---------- parallel leaf generation ---------------------------------------
-    let leaf_hexes = Mutex::new(Vec::<(usize, String)>::new()); // (index, hex)
+    let leaf_hexes = Mutex::new(Vec::<(u64, usize, String)>::new()); // (index, hex)
     let raw_leaves = Mutex::new(Vec::<Fp>::new());
 
     // `enumerate` gives us the leaf‑index (0‑based) for this address/token
@@ -148,7 +160,10 @@ fn gen_token_leaves(
                 &idx.to_string(),
             )?;
             let leaf_hex = format!("0x{}", hex::encode(leaf.to_repr()));
-            leaf_hexes.lock().unwrap().push((idx, leaf_hex));
+            leaf_hexes
+                .lock()
+                .unwrap()
+                .push((fixed_amount, idx, leaf_hex));
             raw_leaves.lock().unwrap().push(leaf);
             Ok(())
         },
@@ -209,8 +224,8 @@ fn main() -> Result<(), BoxError> {
 
             // Push each leaf together with its index:
             //   { "index": <usize>, "leaf": "<hex>" }
-            for (idx, leaf_hex) in leaf_idx_hexes {
-                leaves_arr.push(json!({ "index": idx, "leaf": leaf_hex }));
+            for (fixed_amount, idx, leaf_hex) in leaf_idx_hexes {
+                leaves_arr.push(json!({ "amnt":fixed_amount,"index": idx, "leaf": leaf_hex }));
             }
 
             // ---- push raw leaves into the global vector -------------------
@@ -251,15 +266,6 @@ fn main() -> Result<(), BoxError> {
     Ok(())
 }
 
-fn get_input_path() -> Result<String, BoxError> {
-    let args: Vec<String> = env::args().collect();
-    if args.len() != 2 {
-        eprintln!("Usage: {} <input-file>", args[0]);
-        std::process::exit(1);
-    }
-    Ok(args[1].clone())
-}
-
 #[cfg(test)]
 mod test {
     use super::*;
@@ -279,13 +285,6 @@ mod test {
         }
 
         for (addr, tokens) in data.as_object().unwrap().iter() {
-            // // Validate address key format (simple check for "0x" prefix)
-            // assert!(
-            //     addr.starts_with("0x")
-            //         || addr.len() == 40 && addr.chars().all(|c| c.is_ascii_hexdigit()),
-            //     "Address key must be a valid hex string (with or without 0x): {}",
-            //     addr
-            // );
             assert!(tokens.is_array(), "Value for {} must be an array", addr);
             for token in tokens.as_array().unwrap() {
                 let obj = token.as_object().unwrap();
