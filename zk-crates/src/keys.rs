@@ -11,11 +11,15 @@ use std::error::Error;
 use subtle::{Choice, ConditionallySelectable, CtOption};
 use zip32::{AccountId, DiversifierIndex};
 
+use halo2_gadgets::{poseidon::primitives as poseidon, sinsemilla::primitives as sinsemilla};
+
 use crate::prf_expand::PrfExpand;
 use crate::spec::{
     NonIdentityPallasPoint, NonZeroPallasBase, NonZeroPallasScalar, PreparedNonIdentityBase,
-    diversify_hash, extract_p, hkdr_jubjub, ka_orchard_prepared, prf_nf, to_base,
+    denom_to_base, diversify_hash, elig_sk_to_base, extract_p, hkdr_jubjub, ka_orchard_prepared,
+    prf_jubjub_m, prf_nf, to_base,
 };
+use crate::value::{NoteDenom, NoteValue};
 
 #[derive(Debug, Copy, Clone)]
 pub struct EligibleSk(pub secp256k1::SecretKey);
@@ -68,6 +72,26 @@ impl JubJubKey {
 
 #[derive(Debug, Copy, Clone)]
 pub struct JubJubSignature(redjubjub::Signature<Binding>);
+
+/// The message signed by the JubJub Key
+#[derive(Debug, Copy, Clone)]
+pub struct JubJubMessage(pallas::Base);
+
+impl JubJubMessage {
+    pub fn derive(v: NoteValue, nd: NoteDenom, fdi: u64, elig_sk: EligibleSk) -> Self {
+        JubJubMessage(prf_jubjub_m(
+            fdi.into(),
+            v.inner().into(),
+            denom_to_base(&nd),
+            elig_sk_to_base(&elig_sk),
+        ))
+    }
+
+    /// Returns the raw underlying value.
+    pub fn inner(&self) -> pallas::Base {
+        self.0
+    }
+}
 
 /// A spending key, from which all key material is derived.
 ///

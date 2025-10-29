@@ -419,6 +419,7 @@ A Verifiable Service mesh of nodes acting an a proxy for broadcasting proofs on 
 - <https://medium.com/zokrates/efficient-ecc-in-zksnarks-using-zokrates-bd9ae37b8186>
 - <https://datatracker.ietf.org/doc/html/rfc5869>
 - <https://github.com/dusk-network/jubjub-schnorr>
+- <https://christophe.petit.web.ulb.be/files/16PKC_primeECDLP.pdf>
 
 ### Alt Spec: 👻
 <!-- 

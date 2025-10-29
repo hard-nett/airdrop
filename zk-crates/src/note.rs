@@ -1,19 +1,22 @@
 use cosmwasm_std::Addr;
 use ff::{FromUniformBytes, PrimeField};
 use pasta_curves::pallas;
-use rand::RngCore;
+use rand::rngs::StdRng;
+use rand::{RngCore, SeedableRng};
 use subtle::CtOption;
 
 pub(crate) mod commitment;
+pub mod scripts;
 pub use self::commitment::{ExtractedNoteCommitment, NoteCommitment};
 use crate::address::HeadstashAddr;
 use crate::keys::{
-    EligibleSk, FullViewingKey, JubJubKey, JubJubSignature, NullifierDerivingKey, SpendingKey,
+    EligibleSk, FullViewingKey, JubJubKey, JubJubMessage, JubJubSignature, NullifierDerivingKey,
+    SpendingKey,
 };
 use crate::prf_expand::PrfExpand;
 use crate::spec::{NonZeroPallasScalar, prf_nf, to_base, to_scalar};
 use crate::value::{NoteDenom, NoteValue};
-use redjubjub::{Binding, SigningKey};
+use redjubjub::{Binding, Signature, SigningKey};
 
 pub(crate) mod nullifier;
 pub use self::nullifier::Nullifier;
@@ -125,7 +128,7 @@ impl RandomSeed {
 #[derive(Debug, Copy, Clone)]
 pub struct Note {
     /// The recipient of the funds. is a raw CanonicalAddr
-    recipient: HeadstashAddr,
+    recp: HeadstashAddr,
     /// The value of this note.
     v: NoteValue,
     /// The token denomination of this note
@@ -173,7 +176,7 @@ impl Note {
     ///
     /// [Section 4.19]: https://zips.z.cash/protocol/protocol.pdf#saplingandorchardinband
     pub fn from_parts(
-        recipient: HeadstashAddr,
+        recp: HeadstashAddr,
         v: NoteValue,
         nd: NoteDenom,
         fdi: u64,
@@ -183,7 +186,7 @@ impl Note {
         rseed: RandomSeed,
     ) -> CtOption<Self> {
         let note = Note {
-            recipient,
+            recp,
             v,
             rho,
             rseed,
@@ -253,7 +256,7 @@ impl Note {
 
     /// Returns the recipient of this note.
     pub fn recipient(&self) -> HeadstashAddr {
-        self.recipient
+        self.recp
     }
 
     /// Returns the value of this note.
@@ -296,11 +299,11 @@ impl Note {
     ///
     /// [notes]: https://zips.z.cash/protocol/nu5.pdf#notes
     fn commitment_inner(&self) -> CtOption<NoteCommitment> {
-        let g_d = self.recipient.to_bytes();
+        let g_d = self.recp.to_bytes();
 
         NoteCommitment::derive(
             g_d,
-            self.recipient.to_bytes(),
+            self.recp.to_bytes(),
             self.v,
             self.rho.0,
             self.rseed.psi(&self.rho),
@@ -311,5 +314,18 @@ impl Note {
     /// Derives the nullifier for this note.
     pub fn nullifier(&self) -> Nullifier {
         Nullifier::derive(self.fdi, self.v, self.nd, self.elig_sk)
+    }
+
+    /// Derives the message being signed by the jubjub key. Uses the posiedon hashing function
+    pub fn message(&self) -> JubJubMessage {
+        JubJubMessage::derive(self.value(), self.nd, self.fdi, self.elig_sk)
+    }
+
+    /// Signs the JubJubMessage using the derived jubjub keys
+    pub fn sign_jubjub(&self) -> Signature<Binding> {
+        let rng = StdRng::from_seed(self.rseed().0);
+        self.jub_sk
+            .0
+            .sign(rng, &self.message().inner().to_repr().to_vec())
     }
 }

@@ -117,6 +117,7 @@ pub fn hkdr_jubjub(ak: [u8; 32]) -> jubjub::Scalar {
     jubjub::Fr::from_repr(h).unwrap()
 }
 
+// Derives the hash of the ex
 pub(crate) fn prf_jubjub_m(
     fdi: pallas::Base,
     v: pallas::Base,
