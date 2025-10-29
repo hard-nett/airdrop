@@ -1,34 +1,43 @@
+// cargo run -- --bin create_genesis_notes ./data/genesis_sinsemilla.json 0x0000000000000000000000000000000000000000
 use serde::Serialize;
 use serde_json::{self, Value, json};
-use std::collections::HashMap;
-use std::path::Path;
-use std::{env, fs};
-use zk_crates::constants::fixed_bases::FIXED_AMOUNTS;
+use std::{
+    path::Path,
+    {env, fs},
+};
 
 // The full note template (private fields are placeholders)
 #[derive(Serialize, Debug, Clone)]
 struct NoteTemplate {
-    d: String,             // diversifier
-    pk_d: String,          // diversified transmission key (ivk * G + d)
-    v: String,             // amount (private)
-    p: String,             // rho (nullifier input)
-    ψ: String,             // psi (randomness for note commitment)
-    rcm: String,           // commitment randomness
-    addr_eligible: String, // original eligible address (private)
-    nf_rand: String,       // randomness for nullifier derivation
+    m: String,
+    elig_sk: String,
+    jub_sk: String,
+    sig_jub: String,
+    fdi: u64,
+    amount: String,
+    denom: String,
+    recp: String,
+    jub_null: String,
+    jub_pk: String,
+    ψ: String,
+    note_cm: String,
 }
 
 impl From<NoteTemplate> for Value {
     fn from(nt: NoteTemplate) -> Self {
         json!({
-            "d": nt.d,
-            "pk_d": nt.pk_d,
-            "v": nt.v,
-            "p": nt.p,
-            "ψ": nt.ψ,
-            "rcm": nt.rcm,
-            "addr_eligible": nt.addr_eligible,
-            "nf_rand": nt.nf_rand
+            "m":          nt.m,
+            "elig_sk":    nt.elig_sk,
+            "jub_sk":     nt.jub_sk,
+            "sig_jub":    nt.sig_jub,
+            "fdi":        nt.fdi,
+            "amount":     nt.amount,
+            "denom":      nt.denom,
+            "recp":       nt.recp,
+            "jub_null":   nt.jub_null,
+            "jub_pk":     nt.jub_pk,
+            "ψ":          nt.ψ,
+            "note_cm":    nt.note_cm
         })
     }
 }
@@ -36,14 +45,15 @@ impl From<NoteTemplate> for Value {
 fn get_cli_args() -> Result<(String, String), Box<dyn std::error::Error>> {
     let args: Vec<String> = env::args().collect();
     if args.len() != 3 {
-        eprintln!("Usage: {} <input-file> <address>", args[0]);
+        eprintln!(
+            "provide the following flags: {} <input-file> <address>",
+            args[0]
+        );
         std::process::exit(1);
     }
     Ok((args[1].clone(), args[2].clone()))
 }
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let denominations: Vec<u64> = FIXED_AMOUNTS.to_vec();
-
     let (input_path, addr_target) = get_cli_args()?;
     let input_data: Value = serde_json::from_str(&fs::read_to_string(&input_path)?)?;
 
@@ -56,45 +66,62 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     if let Value::Object(map) = &input_data {
         if let Some(holdings) = map.get(&addr_target) {
             if let Value::Array(holding_array) = holdings {
-                // Step 1: Sum total balance per token
-                let mut token_balances: HashMap<String, u64> = HashMap::new();
+                // ------------------------------------------------------------------
+                // New flow: each holding already contains the concrete leaf values.
+                // ------------------------------------------------------------------
                 for holding in holding_array.iter() {
-                    if let Some(name) = holding["name"].as_str() {
-                        let amount_str = holding["amount"].as_str().unwrap_or("0");
-                        let amount: u64 = amount_str.parse().unwrap_or(0);
-                        *token_balances.entry(name.to_string()).or_insert(0) += amount;
-                    }
-                }
+                    // token identifier – keep the same field you used before (e.g. name or address)
+                    let token_name = holding["name"].as_str().unwrap().to_string();
 
-                // Step 2: For each token, decompose balance into fixed denominations
-                for (token_name, mut total_balance) in token_balances {
+                    // The total amount field is no longer needed for splitting,
+                    // but we keep it in case you still want to log/validate it.
+                    let _total_amount = holding["amount"].as_str().unwrap();
+
+                    let leaves = match holding.get("leaves") {
+                        Some(Value::Array(arr)) => arr,
+                        _ => {
+                            eprintln!("⚠️  No \"leaves\" array for token {}", token_name);
+                            std::process::exit(1);
+                        }
+                    };
+
                     let mut generated_notes = Vec::new();
 
-                    for &denom in &denominations {
-                        while denom <= total_balance {
-                            generated_notes.push(json!({
-                                "d": "0x{diversifier}",
-                                "pk_d": "0x{pk_d}",
-                                "v": denom.to_string(),
-                                "p": "0x{rho}",
-                                "ψ": "0x{psi}",
-                                "rcm": "0x{rcm}",
-                                "addr_eligible": &addr_target,
-                                "nf_rand": "0x{p}"
-                            }));
-                            total_balance -= denom;
-                        }
+                    for leaf in leaves.iter() {
+                        // concrete amount for this note
+                        let amnt = leaf["amnt"].as_u64().unwrap_or_else(|| {
+                            eprintln!("⚠️  Missing \"amnt\" in leaf for token {}", token_name);
+                            std::process::exit(1);
+                        });
+
+                        // the fdi value (the leaf itself)
+                        let fdi = leaf["index"].as_u64().unwrap_or_else(|| {
+                            eprintln!("⚠️  Missing \"index\" in leaf for token {}", token_name);
+                            std::process::exit(1);
+                        });
+
+                        // ------------------------------------------------------------------
+                        // 2️⃣  Build a NoteTemplate‑compatible JSON object
+                        // ------------------------------------------------------------------
+                        generated_notes.push(json!({
+                            "m":          "",
+                            "elig_sk":    &addr_target,
+                            "jub_sk":     "",
+                            "sig_jub":    "",
+                            "fdi":        fdi,
+                            "amount":     amnt.to_string(),
+                            "denom":      token_name.clone(),
+                            "recp":       "",
+                            "jub_null":   "",
+                            "jub_pk":     "",
+                            "ψ":          "",
+                            "note_cm":    ""
+                        }));
                     }
 
-                    // Safety check: ensure full decomposition
-                    if total_balance > 0 {
-                        eprintln!(
-                            "⚠️ Unable to fully decompose {} {} ({} units left)",
-                            total_balance, token_name, total_balance
-                        );
-                        std::process::exit(1);
-                    }
-
+                    // ------------------------------------------------------------------
+                    // 3️⃣  Insert the array of notes for this token into the final map
+                    // ------------------------------------------------------------------
                     address_notes.insert(token_name, Value::Array(generated_notes));
                 }
             } else {
@@ -109,7 +136,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             std::process::exit(1);
         }
     } else {
-        eprintln!("Error: Input JSON must be a JSON object (map of addresses).");
+        eprintln!("Error: Input data is not a JSON object.");
         std::process::exit(1);
     }
 
@@ -130,11 +157,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-// TODO:
-// - tooling for generating values to be used in notes
-
 #[cfg(test)]
 mod test {
+    use std::collections::HashMap;
+
     use super::*;
 
     #[test]
