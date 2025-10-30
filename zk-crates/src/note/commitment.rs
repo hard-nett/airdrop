@@ -36,8 +36,8 @@ impl NoteCommitment {
     ///
     /// [concretesinsemillacommit]: https://zips.z.cash/protocol/nu5.pdf#concretesinsemillacommit
     pub fn derive(
-        g_d: [u8; 32],
-        pk_d: [u8; 32],
+        recp: [u8; 32],
+        jub_pk: [u8; 32],
         v: NoteValue,
         rho: pallas::Base,
         psi: pallas::Base,
@@ -47,8 +47,8 @@ impl NoteCommitment {
         domain
             .commit(
                 iter::empty()
-                    .chain(BitArray::<_, Lsb0>::new(g_d).iter().by_vals())
-                    .chain(BitArray::<_, Lsb0>::new(pk_d).iter().by_vals())
+                    .chain(BitArray::<_, Lsb0>::new(recp).iter().by_vals())
+                    .chain(BitArray::<_, Lsb0>::new(jub_pk).iter().by_vals())
                     .chain(v.to_le_bits().iter().by_vals())
                     .chain(rho.to_le_bits().iter().by_vals().take(L_ORCHARD_BASE))
                     .chain(psi.to_le_bits().iter().by_vals().take(L_ORCHARD_BASE)),

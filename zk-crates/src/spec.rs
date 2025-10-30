@@ -7,8 +7,11 @@ use pasta_curves::arithmetic::CurveExt;
 use pasta_curves::{arithmetic::CurveAffine, pallas};
 use subtle::{ConditionallySelectable, CtOption};
 
-use crate::constants::{KEY_DERIVATION_DST_JUBJUB, KEY_DIVERSIFICATION_PERSONALIZATION};
+use crate::constants::{
+    KEY_DERIVATION_DST_JUBJUB, KEY_DIVERSIFICATION_PERSONALIZATION, NOTE_NULLIFIER_PERSONALIZATION,
+};
 use crate::keys::EligibleSk;
+use crate::note::Rho;
 use crate::value::{MAX_DENOM_LEN, NoteDenom};
 
 const PREPARED_WINDOW_SIZE: usize = 4;
@@ -104,17 +107,22 @@ pub(crate) fn prf_nf(nk: pallas::Base, rho: pallas::Base) -> pallas::Base {
         .hash([nk, rho])
 }
 
-pub fn hkdr_jubjub(ak: [u8; 32]) -> jubjub::Scalar {
-    let mut h: [u8; 32] = *blake3::Hasher::new_derive_key(KEY_DERIVATION_DST_JUBJUB)
-        .update(&ak)
-        // .update(&nk)
-        .finalize()
-        .as_bytes();
+pub fn hkdr_jubjub(ak: [u8; 32], rho: pallas::Base) -> jubjub::Scalar {
+    let ak_fe = pallas::Base::from_repr(ak).expect("invalid ak byte representation");
 
+    let mut dst_bytes = [0u8; 32];
+    let copy_len = KEY_DERIVATION_DST_JUBJUB.len().min(32);
+    dst_bytes[..copy_len].copy_from_slice(&KEY_DERIVATION_DST_JUBJUB.as_bytes()[..copy_len]);
+    let dst_fe = pallas::Base::from_repr(dst_bytes).expect("invalid DST bytes");
+
+    let hash_fe =
+        poseidon::Hash::<_, poseidon::P128Pow5T3, poseidon::ConstantLength<3>, 3, 2>::init()
+            .hash([dst_fe, ak_fe, rho]);
     // Drop the most significant five bits, so it can be interpreted as a scalar.
-    h[31] &= 0b0000_0111;
-
-    jubjub::Fr::from_repr(h).unwrap()
+    let mut repr = [0u8; 32];
+    repr.copy_from_slice(&hash_fe.to_repr());
+    // No need to mask bits – Poseidon output is already a canonical field element.
+    jubjub::Fr::from_repr(repr).expect("Poseidon output not a valid Fr element")
 }
 
 // Derives the hash of the ex
@@ -148,13 +156,12 @@ pub(crate) fn denom_to_base(nd: &NoteDenom) -> pallas::Base {
 }
 
 /// Convert a1 secret key (`EligibleSk`) into a `pallas::Base` scalar
-/// using the Poseidon hash. 
-/// 
+/// using the Poseidon hash.
+///
 /// Used in deriving a notes nullifier.
 pub(crate) fn elig_sk_to_base(esk: &EligibleSk) -> pallas::Base {
-    const DST_TAG: &[u8] = b"jubjub:eligible-sk";
     let mut tag_inputs = [pallas::Base::zero(); MAX_DENOM_LEN];
-    for (i, &b) in DST_TAG.iter().enumerate() {
+    for (i, &b) in NOTE_NULLIFIER_PERSONALIZATION.as_bytes().iter().enumerate() {
         tag_inputs[i] = pallas::Base::from(b as u64);
     }
 
@@ -164,8 +171,9 @@ pub(crate) fn elig_sk_to_base(esk: &EligibleSk) -> pallas::Base {
         key_inputs[i] = pallas::Base::from(b as u64);
     }
 
+    // TODO: ensure the lens is within the expected bounds & if its being trunicated will introduce cla
     let mut poseidon_inputs = [pallas::Base::zero(); MAX_DENOM_LEN];
-    let tag_len = DST_TAG.len();
+    let tag_len = NOTE_NULLIFIER_PERSONALIZATION.len();
     poseidon_inputs[..tag_len].copy_from_slice(&tag_inputs[..tag_len]);
     poseidon_inputs[tag_len..tag_len + 32].copy_from_slice(&key_inputs[..32]);
     // --------------------------------------------------------------------

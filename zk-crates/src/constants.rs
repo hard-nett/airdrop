@@ -10,7 +10,9 @@ pub const NOTE_COMMITMENT_PERSONALIZATION: &str = "terp.network:Headstash-NoteCo
 /// SWU hash-to-curve personalization for the group hash for key diversification
 pub const KEY_DIVERSIFICATION_PERSONALIZATION: &str = "terp.network:Headstash-gd";
 
+pub const NOTE_NULLIFIER_PERSONALIZATION: &str = "NoteNullifier-terp.network";
 pub const KEY_DERIVATION_DST_JUBJUB: &str = "terp.network:hkdf-jubjub";
+
 /// $\mathsf{MerkleDepth^{Orchard}}$
 pub const MERKLE_DEPTH_HEADSTASH: usize = 32;
 

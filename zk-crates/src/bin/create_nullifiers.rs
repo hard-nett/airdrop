@@ -101,14 +101,14 @@ fn main() -> Result<(), BoxError> {
     let input_path = &format!("./data/notes/{}.json", input_file);
     let output_dir = std::path::Path::new("./data/spent-notes");
     let output_file = output_dir.join(&format!("{}.json", input_file));
-    // let mut input_data: Value = serde_json::from_str(&std::fs::read_to_string(input_path)?)?;
     let fdi = find_fdi(&input_path, &token_str, &amount_str)?;
 
     let mnemonic = "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about";
     let seed = derive_secp256k1_seed_from_mnemonic(mnemonic);
     let eth_sk = eth_secret_from_seed(&seed);
     let elig_sk = EligibleSk::from_sk(eth_sk);
-    let jub_sk = JubJubKey::derive_from_elig_sk(elig_sk);
+    let rho = rho_from_secure_random();
+    let jub_sk = JubJubKey::derive_from_elig_sk(elig_sk, rho);
 
     let nd = NoteDenom::from_str(&token_str)?;
     let v = NoteValue::from_raw(
@@ -126,7 +126,7 @@ fn main() -> Result<(), BoxError> {
     )?;
 
     let randomness2 = headstash_randomness::ultra_secure_random();
-    let rho = rho_from_secure_random();
+
     let rseed = RandomSeed::from_bytes(randomness2, &rho).unwrap();
 
     let note = Note::from_parts(recipient, v, nd, fdi, elig_sk, jub_sk, rho, rseed).unwrap();

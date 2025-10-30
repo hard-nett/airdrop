@@ -13,6 +13,7 @@ use zip32::{AccountId, DiversifierIndex};
 
 use halo2_gadgets::{poseidon::primitives as poseidon, sinsemilla::primitives as sinsemilla};
 
+use crate::note::Rho;
 use crate::prf_expand::PrfExpand;
 use crate::spec::{
     NonIdentityPallasPoint, NonZeroPallasBase, NonZeroPallasScalar, PreparedNonIdentityBase,
@@ -60,9 +61,9 @@ impl EligibleSk {
 pub struct JubJubKey(pub redjubjub::SigningKey<Binding>);
 
 impl JubJubKey {
-    pub fn derive_from_elig_sk(elig_sk: EligibleSk) -> Self {
+    pub fn derive_from_elig_sk(elig_sk: EligibleSk, rho: Rho) -> Self {
         let ak: [u8; 32] = *elig_sk.0.as_ref();
-        let scalar: Scalar = hkdr_jubjub(ak);
+        let scalar: Scalar = hkdr_jubjub(ak, rho.into_inner());
         let scalar_bytes: [u8; 32] = scalar.into();
         let signing_key = SigningKey::<Binding>::try_from(scalar_bytes)
             .expect("derived scalar must be a valid JubJub signing key");

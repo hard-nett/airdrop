@@ -16,7 +16,7 @@ use crate::keys::{
 use crate::prf_expand::PrfExpand;
 use crate::spec::{NonZeroPallasScalar, prf_nf, to_base, to_scalar};
 use crate::value::{NoteDenom, NoteValue};
-use redjubjub::{Binding, Signature, SigningKey};
+use redjubjub::{Binding, Signature, SigningKey, VerificationKey};
 
 pub(crate) mod nullifier;
 pub use self::nullifier::Nullifier;
@@ -299,11 +299,9 @@ impl Note {
     ///
     /// [notes]: https://zips.z.cash/protocol/nu5.pdf#notes
     fn commitment_inner(&self) -> CtOption<NoteCommitment> {
-        let g_d = self.recp.to_bytes();
-
         NoteCommitment::derive(
-            g_d,
             self.recp.to_bytes(),
+            VerificationKey::from(&self.jub_sk.0).into(),
             self.v,
             self.rho.0,
             self.rseed.psi(&self.rho),
