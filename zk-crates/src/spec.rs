@@ -106,22 +106,30 @@ pub(crate) fn prf_nf(nk: pallas::Base, rho: pallas::Base) -> pallas::Base {
     poseidon::Hash::<_, poseidon::P128Pow5T3, poseidon::ConstantLength<2>, 3, 2>::init()
         .hash([nk, rho])
 }
-
-pub fn hkdr_jubjub(ak: [u8; 32], rho: pallas::Base) -> jubjub::Scalar {
-    let ak_fe = pallas::Base::from_repr(ak).expect("invalid ak byte representation");
+/// Derives jubjub key from the Pallas base field representation for `elig_sk`\
+/// *(via modular big-endian byte-to-field-element conversion)*\
+/// using the posiedon hashing algorithm with a domain-separation-tag in the order (`DST`,`esk_fp`,`rho`).
+pub fn hkdr_jubjub(elig_sk: [u8; 32], rho: pallas::Base) -> jubjub::Scalar {
+    let esk_fp = {
+        let mut acc = pallas::Base::ZERO;
+        for &byte in &elig_sk {
+            acc = acc * pallas::Base::from(256u64) + pallas::Base::from(byte as u64);
+        }
+        acc
+    };
 
     let mut dst_bytes = [0u8; 32];
     let copy_len = KEY_DERIVATION_DST_JUBJUB.len().min(32);
-    dst_bytes[..copy_len].copy_from_slice(&KEY_DERIVATION_DST_JUBJUB.as_bytes()[..copy_len]);
+    dst_bytes[..copy_len].copy_from_slice(&KEY_DERIVATION_DST_JUBJUB[..copy_len]);
     let dst_fe = pallas::Base::from_repr(dst_bytes).expect("invalid DST bytes");
 
     let hash_fe =
         poseidon::Hash::<_, poseidon::P128Pow5T3, poseidon::ConstantLength<3>, 3, 2>::init()
-            .hash([dst_fe, ak_fe, rho]);
+            .hash([dst_fe, esk_fp, rho]);
     // Drop the most significant five bits, so it can be interpreted as a scalar.
     let mut repr = [0u8; 32];
     repr.copy_from_slice(&hash_fe.to_repr());
-    // No need to mask bits – Poseidon output is already a canonical field element.
+    repr[31] &= 0b0000_0111;
     jubjub::Fr::from_repr(repr).expect("Poseidon output not a valid Fr element")
 }
 
