@@ -62,7 +62,8 @@ pub struct JubJubKey(pub redjubjub::SigningKey<Binding>);
 
 impl JubJubKey {
     pub fn derive_from_elig_sk(elig_sk: EligibleSk, rho: Rho) -> Self {
-        let ak: [u8; 32] = *elig_sk.0.as_ref();
+        let ak: [u8; 32] = elig_sk.0.secret_bytes();
+
         let scalar: Scalar = hkdr_jubjub(ak, rho.into_inner());
         let scalar_bytes: [u8; 32] = scalar.into();
         let signing_key = SigningKey::<Binding>::try_from(scalar_bytes)

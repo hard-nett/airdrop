@@ -106,18 +106,20 @@ pub(crate) fn prf_nf(nk: pallas::Base, rho: pallas::Base) -> pallas::Base {
     poseidon::Hash::<_, poseidon::P128Pow5T3, poseidon::ConstantLength<2>, 3, 2>::init()
         .hash([nk, rho])
 }
+
+/// modular big-endian byte-to-field-element conversion
+pub fn mbe_btfe(elig_sk: [u8; 32]) -> pallas::Base {
+    let mut acc = pallas::Base::ZERO;
+    for &byte in &elig_sk {
+        acc = acc * pallas::Base::from(256u64) + pallas::Base::from(byte as u64);
+    }
+    acc
+}
 /// Derives jubjub key from the Pallas base field representation for `elig_sk`\
 /// *(via modular big-endian byte-to-field-element conversion)*\
 /// using the posiedon hashing algorithm with a domain-separation-tag in the order (`DST`,`esk_fp`,`rho`).
 pub fn hkdr_jubjub(elig_sk: [u8; 32], rho: pallas::Base) -> jubjub::Scalar {
-    let esk_fp = {
-        let mut acc = pallas::Base::ZERO;
-        for &byte in &elig_sk {
-            acc = acc * pallas::Base::from(256u64) + pallas::Base::from(byte as u64);
-        }
-        acc
-    };
-
+    let esk_fp = mbe_btfe(elig_sk);
     let mut dst_bytes = [0u8; 32];
     let copy_len = KEY_DERIVATION_DST_JUBJUB.len().min(32);
     dst_bytes[..copy_len].copy_from_slice(&KEY_DERIVATION_DST_JUBJUB[..copy_len]);
@@ -300,7 +302,7 @@ pub(crate) fn to_scalar(x: [u8; 64]) -> pallas::Scalar {
 /// Defined in [Zcash Protocol Spec § 5.4.1.6: DiversifyHash^Sapling and DiversifyHash^Orchard Hash Functions][concretediversifyhash].
 ///
 /// [concretediversifyhash]: https://zips.z.cash/protocol/nu5.pdf#concretediversifyhash
-pub(crate) fn diversify_hash(d: &[u8; 11]) -> NonIdentityPallasPoint {
+pub(crate) fn diversify_hash(d: &[u8; 32]) -> NonIdentityPallasPoint {
     let hasher = pallas::Point::hash_to_curve(KEY_DIVERSIFICATION_PERSONALIZATION);
     let g_d = hasher(d);
     // If the identity occurs, we replace it with a different fixed point.

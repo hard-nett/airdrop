@@ -1,10 +1,10 @@
 use cosmwasm_std::Addr;
 use ff::{FromUniformBytes, PrimeField};
+use group::GroupEncoding;
 use pasta_curves::pallas;
 use rand::rngs::StdRng;
 use rand::{RngCore, SeedableRng};
 use subtle::CtOption;
-
 pub(crate) mod commitment;
 pub mod scripts;
 pub use self::commitment::{ExtractedNoteCommitment, NoteCommitment};
@@ -298,9 +298,8 @@ impl Note {
     /// Defined in [Zcash Protocol Spec § 3.2: Notes][notes].
     ///
     /// [notes]: https://zips.z.cash/protocol/nu5.pdf#notes
-    fn commitment_inner(&self) -> CtOption<NoteCommitment> {
-        NoteCommitment::derive(
-            self.recp.to_bytes(),
+    fn commitment_inner(&self) -> CtOption<NoteCommitment> {        NoteCommitment::derive(
+            self.recp.g_d().to_bytes(), // NonIdentityPallasPoint
             VerificationKey::from(&self.jub_sk.0).into(),
             self.v,
             self.rho.0,

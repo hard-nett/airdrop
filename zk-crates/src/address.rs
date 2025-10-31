@@ -10,14 +10,14 @@ impl HeadstashAddr {
     pub fn to_bytes(&self) -> [u8; 32] {
         self.0
     }
-    // /// Returns the [`Diversifier`] for this `Address`.
-    // pub fn diversifier(&self) -> Diversifier {
-    //     self.d
-    // }
+    // /// Returns the [`CanonicalAddr`] for this `Address`.
+    pub fn to_canonical(&self) -> CanonicalAddr {
+        CanonicalAddr::from(self.0)
+    }
 
-    // pub(crate) fn g_d(&self) -> NonIdentityPallasPoint {
-    //     diversify_hash(&self.0.to_vec())
-    // }
+    pub(crate) fn g_d(&self) -> NonIdentityPallasPoint {
+        diversify_hash(&self.0)
+    }
 
     // pub(crate) fn pk_d(&self) -> &DiversifiedTransmissionKey {
     //     &self.pk_d
