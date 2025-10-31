@@ -10,8 +10,10 @@ use halo2_gadgets::poseidon::{
 };
 use pasta_curves::pallas;
 
-use halo2_proofs::circuit::{AssignedCell, Chip, Layouter};
-use halo2_proofs::plonk;
+use halo2_proofs::{
+    circuit::{AssignedCell, Chip, Layouter, Value},
+    plonk::{self, Advice, Assigned, Column},
+};
 
 use crate::circuit::AddChip;
 use crate::constants::fixed_bases::{HeadstashFixedBases, NullifierK};
@@ -94,4 +96,23 @@ pub(in crate::circuit) fn derive_nullifier<
     // cm + [poseidon_output + psi] NullifierK
     cm.add(layouter.namespace(|| "nf"), &product)
         .map(|res| res.extract_p())
+}
+
+/// Witnesses the given value in a standalone region.
+///
+/// Usages of this helper are technically superfluous, as the single-cell region is only
+/// ever used in equality constraints. We could eliminate them with a
+/// [write-on-copy abstraction](https://github.com/zcash/halo2/issues/334).
+pub(in crate::circuit) fn assign_free_advice<F: Field, V: Copy>(
+    mut layouter: impl Layouter<F>,
+    column: Column<Advice>,
+    value: Value<V>,
+) -> Result<AssignedCell<V, F>, plonk::Error>
+where
+    for<'v> Assigned<F>: From<&'v V>,
+{
+    layouter.assign_region(
+        || "load private",
+        |mut region| region.assign_advice(|| "load private", column, 0, || value),
+    )
 }

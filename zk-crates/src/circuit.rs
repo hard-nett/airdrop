@@ -21,6 +21,7 @@ use halo2_proofs::{
 use pasta_curves::pallas;
 
 use crate::{
+    circuit::note_commit::{NoteCommitChip, NoteCommitConfig},
     constants::{
         HeadstashHashDomains, MERKLE_DEPTH_HEADSTASH, fixed_bases::HeadstashFixedBases,
         sinsemilla::HeadstashCommitDomains,
@@ -29,6 +30,7 @@ use crate::{
 };
 
 pub mod gadget;
+mod note_commit;
 
 #[derive(Clone, Debug)]
 pub struct HeadstashConfig {
@@ -40,9 +42,7 @@ pub struct HeadstashConfig {
         MerkleConfig<HeadstashHashDomains, HeadstashCommitDomains, HeadstashFixedBases>,
     sinsemilla_config_1:
         SinsemillaConfig<HeadstashHashDomains, HeadstashCommitDomains, HeadstashFixedBases>,
-    // old_note_commit_config: NoteCommitConfig,
-    // new_note_commit_config: NoteCommitConfig,
-    // genesis_sinsemilla_config: MerkleConfig<>
+    note_commit_config: NoteCommitConfig,
 }
 
 /// The Headstash Action circuit.
@@ -156,6 +156,11 @@ impl plonk::Circuit<pallas::Base> for Circuit {
             (sinsemilla_config_1, merkle_config_1)
         };
 
+        // Configuration to handle decomposition and canonicity checking
+        // for NoteCommit_new.
+        let note_commit_config =
+            NoteCommitChip::configure(meta, advices, sinsemilla_config_1.clone());
+
         HeadstashConfig {
             primary,
             add_config,
@@ -163,6 +168,7 @@ impl plonk::Circuit<pallas::Base> for Circuit {
             poseidon_config,
             merkle_config_1,
             sinsemilla_config_1,
+            note_commit_config,
         }
     }
 
