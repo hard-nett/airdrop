@@ -1,6 +1,56 @@
 
 # Headstash Circuit
 
+There are 4 primitive circuits we need to implement:
+
+1. sinsemilla commitDomain hash
+2. pub/priv key curve constraint (should work for both secp256k1 & jubjub)
+3. field conversion accuracy of elig_sk into pallas::Base
+4. posiedon hash + dropped bits (used in HKDF to make hash compatible as scalar input for jubjub)
+
+## 2. Ensure PubKey Is Derived From PrivateKey For Both Secp256k1 & JubJub
+
+### 2.a Secp256k1
+
+- both public & private keys must be private inputs
+- requires foreign-field arithmetic.
+- constraints `pk == sk * G`
+
+### 2.b JubJub
+
+- private key is private input, public key is public input
+- orchard implementation uses the pallas::Affine, while jubjub uses twisted Edwards curve. We need to keep concious of this when implementing our chip
+- we constrain `pk == sk * G` using fixed-based scalar mul
+- <https://github.com/axiom-crypto/halo2-lib/blob/community-edition/halo2-ecc/src/secp256k1/tests/ecdsa.rs>
+
+## 3. Byte-To-Field Conversion Constraint
+
+### Input Handling
+
+- each of the 32 bytes is witnessed as separate `AssignedCell<pallas::Base,pallas::Base>` values in advice columns
+- each byte is in range `0..255`, so range constraints can be applied (via `LookupRangeCheck`),enforcing each witnessed value is exactly 8 bits.
+
+### Accumulation In The Circuit
+
+- starts with an inital accumulator
+- for each byte in the 32 bytes:
+  - compute `acc = acc & pallas::Base::from(256u64) + byte` as a circuit constraint *HOW?*
+  - use `plonk` constraints for mult & addition (can use left-shifts for 256)
+
+This will result in a final `AssignedCell` that can be used as input for the next step
+
+## 4. HKDF Via Posiedon Hash + Dropped Bits
+
+- uses normal posiedon chip to recompute hash derived from `elig_sk||rho`
+- requires 255 bits for pallasField, so to constrain this requirement we can make use of the `LookupRangeCheckConfig` for bit decomposition.
+- implement boolean constraint
+
+## Notes
+
+### Constraining Values To Expected Curve
+
+we need to be concious about how we are constraining raw values to the pallas/vestas curves required to implement our circuit constraints with minimal modifications from the original specs. For example, `elig_sk` is needed to be hashed by posiedon hashing function, and this requires us to represent these bytes on the pallas curve.  We can do this by clearing the top bytes of the hash ensureing its always `< q`.*We can reduce possible collisions due to this reduction by performing two hashes and concatenating them to each other.*
+
 ## Proof Inputs
 
 ### Constant Values
@@ -207,7 +257,7 @@ Constraining the derivation of the note commitment `cm` requires the following i
 - **psi***
 - **rcm***
 
-> note: in order to derive `psi` & `rcm`, we have a `rseed` that is a randomness source in a PRF, that expends into each. 
+> note: in order to derive `psi` & `rcm`, we have a `rseed` that is a randomness source in a PRF, that expends into each.
     <!-- pub fn psi(&self, rho: &Rho) -> pallas::Base {
         to_base(PrfExpand::PSI.with(&self.0, &rho.to_bytes()))
     } -->
@@ -263,7 +313,7 @@ Constraining the derivation of the nullifier `nul` requires the following inputs
 - **v** public
 - **nd*** public
 - **elig_sk*** private
-- **NOTE_NULLIFIER_PERSONALIZATION**constant 
+- **NOTE_NULLIFIER_PERSONALIZATION**constant
 
 > NOTE: each value input is derived into a `pallas::Base`. `nd` & `elig_sk` are hashed using posiedon in order to derive them into the `pallas::Base` point. when hashing the elig_sk to point, the NOTE_NULLIFIER_PERSONALIZATION is used as a DST value for collision resistance.
 
@@ -313,5 +363,5 @@ h_{\mathsf{elig}} &:= \operatorname{Poseidon}_{\mathbb{F}_p}
 \end{aligned}
 ```
 
-
- 
+## Research
+- <https://grok.com/c/3931f7e5-10e6-47e5-86f9-1c25d9963e8a>
