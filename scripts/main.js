@@ -5,8 +5,9 @@ import { processGenesisState, calculateTokenDifference, summarizeAllResults, sum
 import { processHeadstashDistributions, generateMerkleInput } from './headstash-scripts.js';
 import { processGenesisDistribution, checkAddresses } from './genesis-script.js';
 import { fairPercentileRanges, applyNormalizationToAllProjects, generateOverviewReadme } from './calculations.js'
-import { SAC_ENCODED_FILE, SAC_JSON_PATH, HEADSTASH_YAML } from './constants.js';
+import { SAC_ENCODED_FILE, SAC_JSON_PATH, HEADSTASH_YAML, ETH_RPC_URL } from './constants.js';
 import { readYamlFile } from './utils.js'
+import { determineAllPubkeys } from './pubkeys.js'
 // import { generateYamlConfig } from './headstash-scripts.js'
 
 // Process command line arguments
@@ -49,6 +50,9 @@ if (args.length < 1) {
     generateMerkleInput()
 } else if (args[0] === '-11') {
     generateOverviewReadme()
+} else if (args[0] === '-12') {
+    const provider = new ethers.JsonRpcProvider(ETH_RPC_URL);
+    determineAllPubkeys(provider)
 
 } else {
     console.error('Invalid option.');

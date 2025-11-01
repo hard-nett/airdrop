@@ -1,5 +1,5 @@
 
-import { readCsvFile, readYamlFile, toMarkdownTable, escapeRegExp, toOverviewMarkdownTable } from "./utils.js";
+import { readCsvFile, readYamlFile, toMarkdownTable, escapeRegExp, toOverviewMarkdownTable, loadProjectAddresses } from "./utils.js";
 import readline from 'readline';
 import { HEADSTASH_YAML, BASE_ALLOCATION, OVERVIEW_README } from './constants.js'
 import fs from 'fs';
@@ -23,15 +23,6 @@ const ask = (query) => {
         resolve(ans.trim());
     }));
 };
-
-async function loadProjectAddresses(csvPath) {
-    const rows = await readCsvFile(csvPath);
-    // Assume CSV has headers: addr,amount
-    return rows.map((r) => ({
-        addr: r.addr,
-        amount: r.amount
-    }));
-}
 
 /// prompts user to determine fair % ranges for 1,2,3 points
 export const fairPercentileRanges = async (distributionData) => {

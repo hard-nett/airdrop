@@ -1,12 +1,17 @@
 
 # Headstash Circuit
 
-There are 4 primitive circuits we need to implement:
+There are 5 primitive circuits we need to implement:
 
-1. sinsemilla commitDomain hash
-2. pub/priv key curve constraint (should work for both secp256k1 & jubjub)
-3. field conversion accuracy of elig_sk into pallas::Base
-4. posiedon hash + dropped bits (used in HKDF to make hash compatible as scalar input for jubjub)
+1. sinsemilla hashDomain hash (airdrop eligibility)
+2. sinsemilla commitDomain hash (note commitment integrity)
+3. pub/priv key curve constraint (should work for both secp256k1 & jubjub)
+4. field conversion accuracy of elig_sk into pallas::Base
+5. posiedon hash + dropped bits (used in HKDF to make hash compatible as scalar input for jubjub)
+
+## 1. Ensure Genesis Hash Is Valid & Derived From Note Components
+
+This prooves genesis distribution inclusion by recreating the sinsemilla hashdomain tree leaf with the note components, and then constraining that to the tree root. 
 
 ## 2. Ensure PubKey Is Derived From PrivateKey For Both Secp256k1 & JubJub
 

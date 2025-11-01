@@ -5,6 +5,7 @@ const GAIA_PERC_SUPPLY = 0.061152;
 const BCNA_PERC_SUPPLY = 0.01911;
 const BASE_ALLOCATION = 67000000;
 
+const ETH_RPC_URL = "https://mainnet.infura.io/v3/YOUR_KEY";
 // YAML files
 const HEADSTASH_YAML = "../headstash.yaml";
 const GENESIS_YAML_FILE = "../headstash/scripts-data/final_tally.csv";
@@ -59,4 +60,5 @@ export {
     BASE_ALLOCATION,
     SINSEMILLA_JSON_FILE,
     OVERVIEW_README,
+    ETH_RPC_URL,
 };

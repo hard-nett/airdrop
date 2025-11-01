@@ -2,6 +2,16 @@ import fs from 'fs';
 import csv from 'csv-parser';
 import { parse, stringify } from 'yaml'
 
+async function loadProjectAddresses(csvPath) {
+    const rows = await readCsvFile(csvPath);
+    // Assume CSV has headers: addr,amount
+    return rows.map((r) => ({
+        addr: r.addr,
+        amount: r.amount
+    }));
+}
+
+
 // Read Yaml file, parses into JSON object
 const readYamlFile = async (filename) => {
     // Read existing YAML file
@@ -122,7 +132,7 @@ function toOverviewMarkdownTable(projects) {
         '| ' + headers.join(' | ') + ' |',
         '| ' + separator.join(' | ') + ' |',
         ...rows.map(row => '| ' + row + ' |'),
-        '| |`' +  projects.reduce((sum, p) => sum + p.points.totalHolders, 0) + '`| | `' + projects.reduce((sum, p) => sum + (p.tpp * p.points.totalHolders || 0), 0).toFixed(6) + ' TERP & THIOL` |||',
+        '| |`' + projects.reduce((sum, p) => sum + p.points.totalHolders, 0) + '`| | `' + projects.reduce((sum, p) => sum + (p.tpp * p.points.totalHolders || 0), 0).toFixed(6) + ' TERP & THIOL` |||',
         ''
     ].join('\n');
 }
@@ -132,5 +142,16 @@ function escapeRegExp(string) {
     return string.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); // Escape special regex chars
 }
 
-export { readCsvFile, toOverviewMarkdownTable, readJsonFile, readYamlFile, toMarkdownTable, escapeRegExp }
+
+/* ------------------------------------------------------------
+   Append a line to a CSV file (creates the file if it does not
+   exist).  The file is opened in append mode for low‑overhead I/O.
+   ------------------------------------------------------------ */
+async function appendToCsv(filePath, values) {
+    const line = stringify([values], { header: false });
+    fs.appendFile(filePath, line);
+}
+
+
+export { readCsvFile, toOverviewMarkdownTable, readJsonFile, readYamlFile, toMarkdownTable, escapeRegExp, loadProjectAddresses, appendToCsv }
 

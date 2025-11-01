@@ -9,3 +9,6 @@ genesis_sinsemilla:
 
 gen_my_notes:
     cd zk-crates && cargo run --bin create_genesis_notes -- ./data/genesis_sinsemilla.json 0x0000000000000000000000000000000000000000
+
+build-geth:
+    cd scripts/geth && docker buildx build --platform linux/amd64 -t discoverdefiteam/geth-rpc:0.0.1 --load .
