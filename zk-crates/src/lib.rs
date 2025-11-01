@@ -7,3 +7,6 @@ pub mod prf_expand;
 mod spec;
 mod tree;
 pub mod value;
+
+pub mod example_circuits;
+
