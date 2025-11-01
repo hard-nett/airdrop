@@ -70,18 +70,6 @@ Eligible keys are the keypair that has a public allocation set for them, and is 
 | 2 | **Redemption Key** | secp256k1 | `k256` (or `secp256k1`) | Public key is **the recipient** of the claimed allocation; private key is used only to sign the redemption proof. | Same as Eligible (`SigningKey`/`VerifyingKey`) | May be pre‑generated or created on‑the‑fly; no HKDF involved. |
 | 3 | **HKDF‑derived Key** | JubJub (red‑jubjub) | `redjubjub` (or `jubjub`) | Private key **only**; the corresponding public key is *not* exposed – it is used inside the circuit for proof‑of‑ownership. | `redjubjub::PrivateKey` / `redjubjub::PublicKey` (if needed for internal checks) | Deterministically derived via HKDF from circuit‑private inputs (e.g., a seed, a note commitment, a nullifier). The derived scalar is mapped to a JubJub point using the crate’s `generator`. |
 
-### Crate & constant reference table
-
-| Crate | Constant / Type | Description | definition location |
-|-------|----------------|-------------|----------------------------|
-| `k256` (or `secp256k1`) | `Generator` | Secp256k1 base point `G` used for key generation & ECDSA. | *located in crate*|
- | `k256` | `SigningKey`, `VerifyingKey` | Types representing private/public key pairs. | `type SigningKey = k256::ecdsa::SigningKey;` |
-| `redjubjub` | `Generator` | Fixed JubJub generator point used when mapping HKDF‑derived scalars to group elements. |  *located in crate* |
-| `redjubjub` | `DST_HKDF_JUBJUB` | Domain‑separation tag for the HKDF that produces the JubJub scalar. | *located in constants* |
-| `redjubjub` | `PrivateKey`, `PublicKey` | Types for the RedJubjub key pair (scalar + point). | `type PrivateKey = redjubjub::Fr;` |
-| `hkdf`  | `hkdf_extract` / `hkdf_expand` | Functions used to derive the HKDF‑key material from a secret seed. | `let prk = hkdf::Hkdf::<Sha256>::extract(salt, ikm);` |
-| `blake3` (or `poseidon`) | `HASH_DST` | Domain‑separation tag for the hash that feeds the HKDF (e.g., note data). | `const HASH_DST: &[u8] = b"ZK-NOTE-HASH";` |
-
 > NOTE: zcash orchard protocol implements very complex (but useful) key derivation for viewing, authorization, and privacy retention purposes. Our scope does not require the use of viewing or authorization keys, as the end results of tokens claimed will be public. A large portion of the modifications from the orchard protocol altering how note-commitments & nullifiers are derived, as they rely heavily on the use of the key structure used by zcash orchard protocol.
 
 ## Randomness Generation
@@ -193,6 +181,24 @@ We make use of the sinsemilla merkle tree implementation for powering effecient 
 
 **This is the static, starting state of the headstash before any claims happen.**
 Its purpose is to allow a user to prove a specific address `addr_eligible` is eligible to claim a certain allocation `v` without revealing which specific address it is. Each leaf is a commitment to the `HashDomain`,that is public & binding an eligible recipients balance for a single token balance. A leaf is computed using the sinsemilla hashing function as:
+
+In order to do so, we have the following private inputs and public inputs:
+
+| Symbol   | Meaning                         | Type                                 | Public / Private / Constant / Output | Derivation |
+|----------|---------------------------------|--------------------------------------|--------------------------------------|------------|
+| `elig_pk`| Eligible public key             | `bytes[32]`                          | **Private**                          | — |
+| `fdi`    | Fixed Denomination Index        | `u64`                                | **Private**                          | — |
+| `root`   | Genesis Distribution Tree Root  | `u64`                                | **Private**                          | — |
+| `leaf`   | Note Leaf                       | `bytes[]`                            | **Private**                          | — |
+| `v`      | Note Value                      | `NoteValue(u64)`                     | **Public**                           | — |
+| `nd`     | Note Denomination               | `NoteDenom([u8; <128])`              | **Public**
+
+- **Denomination hashing** – Since the length of a denomination is unknown, we hash `nd` with **blake3** to obtain a 32‑byte digest. *Sinsemilla* expects a 253‑bit domain, so we simply clear the top three bits of the digest. The denomination is public, so smart contracts can map `nd` → `blake3(nd) & 0x1FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF` in O(1) time.
+
+- **Padding for `v` and `fdi`** – Both values are `u64` (max 160 bits when concatenated). For table look‑ups we left‑pad each to the byte length required by the hashDomain of Sinsemilla (e.g., 32 bytes). This ensures the inputs line up with the fixed‑size field elements used inside the circuit.
+
+- **`elig_pk` handling for Sinsemilla compatibility** – `elig_pk` is a 32‑byte public‑key representation. The value is interpreted as a field element; any bits that fall outside the field size are cleared (i.e., the top‑most bits are masked) before it is used as input to the Sinsemilla hash. **The Full key is required in‑circuit,**Even though elig_pk is private for the prover, the circuit must receive the entire we need to enforce the relationship of the `jubjub_sk` being derived from a `elig_sk` thyat is paired with an `elig_pk`. This guarantees that the HKDF‑derived key used in the protocol is indeed tied to the secret key elig_sk.
+
 
 ```math
 \begin{aligned}
