@@ -91,7 +91,7 @@ fn test_conversion() {
 
     let sig: Signature<Binding> = sig.into();
     assert!(
-        VerificationKey::try_from(vk_bytes)
+        VerificationKey::try_from(manual_vk_bytes)
             .and_then(|pk| pk.verify(msg, &sig))
             .is_ok(),
         "Signature verification failed"
