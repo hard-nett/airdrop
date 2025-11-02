@@ -50,5 +50,8 @@ sinsemilla = "0.1.0"
 aes = "0.8"
 fpe = { version = "0.6", default-features = false, features = ["alloc"] }
 
+# Developer tooling dependencies
+plotters = { version = "0.3.0", default-features = false }
+
 [dev-dependencies]
 

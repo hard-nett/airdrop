@@ -3918,6 +3918,7 @@ dependencies = [
  "memuse",
  "num-bigint 0.4.6",
  "pasta_curves",
+ "plotters",
  "plume_rustcrypto",
  "poseidon-rs",
  "rand 0.8.5",

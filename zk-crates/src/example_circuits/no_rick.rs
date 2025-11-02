@@ -1,7 +1,8 @@
-use ff::Field;
+use bitvec::view::AsBits;
+use ff::{Field, PrimeField};
 use halo2_proofs::{
     circuit::{AssignedCell, Chip, Layouter, Region, SimpleFloorPlanner, Value},
-    pasta::{pallas, EqAffine, Fp},
+    pasta::{EqAffine, Fp, pallas},
     plonk::{
         Advice, Circuit, Column, ConstraintSystem, Error, Fixed, Instance, Selector, TableColumn,
     },
@@ -11,7 +12,7 @@ use rand_core::OsRng;
 use std::marker::PhantomData;
 
 // ANCHOR: instructions
-trait NumericInstructions<F: Field>: Chip<F> {
+trait NumericInstructions<F: PrimeField>: Chip<F> {
     /// Variable representing a number.
     type Num;
 
@@ -146,9 +147,9 @@ impl<F: Field> Chip<F> for FieldChip<F> {
 // ANCHOR: instructions-impl
 /// A variable representing a number.
 #[derive(Clone)]
-struct Number<F: Field>(AssignedCell<F, F>);
+struct Number<F: PrimeField>(AssignedCell<F, F>);
 
-impl<F: Field> NumericInstructions<F> for FieldChip<F> {
+impl<F: PrimeField> NumericInstructions<F> for FieldChip<F> {
     type Num = Number<F>;
 
     fn load_private(
@@ -241,15 +242,11 @@ impl<F: Field> NumericInstructions<F> for FieldChip<F> {
 /// they won't have any value during key generation. During proving, if any of these
 /// were `None` we would get an error.
 #[derive(Default)]
-struct NoRickCircuit<F: Field> {
-    r: F,                  // ASCII value for 'r'
-    i: F,                  // ASCII value for 'i'
-    c_val: F,              // ASCII value for 'c'
-    k: F,                  // ASCII value for 'k'
-    string: Vec<Value<F>>, // Fixed length of 20
+struct NoRickCircuit<F: PrimeField> {
+    priv_input: Vec<Value<F>>, // Fixed length of 20
 }
 
-impl<F: Field> Circuit<F> for NoRickCircuit<F> {
+impl<F: PrimeField> Circuit<F> for NoRickCircuit<F> {
     // Since we are using a single chip for everything, we can just reuse its config.
     type Config = FieldConfig;
     type FloorPlanner = SimpleFloorPlanner;
@@ -272,56 +269,52 @@ impl<F: Field> Circuit<F> for NoRickCircuit<F> {
     ) -> Result<(), Error> {
         let chip = FieldChip::<F>::construct(config);
 
-        // Load all string characters as private inputs
+        // --------------------------------------------------------------
+        // 2️⃣ Powers of 256 (little‑endian) – they are plain F values,
+        //    no gates are needed to load them.
+        // this essentially moves between 8-bit byte values
+        // --------------------------------------------------------------
+        let pow_256_0 = F::from(256u64.pow(0)); // 256⁰
+        let pow_256_1 = F::from(256u64.pow(1)); // 256¹
+        let pow_256_2 = F::from(256u64.pow(2)); // 256² = 65536
+        let pow_256_3 = F::from(256u64.pow(3)); // 256³ = 16777216
+
+        // Load all private inputs
         let mut chars = Vec::new();
-        for (i, &char_val) in self.string.iter().enumerate() {
+        for (i, &char_val) in self.priv_input.iter().enumerate() {
             let char_cell =
                 chip.load_private(layouter.namespace(|| format!("load char {}", i)), char_val)?;
             chars.push(char_cell);
         }
 
-        // Load constants for 'r','i','c','k' from circuit fields
-        let r = chip.load_constant(layouter.namespace(|| "load r"), self.r)?;
-        let i = chip.load_constant(layouter.namespace(|| "load i"), self.i)?;
-        let c_val = chip.load_constant(layouter.namespace(|| "load c"), self.c_val)?;
-        let k = chip.load_constant(layouter.namespace(|| "load k"), self.k)?;
+        // ---------------------------------------------------------------------
+        let rick_constant = chip.load_constant(
+            layouter.namespace(|| "load constant rick"),
+            str_to_field::<F>("rick"),
+        )?;
         // Check for "rick" at every possible starting index (0 to 16)
         let mut conditions = Vec::new();
         for idx in 0..17 {
-            let char0 = chars[idx].clone();
-            let char1 = chars[idx + 1].clone();
-            let char2 = chars[idx + 2].clone();
-            let char3 = chars[idx + 3].clone();
+            let c0 = chars[idx].clone();
+            let c1 = chars[idx + 1].clone();
+            let c2 = chars[idx + 2].clone();
+            let c3 = chars[idx + 3].clone();
 
             // Compute differences from 'r','i','c','k'
-            let diff0_val = char0.0.value().copied() - r.0.value().copied();
-            let diff1_val = char1.0.value().copied() - i.0.value().copied();
-            let diff2_val = char2.0.value().copied() - c_val.0.value().copied();
-            let diff3_val = char3.0.value().copied() - k.0.value().copied();
+            let packed_val = c0.0.value().copied()
+                + c1.0.value().copied() * Value::known(pow_256_1)
+                + c2.0.value().copied() * Value::known(pow_256_2)
+                + c3.0.value().copied() * Value::known(pow_256_3);
 
-            // Load differences as private inputs
-            let diff0 = chip.load_private(
-                layouter.namespace(|| format!("load diff0 {}", idx)),
-                diff0_val,
-            )?;
-            let diff1 = chip.load_private(
-                layouter.namespace(|| format!("load diff1 {}", idx)),
-                diff1_val,
-            )?;
-            let diff2 = chip.load_private(
-                layouter.namespace(|| format!("load diff2 {}", idx)),
-                diff2_val,
-            )?;
-            let diff3 = chip.load_private(
-                layouter.namespace(|| format!("load diff3 {}", idx)),
-                diff3_val,
-            )?;
+            // ---- compute the difference from the packed constant “rick” ----------
+            // `rick_const` is a `Number<F>` that we loaded earlier.
+            let diff_val = packed_val - rick_constant.0.value().copied();
 
-            // Multiply differences to get condition value (zero if match)
-            let prod1 = chip.mul(layouter.namespace(|| format!("mul1 {}", idx)), diff0, diff1)?;
-            let prod2 = chip.mul(layouter.namespace(|| format!("mul2 {}", idx)), prod1, diff2)?;
-            let cond = chip.mul(layouter.namespace(|| format!("mul3 {}", idx)), prod2, diff3)?;
-            conditions.push(cond);
+            // ---- turn the difference into a private cell (so we can multiply it) --
+            let diff =
+                chip.load_private(layouter.namespace(|| format!("diff {}", idx)), diff_val)?;
+
+            conditions.push(diff);
         }
 
         // Compute product of all conditions
@@ -352,65 +345,81 @@ impl<F: Field> Circuit<F> for NoRickCircuit<F> {
         Ok(())
     }
 }
-// ANCHOR_END: circuit
+
+pub fn str_to_field<F: PrimeField>(s: &str) -> F {
+    let mut repr = F::default().to_repr();
+    let src = s.as_bytes();
+    let len = core::cmp::min(src.len(), repr.as_ref().len());
+    repr.as_mut()[..len].copy_from_slice(&src[..len]);
+    F::from_repr(repr).expect("something bad happened")
+}
 
 // ANCHOR: dev-graph
-fn main() {
+#[test]
+fn test_rick_circuit() {
     use halo2_proofs::dev::MockProver;
 
-    // ANCHOR: test-circuit
-    // The number of rows in our circuit cannot exceed 2^k. Since our example
-    // circuit is very small, we can pick a very small value here.
-    let k = 10; // Sufficient rows for the circuit
+    let circuit_rows: u32 = 10;
 
     // Test with "ricky" (contains "rick") - should fail
     let s1 = "ricky";
+    let s2 = "ronaldrickstien";
+    let s3 = "randy";
 
-    let mut bytes1 = s1.as_bytes().to_vec();
+    let mut as_bytes = s1.as_bytes();
+    println!("s1 as_bytes: {:#?}", as_bytes);
+    println!("s1 byte lens: {:#?}", as_bytes.len());
+    let mut bytes1 = as_bytes.to_vec();
     bytes1.resize(20, 0);
-    let string_vec: Vec<Value<Fp>> = bytes1
+    println!("resized 5 byte string to full 20 via padding");
+    println!("bytes1.len(): {:#?}", bytes1.len());
+    println!("bytes1: {:#?}", bytes1);
+
+    let priv_input: Vec<Value<Fp>> = bytes1
         .iter()
         .map(|&b| Value::known(Fp::from(b as u64)))
         .collect();
 
-    // In your test code:
-    let mut circuit = NoRickCircuit {
-        r: Fp::from(114u64),
-        i: Fp::from(105u64),
-        c_val: Fp::from(99u64),
-        k: Fp::from(107u64),
-        string: string_vec, // Your string values
-    };
-    // THE CONSTRAINT: set to one as we inverse constraint (if result == 0 , we know that the private input has "rick in it")
+    let mut circuit = NoRickCircuit { priv_input };
+
+    // === THE CONSTRAINT===:
+    // set to 1 as we inverse constraint (if result == 0 , we know that the private input has "rick in it")
     let public_input = vec![Fp::one()];
-    let prover1 = MockProver::run(k, &circuit, vec![public_input.clone()]).unwrap();
+
+    let prover1 = MockProver::run(circuit_rows, &circuit, vec![public_input.clone()]).unwrap();
     assert!(prover1.verify().is_err());
 
-    let s2 = "ronaldrickstien";
     let mut bytes2 = s2.as_bytes().to_vec();
+    println!("s2 as_bytes: {:#?}", bytes2);
+    println!("s2 byte lens: {:#?}", bytes2.len());
     bytes2.resize(20, 0);
+    println!("s2 resized byte lens: {:#?}", bytes2.len());
+    println!("s2: {:#?}", bytes2);
+
     let string_vec2: Vec<Value<Fp>> = bytes2
         .iter()
         .map(|&b| Value::known(Fp::from(b as u64)))
         .collect();
 
-    circuit.string = string_vec2;
+    circuit.priv_input = string_vec2;
 
-    let prover2 = MockProver::run(k, &circuit, vec![public_input]).unwrap();
+    let prover2 = MockProver::run(circuit_rows, &circuit, vec![public_input]).unwrap();
     assert!(prover2.verify().is_err());
 
-    let s3 = "randy";
+    // Ensure we are not dropping any of the values
+
     let mut bytes3 = s3.as_bytes().to_vec();
     bytes3.resize(20, 0);
+
     let string_vec3: Vec<Value<Fp>> = bytes3
         .iter()
         .map(|&b| Value::known(Fp::from(b as u64)))
         .collect();
-    let circuit3 = NoRickCircuit {
-        string: string_vec3,
-    };
+
+    circuit.priv_input = string_vec3;
+
     let public_inputs3 = vec![Fp::one()];
-    let prover3 = MockProver::run(k, &circuit3, vec![public_inputs3]).unwrap();
+    let prover3 = MockProver::run(circuit_rows, &circuit, vec![public_inputs3]).unwrap();
     assert!(prover3.verify().is_ok());
 
     // Create the area you want to draw on.
