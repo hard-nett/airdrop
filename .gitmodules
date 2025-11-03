@@ -19,3 +19,7 @@
 [submodule "zk-crates/submodules/sapling-crypto"]
 	path = zk-crates/submodules/sapling-crypto
 	url = https://github.com/zcash/sapling-crypto
+[submodule "zk-crates/submodules/halo2-lib"]
+	path = zk-crates/submodules/halo2-lib
+	url = https://github.com/shreyas-londhe/halo2-lib
+	branch = feat/secp256k1-hash2curve-poseidon

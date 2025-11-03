@@ -17,13 +17,7 @@ In order to prevent this association between verifying ownership & claiming toke
 
 ### Q: How Does Someone Prove They Own An Eligible Wallet Without Revealing Their Signature?
 
-- **proof of ownership + key derivation.** This is similar to the existing proof of ownership described above, however we must use zk-proof optimized implementation as constraining a ecdsa signature within a circuit is computationally expensive.
-
-Specifically, we derive a fresh key-pair that is verifiably derived from the eligible key pair, which lets us perform out-of-circuit signature verification of the notes content, and then in-circuit verification of:
-
-- the derivation of the new keypair
-- the pairing between the original keypairs public and private components
-<!-- - the derivation of the msg signed from the inputs -->
+**A: proof of ownership + PLUME**: A circuit can provide certainty that an individual knows the private key paired with their public key of an eligible account. This circuit also can be able to constrain a destination wallet for the funds being claimed is the one that the private key owner desires, via use of the PLUME implementation we describe below.
 
 ### Q: How can someone prevent leaking where their claimed funds end up, if the total amount & distributions allocated are public?
 
@@ -31,7 +25,7 @@ Specifically, we derive a fresh key-pair that is verifiably derived from the eli
 
 ### Q: How are users prevented from claiming more funds then they are allocated?
 
-- **nullifiers.** deriving from data within a note, collision-resistant nullifiers paired with note-commitments will prevent notes from being double-spent.
+- **nullifiers.** deriving from private data within a note, collision-resistant nullifiers paired with note-commitments will prevent notes from being double-spent.
 
 > **Notes About Design**
 > These obstacles are not unique to our requirements, and have been solved concretely by multiple teams, one for example is the zcash's sprout, sapling, and orchard protocols. We are designing our protocol for private airdrops so that we can leverage a large majority of the work done by the cypherpunk community, however there are some discrepancies we need to design around. Specifically:
@@ -54,21 +48,35 @@ Specifically, we derive a fresh key-pair that is verifiably derived from the eli
 - **Nullifier Use**
 - **Verifiable Service in TEE**
 
+## Zk Circuit Design
+
+There are 3 primitive circuits we need to implement:
+
+1. **Airdrop Eligibility** *via sinsemilla hashDomain hash*
+2. **Note Commitment / Nullifier Integrity** *sinsemilla commitDomain hash*
+3. **pub/priv key pairing**
+
+### 1. Airdrop Eligibility: Ensure Genesis Hash Is Valid & Derived From Note Components
+
+This prooves genesis distribution inclusion by recreating the sinsemilla hashdomain tree leaf with the note components, and then constraining that to the tree root.
+
+___
+
 ## Keys
 
 We have 3 main types of keys involved in this process.
 
-1. Eligible Keys
-2. Redemption Keys
-3. HKDF keys
+1. **Eligible Keys:**  *the keys that has a public allocation set for them, and is what we must keep any signature or hash derived from private, in order to retain privacy.*
+2. **Redemption Keys:** *the keys that will be recieving the public allocations claimed by the eligible keys*
+3. **HKDF keys:** *the keys that are deterministically derived from private inputs of a circuit*
 
-Eligible keys are the keypair that has a public allocation set for them, and is they key that we must keep any signature or hash derived from it private, in order to retain privacy. Redemption keys are the keys that will be recieving the public allocations claimed by the eligible keys. HKDF keys are keys that are deterministically derived from private inputs of a circuit. HKDF keys are specifically used to make our proof of ownership step effecient & feasable in-circuit.
+> HKDF keys are specifically used to make our proof of ownership step effecient & feasable in-circuit.
 
 | # | Key type         | Curve used | Primary crate | Public / Private usage | Typical Rust type (example) | Key‑derivation notes |
 |---|------------------|------------|--------------|------------------------|-----------------------------|----------------------|
 | 1 | **Eligible Key** | secp256k1  | `k256` (or `secp256k1`) | Public key is **published** in the allocation; **private key + any signatures / hashes must stay secret** to preserve privacy. | `k256::ecdsa::SigningKey` / `k256::ecdsa::VerifyingKey` | Directly generated or imported; never derived from other keys. |
 | 2 | **Redemption Key** | secp256k1 | `k256` (or `secp256k1`) | Public key is **the recipient** of the claimed allocation; private key is used only to sign the redemption proof. | Same as Eligible (`SigningKey`/`VerifyingKey`) | May be pre‑generated or created on‑the‑fly; no HKDF involved. |
-| 3 | **HKDF‑derived Key** | JubJub (red‑jubjub) | `redjubjub` (or `jubjub`) | Private key **only**; the corresponding public key is *not* exposed – it is used inside the circuit for proof‑of‑ownership. | `redjubjub::PrivateKey` / `redjubjub::PublicKey` (if needed for internal checks) | Deterministically derived via HKDF from circuit‑private inputs (e.g., a seed, a note commitment, a nullifier). The derived scalar is mapped to a JubJub point using the crate’s `generator`. |
+| 3 | **HKDF‑derived Key** | - | - | Private key **only**; the corresponding public key is *not* exposed – it is used inside the circuit for proof‑of‑ownership. |   | Deterministically derived via HKDF from circuit‑private inputs (e.g., a seed, a note commitment, a nullifier). The derived scalar is mapped to a JubJub point using the crate’s `generator`. |
 
 > NOTE: zcash orchard protocol implements very complex (but useful) key derivation for viewing, authorization, and privacy retention purposes. Our scope does not require the use of viewing or authorization keys, as the end results of tokens claimed will be public. A large portion of the modifications from the orchard protocol altering how note-commitments & nullifiers are derived, as they rely heavily on the use of the key structure used by zcash orchard protocol.
 
@@ -80,50 +88,212 @@ In order to make it impossible to retroatively derive randomness used during the
 >
 > `cargo run --package zk-crates --bin generate_randomness`</center>
 
-## Ownership Verification: HKDF
+## Ownership Verification: Pairing
 
-Its crucial that our circuit has an feasable way to verify that the `eligible_addr` is authorizing the spend of a specific note. normal signature verification for secp256k1 curves are computationally heavy, & generate extremely large proof sizes not compatible with on-chain gas limits & a nice UX. We explored two possible implementing this, both optimized for in-circuit verification so that we maintain the privacy integrity expected. We will eventually implement both, but for our MVP , the selected option is to make use of **deterministic HMAC- Key Deriving Function**, to derive a keypair on the Jubjub curve from the `elig_sk`.  This keypair can then be used to sign `m`, being a hash of relevant components within a note being spent, which in turn will allow us to implement constraints within the circuit that will power both proof of ownership & nullifier derivation.
+Its crucial that our circuit has an feasable way to verify that the owner of the `elig_pk` is authorizing the spend of a specific note. Normal signature verification for secp256k1 curves are computationally heavy, & generate extremely large proof sizes not compatible with on-chain gas limits & a nice UX.
 
-### Step 1: Derive Keys
+| **Aspect** | **Explanation** |
+|------------|-----------------|
+| **Private inputs** | `elig_pk` (public key) and `elig_sk` (secret key) must both be provided as **private** witnesses to the circuit. |
+| **Arithmetic required** | The circuit needs **foreign‑field arithmetic** to operate over the secp256k1 scalar field (different from the base field of the halo2 proof system). |
+| **Core constraint** |  $pk \;=\; sk \;\cdot\; G$, where `G` is the generator point of the secp256k1 curve. |
 
-- derives `jub_sk` from the HKDF `HKDF(elig_sk, dst_jub_hkdf) mod ℓ_jub`
-- computes the baby-jubjub public key `jub_pk = jub_sk * G_jub`
+> **Reference implementation:**  <https://github.com/axiom-crypto/halo2-lib/blob/community-edition/halo2-ecc/src/secp256k1/tests/ecdsa.rs>
 
-### Step 2: Hash & Sign Msg
+- **GENERATOR_X & GENERATOR_Y**
+- **CURVE_ORDER**
+- **elig_pk**
+- **elig_sk**
 
-- generates challenge being signed `m`, where `m == H(amount||denom||fdi||elig_sk)`
-- signs `m` with the `jub_sk`, generating `sig_jub`
+The constraint equation is:
 
-### Step 3: Verification
+$$\begin{aligned}
+\textbf{Private witnesses} &\qquad
+\begin{cases}
+\mathsf{sk}\in\mathbb{F}_{\ell}      &\text{(secret scalar)}\\[2pt]
+\mathsf{pk}= (X_{\mathsf{pk}},Y_{\mathsf{pk}})\in\mathbb{F}_{p}^{\,2}
+                                       &\text{(corresponding public point)}
+\end{cases}
+\\[8pt]
+\textbf{Constants} &\qquad
+\begin{cases}
+G   = (G_{x},G_{y})                     &\text{(generator point)}\\
+G_{x}= \texttt{GENERATOR\_X}            &\\
+G_{y}= \texttt{GENERATOR\_Y}            &\\
+\ell = \texttt{CURVE\_ORDER}            &\text{(sub‑group order)}
+\end{cases}
+\end{aligned}$$
 
-#### Out Of Circuit
->
-> NOTE: This step is a simple signature verification, out of circuit. This can be implemented either within the smart contract state, or within a verifiable service logic.
+$$\boxed{
+\begin{aligned}
+&0 \;<\; \mathsf{sk} \;<\; \ell
+   &&\text{(range‑check that the secret is a canonical scalar)}\\[6pt]
+&\mathsf{pk}\;=\;\mathsf{sk}\,\cdot\,G
+   &&\text{(fixed‑base elliptic‑curve multiplication)}
+\end{aligned}}$$
 
-- verifies `m` is accurately reconstructed from the given inputs
-- verifies `sig_jub` against `m` and the supplied `jub_pk`.
+$$\text{Component‑wise this is equivalent to}
+\qquad
+\begin{cases}
+X_{\mathsf{pk}} = X\!\bigl(\mathsf{sk}\,\cdot\,G\bigr) \\[4pt]
+Y_{\mathsf{pk}} = Y\!\bigl(\mathsf{sk}\,\cdot\,G\bigr)
+\end{cases}$$
 
-#### In Circuit
+## Ownership Verification: PLUME
 
-- **Eligible Public‑key/Secret-Key Consistency**: constrains `elig_sk` is the counterpart to `elig_pk`
-- **HKDF Derivation**: constrains the HKDF used `elig_sk` as an input to derive `jub_sk`
-- **Derived Public‑key/Secret-Key Consistency:** Computes `jub_pk_calc = jub_sk·G_jub` and enforce `jub_pk_calc == jub_pk`.
-- **Message Hash**: constrains `m` is accurately derived from the known values
+PLUME is defined in  [ERC-7524](https://eips.ethereum.org/EIPS/eip-7524) as a way to effeciently verify a message was signed in circuit be a secp256k1 key. This will make it possible for our circuit to constrain that a key owner has authorized a specific address to receive the funds being claimed. This is an extremely important step in binding a proof with the destination of funds being claimed.
 
-### Future Implementations
+### Minimal Requirements
 
-- **PLUME Nullifier Constraints**: in circuit nullifier verification following the spec described in ERC-7524.
+- `g` - generator (aka the base point) of the curve
+- `m` - 32-byte message (will be defined as `m == H(amount||denom||fixed_denom_index)` )
+- `(sk,pk)` - keypair
+- `sec1(pk)` - SEC1 defined compressed public key (33 bytes)
+
+### Signature Generation
+
+1. `r` is a random point
+2. `h` - a hash-to-curve of `htc([m,sec1(pk)])`\
+*NOTE: the length of intput to htc is always 65 bytes, so `m` is required to be a hash of the raw message*
+3. `z` - computed via `h^r`
+4. `nul` - computed `h^sk`
+5. `c` - computed dependent on the version of PLUME used:\
+   V1 - `H([g,pk,h,nul,g^r,z])`\
+   V2 - `H([nul,g^r,z])`
+6. `s` - compute via `r + sk * c`
+
+The signature is then defined as `(z,s,g^r,c,nul)`
 
 ## Notes
 
-notes function as private UTXOs (Unspent Transaction Outputs) that represent claims to portions of the airdropped tokens. Each note contains sensitive data that must remain private, except for certain public components used for verification and transaction processing. We have generated a predetermined set of notes for users, classified by fixed-denomination amounts. we must derive our note-commitments & nullifiers from completely deterministic sources, such that it is impossible to alter one of the PRF inputs, that will result in the ability to reuse a note that has been spent. We can do this by expecting the resulting signature/nullifier from the owernship verification step as an input source in a PRF. This way, the circuit can constrain the nullifer & note-commitment with certainty.
+notes function as private UTXOs (Unspent Transaction Outputs) that represent claims to portions of the airdropped tokens. Each note contains sensitive data that must remain private, except for certain public components used for verification and transaction processing. We have generated a predetermined set of notes for users, classified by fixed-denomination amounts. we must note nullifiers from completely deterministic sources, such that it is impossible to alter one of the PRF inputs, that will result in the ability to reuse a note that has been spent.
 
-- **note-commitment and nullifier derivation**: we need to ensure that note-commitments and nullifiers are impossible to be doublespent, given that we are not using nullifier-keys. specifically, our genesis merkle tree is created by generating leaves for each eligible address total possible fixed denominations. We included an index for all duplicate fixed denomination amounts (ie; if there was 4 1000 TERP fixed denomnination, each leaf without an index would have an identical hash). This allows us to then make use of the signature we are generating from the eligible address as the source of randomness that will derive nullifiers and note-commitment values, so that we can zk-verify that:
-  - a. our signature is generated from `m == H(amount||denom||index)` by the `sk` of the `eligible_addr`
-  - b. the note commitment `nc` (and in result the nullifier) is derived using this signature as the randomness input
+### Nullifiers
 
-These two constraints will ensure with certainty that nullifiers and note-commitments cannot be forged for doublespends.
+To prevent double-spends, each note must have a unique, deterministic nullifier derivable only by the owner. This ensures the nullifier is:
 
+- Unique per note.
+- Unlinkable to the eligible address.
+- Only computable by the note owner.
+
+| Components   | Meaning                         | Type                                 | Public / Private / Constant / Output | Derivation |
+|----------|---------------------------------|--------------------------------------|--------------------------------------|------------|
+| `elig_sk`| Eligible secret key             | `bytes[32]`                          | **Private**                          | — |
+| `fdi`    | Fixed Denomination Index        | `u64`                                | **Private**                          | *fully padded u64* |
+| `NOTE_NULLIFIER_PERSONALIZATION`      |    |                             | **Constant**                          |   |
+| `v`      | Note Value                      | `NoteValue(u64)`                     | **Public**                           | *fully padded u64* |
+| `nd`     | Note Denomination               | `NoteDenom([u8; <128])`              | **Public**                           | *blake3 Hash + top 3 bits |
+
+```math
+\begin{array}{lcl}
+\textbf{Private witnesses} &
+\begin{cases}
+\mathsf{fdi}      \in \mathbb{F}_p      &\text{(field element from private input }fdi\text{)}\\[2pt]
+\mathsf{elig\_sk}  \in \{0,1\}^{256}   &\text{(32‑byte eligibility secret)}\\[2pt]
+\mathsf{nd}        \in \{0,1\}^{256}   &\text{(32‑byte auxiliary data)}\\
+\end{cases}
+\\[10pt]
+\textbf{Public inputs} &
+\begin{cases}
+\mathsf{v}        \in \mathbb{F}_p      &\text{(public value)}\\[2pt]
+\mathsf{nd}^{\ast}\in \mathbb{F}_p      &\text{(public‑derived field element for }nd\text{)}\\[2pt]
+\mathsf{elig\_sk}^{\ast}\in \mathbb{F}_p &\text{(public‑derived field element for }elig\_sk\text{)}\\
+\end{cases}
+\\[10pt]
+\textbf{Constants} &
+\begin{cases}
+\mathtt{DST}_{\!N}= \texttt{NOTE\_NULLIFIER\_PERSONALIZATION}
+    &\text{(domain‑separation tag)}\\[2pt]
+\mathbb{F}_p &\text{base field of the Pallas curve}
+\end{cases}
+\end{array}
+```
+
+```math
+\begin{aligned}
+%--- intermediate hashes -------------------------------------------------
+h_{\mathsf{nd}}   &:= \operatorname{Poseidon}_{\mathbb{F}_p}
+                     \bigl(\,\mathtt{DST}_{\!N}\;\|\;\mathsf{nd}\,\bigr)
+                     \;\in\; \mathbb{F}_p \\[4pt]
+h_{\mathsf{elig}} &:= \operatorname{Poseidon}_{\mathbb{F}_p}
+                     \bigl(\,\mathtt{DST}_{\!N}\;\|\;\mathsf{elig\_sk}\,\bigr)
+                     \;\in\; \mathbb{F}_p \\[6pt]
+%--- final nullifier ----------------------------------------------------
+\boxed{
+\mathsf{nul}
+   = \operatorname{Poseidon}_{\mathbb{F}_p}
+     \bigl(\,\mathsf{fdi},\;\mathsf{v},\;h_{\mathsf{nd}},\;h_{\mathsf{elig}}\,\bigr)
+   \in \mathbb{F}_p
+}
+\end{aligned}
+```
+
+### Note Commitments
+
+Note Commitments `cm` are what is disclosed publicly during claiming, by appending to the Note Commitment Tree. They are derived from the private and public inputs of a note, allowing the origin of the claiming address to be private. note commitments are derived from both deterministic and non-deterministic inputs of a note, as we do not use note-commitments for preventing double spends (this is what nullifiers are for).
+
+| Components   | Meaning                         | Type                                 | Public / Private / Constant / Output | Derivation |
+|----------|---------------------------------|--------------------------------------|--------------------------------------|------------|
+| `recp`   | Recipient Address               | `bytes[32]`                          | **Public**                           | — |
+| `v`      | Note Value                      | `NoteValue(u64)`                     | **Public**                           | *fully padded u64* |
+| `rho`    |                                 |                                      | **Private**                          | - |
+| `psi`    |                                 |                                      | **Private**                          |   |
+| `rcm`    |                                 |                                      | **Private**                           |   |
+| `rseed`  |                                 |                                      | **Private**                           |   |
+
+
+Constraining the derivation of the note commitment `cm` requires the following inputs:
+
+> note: in order to derive `psi` & `rcm`, we have a `rseed` that is a randomness source in a PRF, that expends into each.
+    <!-- pub fn psi(&self, rho: &Rho) -> pallas::Base {
+        to_base(PrfExpand::PSI.with(&self.0, &rho.to_bytes()))
+    } -->
+    <!-- pub fn rcm(&self, rho: &Rho) -> commitment::NoteCommitTrapdoor {
+        commitment::NoteCommitTrapdoor(to_scalar(
+            PrfExpand::ORCHARD_RCM.with(&self.0, &rho.to_bytes()),
+        ))
+    } -->
+
+The constraint equation is:
+
+```math
+\begin{array}{lcl}
+\textbf{Public inputs} &
+\begin{cases}
+\mathsf{recp}   \in \mathbb{F}_p & \text{recipient address} \\[4pt]
+v               \in \mathbb{F}_p & \text{value} \\[4pt]
+\rho            \in \mathbb{F}_p & \text{note randomness}
+\end{cases}
+
+\\[10pt]
+\textbf{Private witnesses} &
+\begin{cases}
+\mathsf{rseed} \in \{0,1\}^{256} & \text{PRF seed} \\[4pt]
+\psi^{\ast}    \in \mathbb{F}_p   & \text{derived via } \operatorname{PRF}_{\text{PSI}} \\[4pt]
+\mathsf{rcm}^{\ast} \in \mathbb{F}_p & \text{derived via } \operatorname{PRF}_{\text{RCM}}
+\end{cases}
+\end{array}
+```
+
+```math
+\begin{aligned}
+\psi      &:= \operatorname{PRF}_{\text{PSI}}\!\bigl(\mathsf{rseed},\,\rho\bigr) \in \mathbb{F}_p,\\[4pt]
+\mathsf{rcm} &:= \operatorname{PRF}_{\text{RCM}}\!\bigl(\mathsf{rseed},\,\rho\bigr) \in \mathbb{F}_p,\\[6pt]
+\boxed{%
+\mathsf{cm}\;:=\;
+\operatorname{Poseidon}_{\mathbb{F}_p}\!\bigl(
+\mathsf{recp},\,
+v,\,\rho,\,\psi,\,\mathsf{rcm}
+\bigr)
+}
+\end{aligned}
+```
+
+### Fixed-Denomination-Index
+
+ we need to ensure that note-commitments and nullifiers are impossible to be doublespent, given that we are not using nullifier-keys. specifically, our genesis merkle tree is created by generating leaves for each eligible address total possible fixed denominations. We included an index for all duplicate fixed denomination amounts (ie; if there was 4 1000 TERP fixed denomnination, each leaf without an index would have an identical hash). This will ensure with certainty that nullifiers cannot be forged for resuse.
+
+<!-- 
 ### Note Structure: HKDF + BabyJubJub verification
 
 > NOTE: for `m`, we may need to implement a deterministic pedersen commitment to `elig_sk`, ensuring all inputs to the hash function are on the curve for posiedon hashing
@@ -155,21 +325,7 @@ These two constraints will ensure with certainty that nullifiers and note-commit
 - `jub_null`
 - `amount`
 - `denom`
-- `recp`
-
-### Note Commitments
-
-Note Commitments `cm` are what is disclosed publicly during claiming, by appending to the Note Commitment Tree. They are derived from the private and public inputs of a note, allowing the origin of the claiming address to be private. note commitments are derived from both deterministic and non-deterministic inputs of a note, as we do not use note-commitments for preventing double spends (this is what nullifiers are for).
-
-### Nullifiers (Anti Double Spend)
-
-To prevent double-spends, each note must have a unique, deterministic nullifier derivable only by the owner.
-
-This ensures the nullifier is:
-
-- Unique per note.
-- Unlinkable to the eligible address or note commitment.
-- Only computable by the note owner.
+- `recp` -->
 
 ___
 
@@ -180,25 +336,30 @@ We make use of the sinsemilla merkle tree implementation for powering effecient 
 ### 1. Genesis Distribution Tree: `HashDomain`
 
 **This is the static, starting state of the headstash before any claims happen.**
-Its purpose is to allow a user to prove a specific address `addr_eligible` is eligible to claim a certain allocation `v` without revealing which specific address it is. Each leaf is a commitment to the `HashDomain`,that is public & binding an eligible recipients balance for a single token balance. A leaf is computed using the sinsemilla hashing function as:
+Its purpose is to allow a user to prove a specific address `elig_pk` is eligible to claim a certain allocation `v` without revealing which specific address it is. Each leaf is a commitment to the `HashDomain`,that is public & binding an eligible recipients balance for a single token balance. A leaf is computed using the sinsemilla hashing function as:
 
-In order to do so, we have the following private inputs and public inputs:
-
-| Symbol   | Meaning                         | Type                                 | Public / Private / Constant / Output | Derivation |
+| Components   | Meaning                         | Type                                 | Public / Private / Constant / Output | Derivation |
 |----------|---------------------------------|--------------------------------------|--------------------------------------|------------|
 | `elig_pk`| Eligible public key             | `bytes[32]`                          | **Private**                          | — |
-| `fdi`    | Fixed Denomination Index        | `u64`                                | **Private**                          | — |
-| `root`   | Genesis Distribution Tree Root  | `u64`                                | **Private**                          | — |
-| `leaf`   | Note Leaf                       | `bytes[]`                            | **Private**                          | — |
-| `v`      | Note Value                      | `NoteValue(u64)`                     | **Public**                           | — |
-| `nd`     | Note Denomination               | `NoteDenom([u8; <128])`              | **Public**
+| `fdi`    | Fixed Denomination Index        | `u64`                                | **Private**                          | *fully padded u64* |
+| `root`   | Genesis Distribution Tree Root  | `u64`                                | **Constant**                          | *sinsemilla::HashDomain*  |
+| `leaf`   | Note Leaf                       | `bytes[32]`                          | **Private**                          | *sinsemilla::HashDomain* |
+| `v`      | Note Value                      | `NoteValue(u64)`                     | **Public**                           | *fully padded u64* |
+| `nd`     | Note Denomination               | `NoteDenom([u8; <128])`              | **Public**                           | *blake3 Hash + top 3 bits cleared* |
 
-- **Denomination hashing** – Since the length of a denomination is unknown, we hash `nd` with **blake3** to obtain a 32‑byte digest. *Sinsemilla* expects a 253‑bit domain, so we simply clear the top three bits of the digest. The denomination is public, so smart contracts can map `nd` → `blake3(nd) & 0x1FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF` in O(1) time.
-
-- **Padding for `v` and `fdi`** – Both values are `u64` (max 160 bits when concatenated). For table look‑ups we left‑pad each to the byte length required by the hashDomain of Sinsemilla (e.g., 32 bytes). This ensures the inputs line up with the fixed‑size field elements used inside the circuit.
-
-- **`elig_pk` handling for Sinsemilla compatibility** – `elig_pk` is a 32‑byte public‑key representation. The value is interpreted as a field element; any bits that fall outside the field size are cleared (i.e., the top‑most bits are masked) before it is used as input to the Sinsemilla hash. **The Full key is required in‑circuit,**Even though elig_pk is private for the prover, the circuit must receive the entire we need to enforce the relationship of the `jubjub_sk` being derived from a `elig_sk` thyat is paired with an `elig_pk`. This guarantees that the HKDF‑derived key used in the protocol is indeed tied to the secret key elig_sk.
-
+> - **Denomination hashing** – Since the length of a denomination is unknown, we hash `nd` with **blake3** to obtain a 32‑byte digest. *Sinsemilla* expects a
+> 253‑bit domain, so we simply clear the top three bits of the digest. The denomination is public, so smart contracts can map `nd` → `blake3(nd) &
+> 0x1FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF` in O(1) time.
+>
+> - **Padding for `v` and `fdi`** – Both values are `u64` (max 160 bits when concatenated). For table look‑ups we left‑pad each to the byte length required by
+> the hashDomain of Sinsemilla (e.g., 32 bytes). This ensures the inputs line up with the fixed‑size field elements used inside the circuit.
+>
+> - **`elig_pk` handling for Sinsemilla compatibility** – `elig_pk` is a 32‑byte public‑key representation. The value is interpreted as a field element; any
+> bits that fall outside the field size are cleared (i.e., the top‑most bits are masked) before it is used as input to the Sinsemilla hash. **The Full key is
+> required in‑circuit,**Even though `elig_pk` is private for the prover, the circuit must receive the entire key as  we need to enforce the relationship of the
+> `hkd_sk` being derived from a `elig_sk` thyat is paired with an `elig_pk`. This guarantees that the HKDF‑derived key used in the protocol is indeed tied to
+> the secret key `elig_sk`.
+>
 
 ```math
 \begin{aligned}
@@ -244,16 +405,19 @@ In order to do so, we have the following private inputs and public inputs:
 
 >
 > q: how can we actually implement a note-commitment tree given our specification, and taking into account possible discrepencies with
-> note-commitment generation timing between multiple parties?
+> note-commitment generation timing between multiple parties?\
+> a: user maintains their own note-commitment tree. This is only used when genesis notes are split into sub-notes, which is not in spec for the inital MVP.
 
-This tree is dynamic and is the core state of the private ledger. It is constantly updated with every claim transaction. Each claim by a user will generate a note-commitment. Each time a user is spending a note generated in the genesis distribution tree, the note-commitment will be appended to a top-level layer in the merkle tree, preventing any association between the geneiss leaf of the note being spent. A commitment is computed from all the fields of a note using a binding and hiding commitment scheme (Sinsemilla `CommitDomain` in our example):
+### 1. Constrain `cm` is derived from public + private inputs
+
+<!-- This tree is dynamic and is the core state of the private ledger. It is constantly updated with every claim transaction. Each claim by a user will generate a note-commitment. Each time a user is spending a note generated in the genesis distribution tree, the note-commitment will be appended to a top-level layer in the merkle tree, preventing any association between the geneiss leaf of the note being spent. A commitment is computed from all the fields of a note using a binding and hiding commitment scheme (Sinsemilla `CommitDomain` in our example): -->
 
 ```math
 % old, need to update
 % \mathrm{cm} = \mathrm{Commit}(d, \mathrm{pk}_d, v, \rho, \psi, \mathrm{rcm})
 ```
-
-> Our genesis tree is non-interactive, derived from the sinsemilla `HashDomain`, but we want to have our note commitments retain same functionality as zcash orchard protocol, which uses the `CommitDomain` for the note-commitments.
+<!-- 
+> Our genesis tree is non-interactive, derived from the sinsemilla `HashDomain`, but we want to have our note commitments retain same functionality as zcash orchard protocol, which uses the `CommitDomain` for the note-commitments. -->
 
 <!-- > q: **do we need the merkle tree for note-commitments?** yes. our merkle tree will require spends of allocations always being one layer deep, and splitting of notes into sub-notes, as there are always a predetermined number of notes (due to using fixed denominations). -->
 <!-- >
@@ -284,13 +448,35 @@ Note Commitment Tree (CommitDomain)
 ```
 
  The only time we allow appending to existing index in the tree is if the user decides to split a note into further sub-notes, using fixed-denominations that sub up to the parent notes value. whenever a sub-note is spent, it would be treated as if it was one of the top-level genesis notes, and the note-commitment would be appended to the top layer of the merkle tree, extending the total anonymity set of the note-commitments. We want to ensure that the path is kept private between all of the sub-notes and parent notest to prevent association -->
-
+<!-- 
 ### How its Built
 
 0. The tree starts empty, with the root being the root also being the genesis distribution tree root.
 1. When a user makes a claim (either genesis or spending an existing note), their transaction output includes a new note commitment `cm_new`
 2. The smart contract verifies the zk-proof and, if valid, inserts `cm_new` into the next available leaf position in this tree.
-3. The contract then computes and stores the new root of this tree (root_notes_current).
+3. The contract then computes and stores the new root of this tree (root_notes_current). -->
+
+## Smart Contract Design
+
+This contracts will keep record of the spent nullifiers, maintain control of funds to distribute, and power the proof verification.
+
+- static verification key (VK) - "compiled down" representation of the circuit
+- public inputs
+- halo2 proof
+
+## Verifiable Service Mesh
+
+A Verifiable Service mesh of nodes acting an a proxy for broadcasting proofs on chain unlocks a number of UX benefits:
+
+- dedicated API for broadcasting claims
+- minimizing fee-grants
+- delayed claiming support
+
+### Smart-Account Use
+
+### Key Aggregation & Rotation
+
+### Additional Features
 
 ## Genesis Bootstrapping
 
@@ -317,65 +503,27 @@ The proxy service must control an on-chain account, in order to register the zk-
 
 - **granularizes sequence of operations**: authenticators require specific steps of a tx broadcasted to be performed within the scope defined by the x/smart-account authentication module. This allows us to separate the signature verification coming from the off-chain service from the users proof verification sequence.
 
-### Step 3: Eligible Addresses Generate & Broadcast Proofs for claiming
+### Step 3: Eligible Addresses Generate Proofs for claiming
 
 In the proof circuit, the user proves:
 
-- They own `addr_eligible` (via signature verification).
+- They own `addr_eligible` via `elig_pk` `elig_sk` pairing.
 - The genesis note corresponds to an unclaimed entry in the genesis Merkle tree.
 - The nullifier `nf` for the genesis note has not been published.
 
-### Step 4: Output New Note
+### Step 4: Claim Spent Note By Contract Call
 
-for the claimed amount (or the full amount if claiming entirely), with its own `cm` and `nf`.
-
-### Zk Circuit Design
-
-The circuit should verify:
-
-1. **Merkle inclusion**: Prove that addr_eligible is in the genesis tree with root root_genesis.
-2. **Signature verification**: Prove knowledge of sig valid for addr_eligible signing H(m), where m includes the diversified address pk_d.
-3. **Nullifier checks**\
-  a. Prove correct derivation of `nf` from private inputs.
-  b. Check that `nf` is not in the nullifier set.
-4. **Value balancing**: For partial claims, ensure input value ≥ output value.
-5. **Note commitment integrity**: Verify correct computation of cm for output notes.
-
-Public inputs to the circuit:
-
-- `root_genesis`
-- `nf` (nullifier of the input note, or for genesis, a commitment to it)
-- `cm_out` (commitment of the output note)
-- `cv` (value commitment)
-- `pk_d`, `d` (diversified address)
-
-Private inputs to the circuit:
-
-- `addr_eligible`
-- Signature components
-- Merkle path for `addr_eligible`
-- `v`, `ρ`, `ψ`, `rcm`, `nf_rand`
-
-___
-
-## Claim Process
-
-### Step 1: User generates keys
-
-### Step 2: User constructs proof
-
-### Step 3: Submit transaction
-
-### Step 4: Contract updates state
+A user will broadcast their proof generated to the verifiable service, which has feegrants registered under an account it controls to cover gas cost to broadcast to a chain state.
 
 ## Implementation Checklist
 
-- [ ] Define Sinsemilla hashing parameters for Merkle trees and commitments.
+- [x] Define Sinsemilla hashing parameters for Merkle trees and commitments.
 - [ ] Implement Halo2 circuits for:
-  - Merkle inclusion proofs
-  - Signature verification (erc-7524)
-  - Nullifier derivation
-  - Note commitment computation
+  - [ ] Merkle inclusion proofs
+  - [ ] Proof Of Ownership (key-pairing)
+  - [ ] Proof Of Destination (erc-7524)
+  - [ ] Nullifier derivation
+  - [ ] Note commitment derivation
 - [ ] Design smart contract to manage:
   - Nullifier set
   - Note commitment tree
@@ -385,22 +533,6 @@ ___
   - [x] secure random number generator
   - [x] genesis proof generator
   - [x] genesis fixed amount note generator
-
-## Smart Contract Design
-
-- static verification key (VK) - "compiled down" representation of the circuit
-- public inputs
-- halo2 proof
-
-A cosmwasm smart contract will be paired with a wavs instance, which we expect to have a set of bls12-381 keys as identity and authentication. This contracts must accept and process a proof of ownership of function for the bls12-381 keys, as we will implement support for key aggregation and rotation. This smart contract will manage the nullifier set as well, in an append-only accepted only from the account managed by the set of wavs operators. It will make use of the sudo entrypoint interface required by the x/smart-account module, allowing for a granular approach to implementing this.
-
-## Verifiable Service Mesh
-
-A Verifiable Service mesh of nodes acting an a proxy for broadcasting proofs on chain unlocks a number of UX benefits:
-
-- dedicated API for broadcasting claims
-- minimizing fee-grants
-- delayed claiming support
 
 ### Claiming API
 
@@ -426,33 +558,13 @@ A Verifiable Service mesh of nodes acting an a proxy for broadcasting proofs on 
 - <https://datatracker.ietf.org/doc/html/rfc5869>
 - <https://github.com/dusk-network/jubjub-schnorr>
 - <https://christophe.petit.web.ulb.be/files/16PKC_primeECDLP.pdf>
+- <https://forum.zcashcommunity.com/t/status-update-rfc-zec-nam-shielded-airdrop-protocol/49144>
+- <https://ebuchman.github.io/pdf/snarks.pdf>
+- <https://github.com/DelphinusLab/halo2ecc-s>
 
 ### Alt Spec: 👻
 <!-- 
 ### Option 1: PLUME signature proofs
-
-The first option is to implement the [ERC-7524](https://eips.ethereum.org/EIPS/eip-7524) spec in circuit. This will allow users to produce two components, one deterministic & one non-deterministic, allowing us to use the determinstic on as an input in the PRF for note-commitments and nullifiers.
-
-### Minimal Requirements
-
-- `g` - generator (aka the base point) of the curve
-- `m` - 32-byte message (will be defined as `m == H(amount||denom||fixed_denom_index)` )
-- `(sk,pk)` - keypair
-- `sec1(pk)` - SEC1 defined compressed public key (33 bytes)
-
-### Signature Generation
-
-1. `r` is a random point
-2. `h` - a hash-to-curve of `htc([m,sec1(pk)])`\
-*NOTE: the length of intput to htc is always 65 bytes, so `m` is required to be a hash of the raw message*
-3. `z` - computed via `h^r`
-4. `nul` - computed `h^sk`
-5. `c` - computed dependent on the version of PLUME used:\
-   V1 - `H([g,pk,h,nul,g^r,z])`\
-   V2 - `H([nul,g^r,z])`
-6. `s` - compute via `r + sk * c`
-
-The signature is then defined as `(z,s,g^r,c,nul)`
 
 ### Zk-Prooving
 
@@ -550,3 +662,38 @@ We will use version two defined of the PLUME implementation, but modified to ret
   "note_cm":  "G1",                 // note commitment (public output)
 }
 ``` -->
+
+<!-- 
+## HKDF STEPS
+
+Specifically, we aim derive a keypair on the `TBD` curve from the `elig_sk`.  This keypair can then be used to sign `m`, being a hash of relevant components within a note being spent, which in turn will allow us to implement constraints within the circuit that will power both proof of ownership & nullifier derivation.
+
+### Step 0: Prepare Inputs
+
+We need a specific structure for the data used to derive the keys
+
+### Step 1: Derive Keys
+
+- derives `jub_sk` from the HKDF `HKDF(elig_sk, dst_jub_hkdf) mod ℓ_jub`
+- computes the baby-jubjub public key `jub_pk = jub_sk * G_jub`
+
+### Step 2: Hash & Sign Msg
+
+- generates challenge being signed `m`, where `m == H(amount||denom||fdi||elig_sk)`
+- signs `m` with the `jub_sk`, generating `sig_jub`
+
+### Step 3: Verification
+
+#### Out Of Circuit
+>
+> NOTE: This step is a simple signature verification, out of circuit. This can be implemented either within the smart contract state, or within a verifiable service logic.
+
+- verifies `m` is accurately reconstructed from the given inputs
+- verifies `sig_jub` against `m` and the supplied `jub_pk`.
+
+#### In Circuit
+
+- **Eligible Public‑key/Secret-Key Consistency**: constrains `elig_sk` is the counterpart to `elig_pk`
+- **HKDF Derivation**: constrains the HKDF used `elig_sk` as an input to derive `jub_sk`
+- **Derived Public‑key/Secret-Key Consistency:** Computes `jub_pk_calc = jub_sk·G_jub` and enforce `jub_pk_calc == jub_pk`.
+- **Message Hash**: constrains `m` is accurately derived from the known values -->
