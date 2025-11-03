@@ -42,41 +42,29 @@ In order to prevent this association between verifying ownership & claiming toke
 
 - **Keys: Self-Custody Key Management Systems**
 - **Randomness Generators**
-- **Private Proof Of Ownership - PLUME or Baby-JubJub**
+- **Private Proof Of Ownership - PLUME + key pairing**
 - **Sinsemilla Merkle Trees**
-- **Notes & Note Commitments (UTXO)**
-- **Nullifier Use**
+- **Nullifier & Note Commitments**
 - **Verifiable Service in TEE**
-
-## Zk Circuit Design
-
-There are 3 primitive circuits we need to implement:
-
-1. **Airdrop Eligibility** *via sinsemilla hashDomain hash*
-2. **Note Commitment / Nullifier Integrity** *sinsemilla commitDomain hash*
-3. **pub/priv key pairing**
-
-### 1. Airdrop Eligibility: Ensure Genesis Hash Is Valid & Derived From Note Components
-
-This prooves genesis distribution inclusion by recreating the sinsemilla hashdomain tree leaf with the note components, and then constraining that to the tree root.
+- **On-Chain Smart Contract**
 
 ___
 
 ## Keys
 
-We have 3 main types of keys involved in this process.
+We have 2 main types of keys involved in this process.
 
 1. **Eligible Keys:**  *the keys that has a public allocation set for them, and is what we must keep any signature or hash derived from private, in order to retain privacy.*
 2. **Redemption Keys:** *the keys that will be recieving the public allocations claimed by the eligible keys*
-3. **HKDF keys:** *the keys that are deterministically derived from private inputs of a circuit*
 
-> HKDF keys are specifically used to make our proof of ownership step effecient & feasable in-circuit.
+<!-- 3. **HKDF keys:** *the keys that are deterministically derived from private inputs of a circuit* -->
+<!-- > HKDF keys are specifically used to make our proof of ownership step effecient & feasable in-circuit. -->
 
 | # | Key type         | Curve used | Primary crate | Public / Private usage | Typical Rust type (example) | Key‑derivation notes |
 |---|------------------|------------|--------------|------------------------|-----------------------------|----------------------|
 | 1 | **Eligible Key** | secp256k1  | `k256` (or `secp256k1`) | Public key is **published** in the allocation; **private key + any signatures / hashes must stay secret** to preserve privacy. | `k256::ecdsa::SigningKey` / `k256::ecdsa::VerifyingKey` | Directly generated or imported; never derived from other keys. |
 | 2 | **Redemption Key** | secp256k1 | `k256` (or `secp256k1`) | Public key is **the recipient** of the claimed allocation; private key is used only to sign the redemption proof. | Same as Eligible (`SigningKey`/`VerifyingKey`) | May be pre‑generated or created on‑the‑fly; no HKDF involved. |
-| 3 | **HKDF‑derived Key** | - | - | Private key **only**; the corresponding public key is *not* exposed – it is used inside the circuit for proof‑of‑ownership. |   | Deterministically derived via HKDF from circuit‑private inputs (e.g., a seed, a note commitment, a nullifier). The derived scalar is mapped to a JubJub point using the crate’s `generator`. |
+<!-- | 3 | **HKDF‑derived Key** | - | - | Private key **only**; the corresponding public key is *not* exposed – it is used inside the circuit for proof‑of‑ownership. |   | Deterministically derived via HKDF from circuit‑private inputs (e.g., a seed, a note commitment, a nullifier). The derived scalar is mapped to a JubJub point using the crate’s `generator`. | -->
 
 > NOTE: zcash orchard protocol implements very complex (but useful) key derivation for viewing, authorization, and privacy retention purposes. Our scope does not require the use of viewing or authorization keys, as the end results of tokens claimed will be public. A large portion of the modifications from the orchard protocol altering how note-commitments & nullifiers are derived, as they rely heavily on the use of the key structure used by zcash orchard protocol.
 
