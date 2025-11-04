@@ -95,7 +95,8 @@ Its crucial that our circuit has an feasable way to verify that the owner of the
 
 The constraint equation is:
 
-$$\begin{aligned}
+```math
+\begin{aligned}
 \textbf{Private witnesses} &\qquad
 \begin{cases}
 \mathsf{sk}\in\mathbb{F}_{\ell}      &\text{(secret scalar)}\\[2pt]
@@ -110,22 +111,27 @@ G_{x}= \texttt{GENERATOR\_X}            &\\
 G_{y}= \texttt{GENERATOR\_Y}            &\\
 \ell = \texttt{CURVE\_ORDER}            &\text{(sub‑group order)}
 \end{cases}
-\end{aligned}$$
+\end{aligned}
+```
 
-$$\boxed{
+```math
+\boxed{
 \begin{aligned}
 &0 \;<\; \mathsf{sk} \;<\; \ell
    &&\text{(range‑check that the secret is a canonical scalar)}\\[6pt]
 &\mathsf{pk}\;=\;\mathsf{sk}\,\cdot\,G
    &&\text{(fixed‑base elliptic‑curve multiplication)}
-\end{aligned}}$$
+\end{aligned}}
+```
 
-$$\text{Component‑wise this is equivalent to}
+```math
+\text{Component‑wise this is equivalent to}
 \qquad
 \begin{cases}
 X_{\mathsf{pk}} = X\!\bigl(\mathsf{sk}\,\cdot\,G\bigr) \\[4pt]
 Y_{\mathsf{pk}} = Y\!\bigl(\mathsf{sk}\,\cdot\,G\bigr)
-\end{cases}$$
+\end{cases}
+```
 
 ## Ownership Verification: PLUME
 
@@ -200,16 +206,16 @@ To prevent double-spends, each note must have a unique, deterministic nullifier 
 ```math
 \begin{aligned}
 %--- intermediate hashes -------------------------------------------------
-h_{\mathsf{nd}}   &:= \operatorname{Poseidon}_{\mathbb{F}_p}
+h_{\mathsf{nd}}   &:= \text{Poseidon}_{\mathbb{F}_p}
                      \bigl(\,\mathtt{DST}_{\!N}\;\|\;\mathsf{nd}\,\bigr)
                      \;\in\; \mathbb{F}_p \\[4pt]
-h_{\mathsf{elig}} &:= \operatorname{Poseidon}_{\mathbb{F}_p}
+h_{\mathsf{elig}} &:= \text{Poseidon}_{\mathbb{F}_p}
                      \bigl(\,\mathtt{DST}_{\!N}\;\|\;\mathsf{elig\_sk}\,\bigr)
                      \;\in\; \mathbb{F}_p \\[6pt]
 %--- final nullifier ----------------------------------------------------
 \boxed{
 \mathsf{nul}
-   = \operatorname{Poseidon}_{\mathbb{F}_p}
+   = \text{Poseidon}_{\mathbb{F}_p}
      \bigl(\,\mathsf{fdi},\;\mathsf{v},\;h_{\mathsf{nd}},\;h_{\mathsf{elig}}\,\bigr)
    \in \mathbb{F}_p
 }
@@ -228,7 +234,6 @@ Note Commitments `cm` are what is disclosed publicly during claiming, by appendi
 | `psi`    |                                 |                                      | **Private**                          |   |
 | `rcm`    |                                 |                                      | **Private**                           |   |
 | `rseed`  |                                 |                                      | **Private**                           |   |
-
 
 Constraining the derivation of the note commitment `cm` requires the following inputs:
 
@@ -257,19 +262,19 @@ v               \in \mathbb{F}_p & \text{value} \\[4pt]
 \textbf{Private witnesses} &
 \begin{cases}
 \mathsf{rseed} \in \{0,1\}^{256} & \text{PRF seed} \\[4pt]
-\psi^{\ast}    \in \mathbb{F}_p   & \text{derived via } \operatorname{PRF}_{\text{PSI}} \\[4pt]
-\mathsf{rcm}^{\ast} \in \mathbb{F}_p & \text{derived via } \operatorname{PRF}_{\text{RCM}}
+\psi^{\ast}    \in \mathbb{F}_p   & \text{derived via } \text{PRF}_{\text{PSI}} \\[4pt]
+\mathsf{rcm}^{\ast} \in \mathbb{F}_p & \text{derived via } \text{PRF}_{\text{RCM}}
 \end{cases}
 \end{array}
 ```
 
 ```math
 \begin{aligned}
-\psi      &:= \operatorname{PRF}_{\text{PSI}}\!\bigl(\mathsf{rseed},\,\rho\bigr) \in \mathbb{F}_p,\\[4pt]
-\mathsf{rcm} &:= \operatorname{PRF}_{\text{RCM}}\!\bigl(\mathsf{rseed},\,\rho\bigr) \in \mathbb{F}_p,\\[6pt]
+\psi      &:= \text{PRF}_{\text{PSI}}\!\bigl(\mathsf{rseed},\,\rho\bigr) \in \mathbb{F}_p,\\[4pt]
+\mathsf{rcm} &:= \text{PRF}_{\text{RCM}}\!\bigl(\mathsf{rseed},\,\rho\bigr) \in \mathbb{F}_p,\\[6pt]
 \boxed{%
 \mathsf{cm}\;:=\;
-\operatorname{Poseidon}_{\mathbb{F}_p}\!\bigl(
+\text{Poseidon}_{\mathbb{F}_p}\!\bigl(
 \mathsf{recp},\,
 v,\,\rho,\,\psi,\,\mathsf{rcm}
 \bigr)
