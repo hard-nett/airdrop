@@ -5,13 +5,13 @@
 
 ## Context
 
-Our current airdrop framework, `The Headstash Contract` powers distribution by mapping ECDSA addresses not native to the chain (ETH,SOL,etc) as eligible to claim a specific list of tokens. In order to claim, users need to verify they are owners of any eligible addresses. This is done by generating a signature with the eligible address keys, from a message that includes the address native to the chain that the user will use to broadcast the message to claim their allocations.
+Our current airdrop framework, `The Headstash Contract` powers distribution by mapping ECDSA addresses not native to the chain (ETH,SOL,etc) as eligible to claim a specific list of tokens. In order to claim, users need to verify they are owners of any eligible addresses secret key `elig_sk`. This is done by generating a signature with `elig_sk`, from a message that includes the address native to the chain that the user will use to broadcast the message to claim their allocations `recp`.
 
 ```math
-\sigma = \text{Sign}_{\text{sk}_{\text{eligible}}}\big( H(m) \big), \quad \text{where } \text{addr}_{\text{native}} \in m
+\sigma = \text{Sign}_{\text{elig}_{\text{sk}}}\big( H(m) \big), \quad \text{where } \text{recp} \in m
 ```
 
-**This creates an on-chain association between the eligible address, and the claiming address, which we want to prevent.**
+**This creates an on-chain association between the eligible account `elig_pk`, and the claiming address `recp`, which we want to prevent.**
 
 In order to prevent this association between verifying ownership & claiming tokens, there are 3 major obstacles:
 
@@ -21,11 +21,11 @@ In order to prevent this association between verifying ownership & claiming toke
 
 ### Q: How can someone prevent leaking where their claimed funds end up, if the total amount & distributions allocated are public?
 
-- **note commitments.** Partial claims of genesis allocations via fixed denomination notes. This allows eligble claimers to designate unique addresses for receiving allocations over a span of time rather than immediately.
+**A: Note Commitments**: Partial claims of genesis allocations via fixed denomination notes. This allows eligble claimers to designate unique addresses for receiving allocations over a span of time rather than immediately.
 
 ### Q: How are users prevented from claiming more funds then they are allocated?
 
-- **nullifiers.** deriving from private data within a note, collision-resistant nullifiers paired with note-commitments will prevent notes from being double-spent.
+**A:nullifiers**: Deriving from private data within a note, collision-resistant nullifiers paired with note-commitments will prevent notes from being double-spent.
 
 > **Notes About Design**
 > These obstacles are not unique to our requirements, and have been solved concretely by multiple teams, one for example is the zcash's sprout, sapling, and orchard protocols. We are designing our protocol for private airdrops so that we can leverage a large majority of the work done by the cypherpunk community, however there are some discrepancies we need to design around. Specifically:
@@ -62,7 +62,7 @@ We have 2 main types of keys involved in this process.
 
 | # | Key type         | Curve used | Primary crate | Public / Private usage | Typical Rust type (example) | Key‑derivation notes |
 |---|------------------|------------|--------------|------------------------|-----------------------------|----------------------|
-| 1 | **Eligible Key** | secp256k1  | `k256` (or `secp256k1`) | Public key is **published** in the allocation; **private key + any signatures / hashes must stay secret** to preserve privacy. | `k256::ecdsa::SigningKey` / `k256::ecdsa::VerifyingKey` | Directly generated or imported; never derived from other keys. |
+| 1 | **Eligible Key** | secp256k1  | `k256` (or `secp256k1`) | Public key is **published** in the allocation; **private key + any signatures / hashes must stay secret** to preserve privacy. | `k256::ecdsa::SigningKey` / `k256::ecdsa::VerifyingKey` | - |
 | 2 | **Redemption Key** | secp256k1 | `k256` (or `secp256k1`) | Public key is **the recipient** of the claimed allocation; private key is used only to sign the redemption proof. | Same as Eligible (`SigningKey`/`VerifyingKey`) | May be pre‑generated or created on‑the‑fly; no HKDF involved. |
 <!-- | 3 | **HKDF‑derived Key** | - | - | Private key **only**; the corresponding public key is *not* exposed – it is used inside the circuit for proof‑of‑ownership. |   | Deterministically derived via HKDF from circuit‑private inputs (e.g., a seed, a note commitment, a nullifier). The derived scalar is mapped to a JubJub point using the crate’s `generator`. | -->
 
@@ -80,6 +80,8 @@ In order to make it impossible to retroatively derive randomness used during the
 
 Its crucial that our circuit has an feasable way to verify that the owner of the `elig_pk` is authorizing the spend of a specific note. Normal signature verification for secp256k1 curves are computationally heavy, & generate extremely large proof sizes not compatible with on-chain gas limits & a nice UX.
 
+**Instead, users can prove they know this `elig_sk` by providing it and `elig_pk` as private inputs when generating their proofs.** The circuit will then make use of the known curve equation & generator points to constrain that the two keys are either mathematically paired together or not.
+
 | **Aspect** | **Explanation** |
 |------------|-----------------|
 | **Private inputs** | `elig_pk` (public key) and `elig_sk` (secret key) must both be provided as **private** witnesses to the circuit. |
@@ -87,11 +89,6 @@ Its crucial that our circuit has an feasable way to verify that the owner of the
 | **Core constraint** |  $pk \;=\; sk \;\cdot\; G$, where `G` is the generator point of the secp256k1 curve. |
 
 > **Reference implementation:**  <https://github.com/axiom-crypto/halo2-lib/blob/community-edition/halo2-ecc/src/secp256k1/tests/ecdsa.rs>
-
-- **GENERATOR_X & GENERATOR_Y**
-- **CURVE_ORDER**
-- **elig_pk**
-- **elig_sk**
 
 The constraint equation is:
 
@@ -139,24 +136,70 @@ PLUME is defined in  [ERC-7524](https://eips.ethereum.org/EIPS/eip-7524) as a wa
 
 ### Minimal Requirements
 
-- `g` - generator (aka the base point) of the curve
-- `m` - 32-byte message (will be defined as `m == H(amount||denom||fixed_denom_index)` )
-- `(sk,pk)` - keypair
-- `sec1(pk)` - SEC1 defined compressed public key (33 bytes)
+| Components   | Meaning                               | Type                  | Public / Private / Constant / Output | Derivation |
+|------------|-----------------------------------------|-----------------------|--------------------------------------|------------|
+| `g`        | generator (aka base point) of the curve |                       | **Constant**                         | - |
+| `r`        |  random point                           |                       | **Private**                          | - |
+| `g^r`      | $g^r$                                   |                       | **Public**                           | -  |
+| `elig_sk`  | public key of eligible address          |                       | **Private**                          | - |
+| `elig_pk`  | private key of eligible address         |                       | **Private**                          | - |
+| `m`        |  $m \;=\; H\!\bigl(\text{v}\,‖,\text{nd}\,‖,\text{fdi}\,‖,\text{recp}\bigr))$ | `u64`                  | **Private**                          |  |
+| `sec1(pk)` | SEC1 defined compressed public key      | 33 bytes              | **Private**                          | - |
+| `h`        | hash to curve $htc([m,sec1(pk)])$       |                       | **Private**                          |  |
+| `z`        | $h^r$                                   |                       | **Public**                          | - |
+| `nul`      | $h^{sk}$                                |                       | **Public**                          | -  |
+| `c`        |$H\bigl(\,[\,g,\;pk,\;h,\;nul,\;g^{r},\;z\,]\bigr)$     |        | **Public**                          |-  |
+| `s`        |$r + sk * c$                             |                       | **Private**                          | -  |
+| `plume_sig`|$(z,s,g^r,c,nul)$                        |                       | **Output**                          | -  |
 
-### Signature Generation
+### Signature Verification
 
-1. `r` is a random point
-2. `h` - a hash-to-curve of `htc([m,sec1(pk)])`\
-*NOTE: the length of intput to htc is always 65 bytes, so `m` is required to be a hash of the raw message*
-3. `z` - computed via `h^r`
-4. `nul` - computed `h^sk`
-5. `c` - computed dependent on the version of PLUME used:\
-   V1 - `H([g,pk,h,nul,g^r,z])`\
-   V2 - `H([nul,g^r,z])`
-6. `s` - compute via `r + sk * c`
+#### Non-ZK
 
-The signature is then defined as `(z,s,g^r,c,nul)`
+*This is not expected to be used, but rather helpful to understand how verification occurs in circuit*
+
+In a situation where the verifier knows $g$,$m$, ${pk}$, & ${plume\_sig}$, they may perform the following checks to determine if the signature is valid:
+
+1. compute $htc([m,sec1(pk)])$
+2. compute $H\bigl(\,[\,g,\;pk,\;h,\;nul,\;g^{r},\;z\,]\bigr)$
+3. reject if any is untrue:
+
+$$g^s * {pk}^{-c} = g^r$$
+$$h^s * {nul}^{-c} = z$$
+$$h^s * {c} = {plume\_sig}$$
+
+#### Zk-Circuit
+
+1. compute $htc([m,sec1(pk)])$
+2. compute ${pk} = g^{sk}$
+3. compute $g^s * {pk}^{-c}$
+3. compute $g^r$
+3. compute $h^s * {nul}^{-c}$
+
+the circuit establishes the following constraints:
+
+```math
+\boxed{
+\begin{aligned}
+&g^s \;*\; \mathsf{pk}^{-c} \;=\; g^r\
+\end{aligned}}
+```
+
+```math
+\boxed{
+\begin{aligned}
+&h^s * {nul}^{-c} \;=\; z\
+\end{aligned}}
+```
+
+Out of circuit, the following must also be verified:
+
+<center>
+
+```math
+c == {H}\bigl({nul}‖g^r‖h^r)
+```
+</center>
 
 ## Notes
 
@@ -174,7 +217,7 @@ To prevent double-spends, each note must have a unique, deterministic nullifier 
 |----------|---------------------------------|--------------------------------------|--------------------------------------|------------|
 | `elig_sk`| Eligible secret key             | `bytes[32]`                          | **Private**                          | — |
 | `fdi`    | Fixed Denomination Index        | `u64`                                | **Private**                          | *fully padded u64* |
-| `NOTE_NULLIFIER_PERSONALIZATION`      |    |                             | **Constant**                          |   |
+| `NOTE_NULLIFIER_PERSONALIZATION`      |    |                                      | **Constant**                         |   |
 | `v`      | Note Value                      | `NoteValue(u64)`                     | **Public**                           | *fully padded u64* |
 | `nd`     | Note Denomination               | `NoteDenom([u8; <128])`              | **Public**                           | *blake3 Hash + top 3 bits |
 
@@ -536,16 +579,14 @@ A user will broadcast their proof generated to the verifiable service, which has
 - provides single time feegrants to diversifier keys of claiming addresses
 
 ## Research
-<!-- zcash primitives -->
+
 - <https://seanbowe.com/blog/tachyon-scaling-zcash-oblivious-synchronization/>
-<!-- helped figure out how to verify secp256k1 signatures -->
 - <https://0xparc.org/blog/zk-ecdsa-1>
 - <https://github.com/stealthdrop/stealthdrop>
 - <https://eips.ethereum.org/EIPS/eip-7524>
 - <https://www.rfc-editor.org/rfc/rfc9380.html>
 = <https://eprint.iacr.org/2017/1108.pdf>
 - <https://github.com/stealthdrop/stealthdrop>
-<!-- used for (baby)jubjub understanding -->
 - <https://zips.z.cash/zip-0216>
 - <https://medium.com/zokrates/efficient-ecc-in-zksnarks-using-zokrates-bd9ae37b8186>
 - <https://datatracker.ietf.org/doc/html/rfc5869>
