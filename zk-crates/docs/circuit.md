@@ -10,6 +10,9 @@
   └─ Requires: EccChip for point multiplication
 
    HKDF + Signature Verification
+  ├─ Requires: Poseidon on Pallas (already configured)
+  ├─ Inputs: elig_sk (u64), DST (32 bytes)
+  └─ Output: pk/sk (Pallas)
 
    Nullifier Derivation
   ├─ Requires: Poseidon on Pallas (already configured)
@@ -30,11 +33,6 @@
   1. Integrating halo2-lib with halo2-gadgets: The halo2-lib chips use a different architecture (FlexGate, RangeChip abstractions) than halo2-gadgets
   (traditional Chip trait). You'll need to bridge these or standardize on one approach.
 
-  > A: we will standardize approach by implmenting the halo20lib in our own crate, with the structure of native halo2 circuit config->circuit implementation (just like examples and orchard/sapling/etc).
-  > a large portion of the core logic needed for implementing foreign field arithemtic and values for secp256k1 && bn254 existin in the halo2-lib crate
-  > so we need to make sure we do not recreate but rather refactor from existing implementation. 
-
-  2. BigInt Limb Representation: Secp256k1 field elements need to be decomposed into limbs that fit in Pallas field. Typical approach is 88-bit limbs (3 limbs for 256-bit numbers).
 
   3. Hash-to-Curve In-Circuit: The PLUME signature requires h = HTC([m, sec1(pk)]) computed in-circuit. The halo2-ecc/secp256k1/hash_to_curve module should
   provide this.
@@ -59,13 +57,11 @@ Our circuit primary curve is pallas. We have a need to make use of multiple curv
 | **Sinsemilla**| **Point(`Ep`)** | **Pallas**  |  - | — |
 | **Plume_Fp**| **Base(`Fp`)** |**Secp256k1**  | `p = 0xfffffffffffffffffffffffffffffffffffffffffffffffffffffffefffffc2f`| — |
 | **Plume_Fq**| **Scalar(`Fq`)** | **Secp256k1**  |`q = 0xfffffffffffffffffffffffffffffffebaaedce6af48a03bbfd25e8cd0364141`| — |
-| **Plume_Fr**| **Scalar(`Fr`)** | **Bn254**  |`r = 0x30644e72e131a029b85045b68181585d2833e84879b9709143e1f593f0000001`| — |
+<!-- | **Plume_Fr**| **Scalar(`Fr`)** | **Bn254**  |`r = 0x30644e72e131a029b85045b68181585d2833e84879b9709143e1f593f0000001`| — |
 | **Plume_Point**| **Scalar(`Fr`)** | **Bn254**  |`r = 0x30644e72e131a029b85045b68181585d2833e84879b9709143e1f593f0000001`| — |
-| **Plume_Posiedon_Hash**| **Scalar(`Fr`)** | **Bn254**  |`r = 0x30644e72e131a029b85045b68181585d2833e84879b9709143e1f593f0000001`| — |
+| **Plume_Posiedon_Hash**| **Scalar(`Fr`)** | **Bn254**  |`r = 0x30644e72e131a029b85045b68181585d2833e84879b9709143e1f593f0000001`| — | -->
 
-## plume chip spec
-
-Requires the following features:
+## Foreign-Field Related Chips
 
 ### PallasLookupRangeCheck
 
@@ -82,19 +78,19 @@ The `RangeChip` is the foundation for foreign field arithmetic in our Pallas-bas
 - **Rationale:** 88-bit limbs fit comfortably within Pallas field capacity while minimizing the number of limbs needed
 - The RangeChip enforces: 0 ≤ limb_i < 2^88 via lookup tables
 
-**BN254 → Pallas:**
+<!-- **BN254 → Pallas:**
 
 - **limb_bits:** 88
 - **num_limbs:** 3
 - **Total bits:** 264 (covers 254-bit BN254::Fr)
 - **Lookup bits:** 17
-- **Rationale:** Same configuration as secp256k1 for consistency
+- **Rationale:** Same configuration as secp256k1 for consistency -->
 
-```
+<!-- ```
 BN254::Fr = 0x30644e72e131a029b85045b68181585d2833e84879b9709143e1f593f0000001 ≈ 2^254
 
 Using same 88-bit × 3 limb strategy provides adequate coverage
-```
+``` -->
 
 **Key Configuration Constants:**
 
