@@ -47,6 +47,7 @@ In order to prevent this association between verifying ownership & claiming toke
 - **Nullifier & Note Commitments**
 - **Verifiable Service in TEE**
 - **On-Chain Smart Contract**
+- **Metamask Snap Support**
 
 ___
 
@@ -56,15 +57,15 @@ We have 2 main types of keys involved in this process.
 
 1. **Eligible Keys:**  *the keys that has a public allocation set for them, and is what we must keep any signature or hash derived from private, in order to retain privacy.*
 2. **Redemption Keys:** *the keys that will be recieving the public allocations claimed by the eligible keys*
+3. **HKDF keys:** *the keys that are deterministically derived from private inputs of a circuit*
 
-<!-- 3. **HKDF keys:** *the keys that are deterministically derived from private inputs of a circuit* -->
-<!-- > HKDF keys are specifically used to make our proof of ownership step effecient & feasable in-circuit. -->
+> HKDF keys are specifically used to make our proof of ownership step effecient & feasable in-circuit.
 
 | # | Key type         | Curve used | Primary crate | Public / Private usage | Typical Rust type (example) | Key‑derivation notes |
 |---|------------------|------------|--------------|------------------------|-----------------------------|----------------------|
 | 1 | **Eligible Key** | secp256k1  | `k256` (or `secp256k1`) | Public key is **published** in the allocation; **private key + any signatures / hashes must stay secret** to preserve privacy. | `k256::ecdsa::SigningKey` / `k256::ecdsa::VerifyingKey` | - |
 | 2 | **Redemption Key** | secp256k1 | `k256` (or `secp256k1`) | Public key is **the recipient** of the claimed allocation; private key is used only to sign the redemption proof. | Same as Eligible (`SigningKey`/`VerifyingKey`) | May be pre‑generated or created on‑the‑fly; no HKDF involved. |
-<!-- | 3 | **HKDF‑derived Key** | - | - | Private key **only**; the corresponding public key is *not* exposed – it is used inside the circuit for proof‑of‑ownership. |   | Deterministically derived via HKDF from circuit‑private inputs (e.g., a seed, a note commitment, a nullifier). The derived scalar is mapped to a JubJub point using the crate’s `generator`. | -->
+| 3 | **HKDF‑derived Key** |  pallas | - | Private key **only**; the corresponding public key is *not* exposed – it is used inside the circuit for proof‑of‑ownership. |   | Deterministically derived via posiedon based HKDF from circuit‑private inputs (e.g., a seed, a note commitment, a nullifier). The derived scalar is mapped to a pallas point using the crate’s `generator` |
 
 > NOTE: zcash orchard protocol implements very complex (but useful) key derivation for viewing, authorization, and privacy retention purposes. Our scope does not require the use of viewing or authorization keys, as the end results of tokens claimed will be public. A large portion of the modifications from the orchard protocol altering how note-commitments & nullifiers are derived, as they rely heavily on the use of the key structure used by zcash orchard protocol.
 
@@ -130,76 +131,16 @@ Y_{\mathsf{pk}} = Y\!\bigl(\mathsf{sk}\,\cdot\,G\bigr)
 \end{cases}
 ```
 
-## Ownership Verification: PLUME
+## HKDF STEPS
 
-PLUME is defined in  [ERC-7524](https://eips.ethereum.org/EIPS/eip-7524) as a way to effeciently verify a message was signed in circuit be a secp256k1 key. This will make it possible for our circuit to constrain that a key owner has authorized a specific address to receive the funds being claimed. This is an extremely important step in binding a proof with the destination of funds being claimed.
+Specifically, we aim derive a keypair on the pallas curve from the `elig_sk`.  This keypair can then be used to sign `m`, being a posiedon hash of relevant components within a note being spent, which in turn will allow us to implement constraints within the circuit that will power both proof of ownership & nullifier derivation.
 
-### Minimal Requirements
+#### In Circuit
 
-| Components   | Meaning                               | Type                  | Public / Private / Constant / Output | Derivation |
-|------------|-----------------------------------------|-----------------------|--------------------------------------|------------|
-| `g`        | generator (aka base point) of the curve |                       | **Constant**                         | - |
-| `r`        |  random point                           |                       | **Private**                          | - |
-| `g^r`      | $g^r$                                   |                       | **Public**                           | -  |
-| `elig_sk`  | public key of eligible address          |                       | **Private**                          | - |
-| `elig_pk`  | private key of eligible address         |                       | **Private**                          | - |
-| `m`        |  $m \;=\; H\!\bigl(\text{v}\,‖,\text{nd}\,‖,\text{fdi}\,‖,\text{recp}\bigr))$ | `u64`                  | **Private**                          |  |
-| `sec1(pk)` | SEC1 defined compressed public key      | 33 bytes              | **Private**                          | - |
-| `h`        | hash to curve $htc([m,sec1(pk)])$       |                       | **Private**                          |  |
-| `z`        | $h^r$                                   |                       | **Public**                          | - |
-| `nul`      | $h^{sk}$                                |                       | **Public**                          | -  |
-| `c`        |$H\bigl(\,[\,g,\;pk,\;h,\;nul,\;g^{r},\;z\,]\bigr)$     |        | **Public**                          |-  |
-| `s`        |$r + sk * c$                             |                       | **Private**                          | -  |
-| `plume_sig`|$(z,s,g^r,c,nul)$                        |                       | **Output**                          | -  |
-
-### Signature Verification
-
-#### Non-ZK
-
-*This is not expected to be used, but rather helpful to understand how verification occurs in circuit*
-
-In a situation where the verifier knows $g$,$m$, ${pk}$, & ${plume\_sig}$, they may perform the following checks to determine if the signature is valid:
-
-1. compute $htc([m,sec1(pk)])$
-2. compute $H\bigl(\,[\,g,\;pk,\;h,\;nul,\;g^{r},\;z\,]\bigr)$
-3. reject if any is untrue:
-
-$$g^s * {pk}^{-c} = g^r$$
-$$h^s * {nul}^{-c} = z$$
-$$h^s * {c} = {plume\_sig}$$
-
-#### Zk-Circuit
-
-1. compute $htc([m,sec1(pk)])$
-2. compute ${pk} = g^{sk}$
-3. compute $g^s * {pk}^{-c}$
-3. compute $g^r$
-3. compute $h^s * {nul}^{-c}$
-
-the circuit establishes the following constraints:
-
-```math
-\boxed{
-\begin{aligned}
-&g^s \;*\; \mathsf{pk}^{-c} \;=\; g^r\
-\end{aligned}}
-```
-
-```math
-\boxed{
-\begin{aligned}
-&h^s * {nul}^{-c} \;=\; z\
-\end{aligned}}
-```
-
-Out of circuit, the following must also be verified:
-
-<center>
-
-```math
-c == {H}\bigl({nul}‖g^r‖h^r)
-```
-</center>
+- **Eligible Public‑key/Secret-Key Consistency**: constrains `elig_sk` is the counterpart to `elig_pk`
+- **HKDF Derivation**: constrains the HKDF used `elig_sk` as an input to derive `jub_sk`
+- **Derived Public‑key/Secret-Key Consistency:** Computes `jub_pk_calc = jub_sk·G_jub` and enforce `jub_pk_calc == jub_pk`.
+- **Message Hash**: constrains `m` is accurately derived from the known values -->
 
 ## Notes
 
@@ -446,59 +387,13 @@ Its purpose is to allow a user to prove a specific address `elig_pk` is eligible
 
 ### 1. Constrain `cm` is derived from public + private inputs
 
-<!-- This tree is dynamic and is the core state of the private ledger. It is constantly updated with every claim transaction. Each claim by a user will generate a note-commitment. Each time a user is spending a note generated in the genesis distribution tree, the note-commitment will be appended to a top-level layer in the merkle tree, preventing any association between the geneiss leaf of the note being spent. A commitment is computed from all the fields of a note using a binding and hiding commitment scheme (Sinsemilla `CommitDomain` in our example): -->
+## Metamask Snap: Headstash
 
-```math
-% old, need to update
-% \mathrm{cm} = \mathrm{Commit}(d, \mathrm{pk}_d, v, \rho, \psi, \mathrm{rcm})
-```
-<!-- 
-> Our genesis tree is non-interactive, derived from the sinsemilla `HashDomain`, but we want to have our note commitments retain same functionality as zcash orchard protocol, which uses the `CommitDomain` for the note-commitments. -->
-
-<!-- > q: **do we need the merkle tree for note-commitments?** yes. our merkle tree will require spends of allocations always being one layer deep, and splitting of notes into sub-notes, as there are always a predetermined number of notes (due to using fixed denominations). -->
-<!-- >
-> q: **how can we implement a system that allows note-splitting from the original genesis distribution leaves?** If a user decides that they want to split a fixed-denomination note into additional, fixed-denomination sub-notes, we must be able to:
->
-> - a. ensure the original notes will be percieved as consumed
-> - b.ensure the sum total of the sub-notes are never more than what the parent note value was
-> - c.allow for infinite recursiveness of subnotes up until the smallest fixed denomination possible
->
-> -->
-<!-- 
-### Splitting Notes
-
-A user may want to split a note such that:
-
-- a parent note nullifier is created,marking the note as 'spent'
-- a new child note(s) whose values sum to the parent value are created
-
-```txt
-Note Commitment Tree (CommitDomain)
-├─ Position 0: First claimed genesis note
-├─ Position 1: Second claimed genesis note  
-├─ Position 2: Split from position 0 (child note 1)
-├─ Position 3: Split from position 0 (child note 2)
-├─ Position 4: Third claimed genesis note
-├─ Position 5: Split from position 2 (grandchild note)
-└─ ... continues growing
-```
-
- The only time we allow appending to existing index in the tree is if the user decides to split a note into further sub-notes, using fixed-denominations that sub up to the parent notes value. whenever a sub-note is spent, it would be treated as if it was one of the top-level genesis notes, and the note-commitment would be appended to the top layer of the merkle tree, extending the total anonymity set of the note-commitments. We want to ensure that the path is kept private between all of the sub-notes and parent notest to prevent association -->
-<!-- 
-### How its Built
-
-0. The tree starts empty, with the root being the root also being the genesis distribution tree root.
-1. When a user makes a claim (either genesis or spending an existing note), their transaction output includes a new note commitment `cm_new`
-2. The smart contract verifies the zk-proof and, if valid, inserts `cm_new` into the next available leaf position in this tree.
-3. The contract then computes and stores the new root of this tree (root_notes_current). -->
+"A good UX does not require the user to learn anything they do not already know." Powered by this principle, we can make use of a metamask snap
 
 ## Smart Contract Design
 
-This contracts will keep record of the spent nullifiers, maintain control of funds to distribute, and power the proof verification.
-
-- static verification key (VK) - "compiled down" representation of the circuit
-- public inputs
-- halo2 proof
+This contracts will keep hold the static verification key, record of the spent nullifiers, maintain control of funds to distribute, and power the proof verification.
 
 ## Verifiable Service Mesh
 
@@ -595,139 +490,82 @@ A user will broadcast their proof generated to the verifiable service, which has
 - <https://forum.zcashcommunity.com/t/status-update-rfc-zec-nam-shielded-airdrop-protocol/49144>
 - <https://ebuchman.github.io/pdf/snarks.pdf>
 - <https://github.com/DelphinusLab/halo2ecc-s>
+- <https://github.com/tahowallet/extension/pull/3638>
+- <https://halo2.zksecurity.xyz/intro/>
+- <https://github.com/Lightprotocol/light-poseidon>
+- <https://www.youtube.com/watch?v=r9hJiDrtukI>
 
 ### Alt Spec: 👻
-<!-- 
-### Option 1: PLUME signature proofs
-
-### Zk-Prooving
-
-We will use version two defined of the PLUME implementation, but modified to retain privcacy of the nullifer. specifically, since preventing doublespends of PLUME nullifiers is not required, as we are using it for proof of ownership constraints. Since the PLUME nullifier is a private input, we need to ensure `c` is accurately constructed,requireing us to define the public and private inputs as:
-
-#### Public Inputs
-
-| # | Input | Category | Type / Format | Description | Remarks |
-|---|-------|----------|---------------|-------------|--------|
-| **1** | `c` | Public | **FP** (field element) |   | **Generated with Posiedon Hashing** |
-| **2** | `g^r` | Public | **G1** (group element on the curve) |   |   |
-| **3** | `z` | Public | **G1** (group element) |   |   |
-| **4** | `m` | Public | **32‑byte array** (`[u8;32]`) |  |   |
-
-#### Private Inputs
-
-| # | Input | Category | Type / Format | Description | Remarks |
-|---|-------|----------|---------------|-------------|--------|
-| **5** | `nul` | Private | **FP** (field element) |   |   |
-| **6** | `pk` | Private | **G1** (group element) | Owner’s public key (kept private inside the circuit to hide the actual key). | Allows the circuit to prove possession of the corresponding secret key `sk`. |
-| **7** | `sk` | Private | **Scalar** (`Fr`) | Secret key of the owner. | Never leaves the prover; only used to compute `pk` and the nullifier internally. |
-| **8** | `r` | Private | **Scalar** (`Fr`) | Randomness used for blinding (`g^r`). | Must be freshly sampled for each proof. |
-| **9** | `s` | Private | **Scalar** (`Fr`) |   |   |
-
-#### PLUME constraint notes
-
-- **Public inputs** are the values that appear in the proof’s public‑input vector and must be supplied to the verifier.  
-- **Private inputs** are witness data supplied only to the prover; the circuit checks that they correctly relate to the public inputs without revealing them.  
-
-#### Circuit Arithmetic
-
-1. Compute $h = HTC([m,sec1(pk)])$
-2. Compute $pk = g^{sk}$
-3. Compute $left = g^s * pk^{-c}$
-4. Compute $ right = g^r$
-5. Compute $h^s * nul^{-c}$
-
-#### Circuit Constraints
-
-- $g^{s} * pk^{-c} = g^{r}$
-- $h^{s} * nul^{-c} = z$
-
-> what value should be used as the PRF input from the plume components so that we can assert that note-commitment and nullifiers concretely prevent double-spending of notes? They should not include and randomness source as this will lead to non-deterministic results of the nullifier & note-commitment.
-
-> <center>
-> DEMO: to demonstrate the lifecycle of generating & verifying a plume signature:
->
-> `cargo test --package zk-crates --bin plume_demo --  --show-output`</center> -->
 
 <!-- 
-### Note Structure: PLUME authorization
+## Ownership Verification: PLUME
 
-| Symbol   | Meaning                                      | Type            | Public / Private / Constant / Output | Derivation (deterministic)                                            |
-|----------|----------------------------------------------|-----------------|--------------------------------------|------------------------------------------------------------------------|
-| `g`      | Curve generator                              | `G1`            | **Constant** | Hard‑coded in the circuit                                              |
-| `elig_pk`| eligible public key                          |                 | **Private**  |                                                                        |
-| `elig_sk`| eligible secret key                          |                 | **Private**  |                                                                        |
-| `fdi`    | fixed‑denom‑index.                           | `u16`           | **Private**  | needs to be private as it will leak privacy, reducing anonimity set |
-| `m`      | `H(amount‖denom‖fdi‖elig_sk)`                 | `bytes[32]`     | **Private**  | needs to be private to prevent derivation, leaking privacy          |
-| `r`      | rho                                          |                 | **Private**  | randomness used to derive challenge                                   |
-| `h`      | `HTC([m, sec1(elig_pk)])`                    | `G1`            | **Private**  | Deterministic because `m` and `pk` are inputs                         |
-| `plume_nul`| `h^elig_sk` – “PLUME nullifier”            | `FP`            | **Private**  | `sk` (private) × `h` (deterministic)                                   |
-| `s`      | `r + sk·c` (private scalar)                  | `Fr`            | **Private**  | Computed from `r`, `sk`, `c` – never leaves the prover                |
-| `c`      | Challenge `H([plume_nul, g^r, z])` (PLUME V2)| `FP`            | **Public**   | All three arguments are deterministic                                 |
-| `g^r`    | `g` raised to the prover’s random scalar `r` | `G1`            | **Public**   | `r` is a private scalar but `g^r` is published                        |
-| `z`      | `h^r`                                        | `G1`            | **Public**   |                                                                        |
-| `recp`   | reciepient address of funds                  | `CanonicalAddr` | **Public**   | public as funds are going to this destination                         |
-| `amount` | token amount                                 |                 | **Public**   |                                                                        |
-| `denom`  | token denomination                           |                 | **Public**   |                                                                        |
-| `note_nul`| nullifier                                   |                 | **Output**   |                                                                        |
-| `note_cm`| note-commitment                              |                 | **Output**   |                                                                        |
+PLUME is defined in  [ERC-7524](https://eips.ethereum.org/EIPS/eip-7524) as a way to effeciently verify a message was signed in circuit be a secp256k1 key. This will make it possible for our circuit to constrain that a key owner has authorized a specific address to receive the funds being claimed. This is an extremely important step in binding a proof with the destination of funds being claimed.
 
-#### JSON Format
+### Minimal Requirements
 
-```json
-{
-  // ----- Private (witness) -----
-  "elig_pk":  "G1",                 // g^sk (kept private inside circuit)
-  "elig_sk":  "Fr",                 // eligible secret key (never leaves prover)
-  "fdi":      "u16",        // which fixed‑denom leaf is spent (private)
-  "m":        "bytes[32]",          // H(amount‖denom‖index)
-  "r":        "Fr",                 // prover‑chosen randomness
-  "h":        "G1",                 // HTC([m, sec1(pk)])
-  "plume_nul":"FP",                 // h^sk
-  "s":        "Fr",                 // r + sk·c
+| Components   | Meaning                               | Type                  | Public / Private / Constant / Output | Derivation |
+|------------|-----------------------------------------|-----------------------|--------------------------------------|------------|
+| `g`        | generator (aka base point) of the curve |                       | **Constant**                         | - |
+| `r`        |  random point                           |                       | **Private**                          | - |
+| `g^r`      | $g^r$                                   |                       | **Public**                           | -  |
+| `elig_sk`  | public key of eligible address          |                       | **Private**                          | - |
+| `elig_pk`  | private key of eligible address         |                       | **Private**                          | - |
+| `m`        |  $m \;=\; H\!\bigl(\text{v}\,‖,\text{nd}\,‖,\text{fdi}\,‖,\text{recp}\bigr))$ | `u64`                  | **Private**                          |  |
+| `sec1(pk)` | SEC1 defined compressed public key      | 33 bytes              | **Private**                          | - |
+| `h`        | hash to curve $htc([m,sec1(pk)])$       |                       | **Private**                          |  |
+| `z`        | $h^r$                                   |                       | **Public**                          | - |
+| `nul`      | $h^{sk}$                                |                       | **Public**                          | -  |
+| `c`        |$H\bigl(\,[\,g,\;pk,\;h,\;nul,\;g^{r},\;z\,]\bigr)$     |        | **Public**                          |-  |
+| `s`        |$r + sk * c$                             |                       | **Private**                          | -  |
+| `plume_sig`|$(z,s,g^r,c,nul)$                        |                       | **Output**                          | -  |
 
-  // ----- Public (exposed to verifier) -----
-  "c":        "FP",                 // PLUME challenge (Poseidon hash)
-  "g_r":      "G1",                 // g^r
-  "z":        "G1",                 // h^r
-  "recp":     "CanonicalAddr",      // recipient
-  "amount":   "u64",                // token amount (public, but part of m)
-  "denom":    "u32",                // token denom (public, but part of m)
-  "note_nul": "FP",                 // nullifier (public output)
-  "note_cm":  "G1",                 // note commitment (public output)
-}
-``` -->
+### Signature Verification
 
-<!-- 
-## HKDF STEPS
+#### Non-ZK
 
-Specifically, we aim derive a keypair on the `TBD` curve from the `elig_sk`.  This keypair can then be used to sign `m`, being a hash of relevant components within a note being spent, which in turn will allow us to implement constraints within the circuit that will power both proof of ownership & nullifier derivation.
+*This is not expected to be used, but rather helpful to understand how verification occurs in circuit*
 
-### Step 0: Prepare Inputs
+In a situation where the verifier knows $g$,$m$, ${pk}$, & ${plume\_sig}$, they may perform the following checks to determine if the signature is valid:
 
-We need a specific structure for the data used to derive the keys
+1. compute $htc([m,sec1(pk)])$
+2. compute $H\bigl(\,[\,g,\;pk,\;h,\;nul,\;g^{r},\;z\,]\bigr)$
+3. reject if any is untrue:
 
-### Step 1: Derive Keys
+$$g^s * {pk}^{-c} = g^r$$
+$$h^s * {nul}^{-c} = z$$
+$$h^s * {c} = {plume\_sig}$$
 
-- derives `jub_sk` from the HKDF `HKDF(elig_sk, dst_jub_hkdf) mod ℓ_jub`
-- computes the baby-jubjub public key `jub_pk = jub_sk * G_jub`
+#### Zk-Circuit
 
-### Step 2: Hash & Sign Msg
+1. compute $htc([m,sec1(pk)])$
+2. compute ${pk} = g^{sk}$
+3. compute $g^s * {pk}^{-c}$
+3. compute $g^r$
+3. compute $h^s * {nul}^{-c}$
 
-- generates challenge being signed `m`, where `m == H(amount||denom||fdi||elig_sk)`
-- signs `m` with the `jub_sk`, generating `sig_jub`
+the circuit establishes the following constraints:
 
-### Step 3: Verification
+```math
+\boxed{
+\begin{aligned}
+&g^s \;*\; \mathsf{pk}^{-c} \;=\; g^r\
+\end{aligned}}
+```
 
-#### Out Of Circuit
->
-> NOTE: This step is a simple signature verification, out of circuit. This can be implemented either within the smart contract state, or within a verifiable service logic.
+```math
+\boxed{
+\begin{aligned}
+&h^s * {nul}^{-c} \;=\; z\
+\end{aligned}}
+```
 
-- verifies `m` is accurately reconstructed from the given inputs
-- verifies `sig_jub` against `m` and the supplied `jub_pk`.
+Out of circuit, the following must also be verified:
 
-#### In Circuit
+<center>
 
-- **Eligible Public‑key/Secret-Key Consistency**: constrains `elig_sk` is the counterpart to `elig_pk`
-- **HKDF Derivation**: constrains the HKDF used `elig_sk` as an input to derive `jub_sk`
-- **Derived Public‑key/Secret-Key Consistency:** Computes `jub_pk_calc = jub_sk·G_jub` and enforce `jub_pk_calc == jub_pk`.
-- **Message Hash**: constrains `m` is accurately derived from the known values -->
+```math
+c == {H}\bigl({nul}‖g^r‖h^r)
+```
+
+</center> -->
