@@ -17,15 +17,17 @@ In order to prevent this association between verifying ownership & claiming toke
 
 ### Q: How Does Someone Prove They Own An Eligible Wallet Without Revealing Their Signature?
 
-**A: proof of ownership + PLUME**: A circuit can provide certainty that an individual knows the private key paired with their public key of an eligible account. This circuit also can be able to constrain a destination wallet for the funds being claimed is the one that the private key owner desires, via use of the PLUME implementation we describe below.
+**A: proof of ownership**: A circuit can provide certainty that an individual knows the private key paired with their public key of an eligible account, by use of the deterministic capabilities of a hash-based key deriving function (hkdf).
 
 ### Q: How can someone prevent leaking where their claimed funds end up, if the total amount & distributions allocated are public?
 
-**A: Note Commitments**: Partial claims of genesis allocations via fixed denomination notes. This allows eligble claimers to designate unique addresses for receiving allocations over a span of time rather than immediately.
+**A: Fixed Denomination Notes**: notes function as private UTXOs (Unspent Transaction Outputs) that represent claims to portions of the airdropped tokens. Each note contains sensitive data that must remain private, except for certain public components used for verification and transaction processing.
+
+A predetermined set of notes for users are generated based on initial allocations, classified by fixed-denomination amounts. Partial claims of genesis allocations are then possible, and allows eligble claimers to designate unique addresses for receiving allocations over a span of time rather than immediately.
 
 ### Q: How are users prevented from claiming more funds then they are allocated?
 
-**A:nullifiers**: Deriving from private data within a note, collision-resistant nullifiers paired with note-commitments will prevent notes from being double-spent.
+**A:nullifiers**: Deriving from private data within a note, collision-resistant nullifiers paired with note-commitments will prevent notes from being double-spent.note nullifiers derive from completely deterministic sources, such that it is impossible to alter one of the PRF inputs, that will result in the ability to reuse a note that has been spent.
 
 > **Notes About Design**
 > These obstacles are not unique to our requirements, and have been solved concretely by multiple teams, one for example is the zcash's sprout, sapling, and orchard protocols. We are designing our protocol for private airdrops so that we can leverage a large majority of the work done by the cypherpunk community, however there are some discrepancies we need to design around. Specifically:
@@ -51,9 +53,9 @@ In order to prevent this association between verifying ownership & claiming toke
 
 ___
 
-## Keys
+## Keys, Curves & Fields
 
-We have 2 main types of keys involved in this process.
+We have 3 main types of keys involved in this process.
 
 1. **Eligible Keys:**  *the keys that has a public allocation set for them, and is what we must keep any signature or hash derived from private, in order to retain privacy.*
 2. **Redemption Keys:** *the keys that will be recieving the public allocations claimed by the eligible keys*
@@ -63,11 +65,75 @@ We have 2 main types of keys involved in this process.
 
 | # | Key type         | Curve used | Primary crate | Public / Private usage | Typical Rust type (example) | Key‑derivation notes |
 |---|------------------|------------|--------------|------------------------|-----------------------------|----------------------|
-| 1 | **Eligible Key** | secp256k1  | `k256` (or `secp256k1`) | Public key is **published** in the allocation; **private key + any signatures / hashes must stay secret** to preserve privacy. | `k256::ecdsa::SigningKey` / `k256::ecdsa::VerifyingKey` | - |
+| 1 | **Eligible Key** | `secp256k1`  | `k256` (or `secp256k1`) | Public key is **published** in the allocation; **private key + any signatures / hashes must stay secret** to preserve privacy. | `k256::ecdsa::SigningKey` / `k256::ecdsa::VerifyingKey` | - |
 | 2 | **Redemption Key** | secp256k1 | `k256` (or `secp256k1`) | Public key is **the recipient** of the claimed allocation; private key is used only to sign the redemption proof. | Same as Eligible (`SigningKey`/`VerifyingKey`) | May be pre‑generated or created on‑the‑fly; no HKDF involved. |
-| 3 | **HKDF‑derived Key** |  pallas | - | Private key **only**; the corresponding public key is *not* exposed – it is used inside the circuit for proof‑of‑ownership. |   | Deterministically derived via posiedon based HKDF from circuit‑private inputs (e.g., a seed, a note commitment, a nullifier). The derived scalar is mapped to a pallas point using the crate’s `generator` |
+| 3 | **HKDF‑derived Key** |  `pallas` | - | Private key **only**; the corresponding public key is *not* exposed – it is used inside the circuit for proof‑of‑ownership. |   | Deterministically derived via posiedon based HKDF from circuit‑private inputs (e.g., a seed, a note commitment, a nullifier). The derived scalar is mapped to a pallas point using the crate’s `generator` |
 
 > NOTE: zcash orchard protocol implements very complex (but useful) key derivation for viewing, authorization, and privacy retention purposes. Our scope does not require the use of viewing or authorization keys, as the end results of tokens claimed will be public. A large portion of the modifications from the orchard protocol altering how note-commitments & nullifiers are derived, as they rely heavily on the use of the key structure used by zcash orchard protocol.
+
+### Circuit Curve
+
+Our circuit primary curve is pallas. We have a need to make use of multiple curves, as expected elements of our circuit inputs are related to curves other than pallas.
+
+| Chip     | Field       | Curve|   Value | |
+|----------|-------------|--------------------------------------|--------------------------------------|------------|
+| **Sinsemilla**| **Base(`Fp`)** | **Pallas**  | `p = 0x40000000000000000000000000000000224698fc094cf91b992d30ed00000001`| — |
+| **Sinsemilla**| **Scalar(`Fq`)** | **Pallas**  | `q = 0x40000000000000000000000000000000224698fc0994a8dd8c46eb2100000001`| — |
+| **Sinsemilla**| **Point(`Ep`)** | **Pallas**  |  - | — |
+| **Plume_Fp**| **Base(`Fp`)** |**Secp256k1**  | `p = 0xfffffffffffffffffffffffffffffffffffffffffffffffffffffffefffffc2f`| — |
+| **Plume_Fq**| **Scalar(`Fq`)** | **Secp256k1**  |`q = 0xfffffffffffffffffffffffffffffffebaaedce6af48a03bbfd25e8cd0364141`| — |
+
+### Circuit Field Elements
+
+### Field Elements (Fp,Fq,Fr)
+
+In our circuit, we need to represent and operate on field elements from three different curves within the Pallas native field. This requires careful handling of **non-native field arithmetic** using the Chinese Remainder Theorem (CRT) representation.
+
+#### CRT Integer Representation
+
+Each foreign field element is represented as a `ProperCrtUint<F>` where `F = Pallas::Base`:
+
+```rust
+pub struct ProperCrtUint<F> {
+    // Limb representation: value = Σ(limb[i] * 2^(limb_bits * i))
+    pub truncation: OverflowInteger<F>,
+    // Native field representation: value mod modulus::<F>()
+    pub native: AssignedValue<F>,
+    // Maximum limb value
+    pub max_limb_bits: usize,
+}
+```
+
+**How It Works:**
+
+1. **Limb decomposition:** A 256-bit foreign field element is split into 3 × 88-bit limbs
+2. **Native reduction:** The value is also stored as `value mod Pallas::Fq` in native representation
+3. **Dual representation:** Both representations are constrained to be equivalent, enabling efficient operations
+
+#### Constraining Foreign Fields in Circuit
+
+**Operation Flow:**
+
+1. Load foreign field element as witness:\
+   `FpChip::load_private( secp_value) → ProperCrtUint<Pallas::Base>`
+
+2. Perform operations in CRT representation:
+   - Addition: add limbs element-wise, check for carries
+   - Multiplication: mul limbs, reduce modulo foreign field prime
+   - Reduction: carry_mod ensures result < foreign_modulus
+
+3. Range check all limbs:\
+   RangeChip::range_check( limb, LIMB_BITS) → ensures limb < 2^88
+
+4. Verify CRT consistency:
+   Constrain: native_value ≡ Σ(limb[i] *2^(88*i)) (mod Pallas::Fq)
+
+**Critical Constraints:**
+
+1. **Limb Bounds:** Each limb must be < 2^88 (enforced by RangeChip lookups)
+2. **Modular Reduction:** After operations, values must be reduced mod foreign_prime
+3. **Native Consistency:** `native ≡ Σ limbs (mod Pallas::Fq)`
+4. **Carry Propagation:** Multi-limb arithmetic must handle carries correctly
 
 ## Randomness Generation
 
@@ -131,20 +197,31 @@ Y_{\mathsf{pk}} = Y\!\bigl(\mathsf{sk}\,\cdot\,G\bigr)
 \end{cases}
 ```
 
-## HKDF STEPS
+## Headstash Destination Authorization: HKDF STEPS
 
-Specifically, we aim derive a keypair on the pallas curve from the `elig_sk`.  This keypair can then be used to sign `m`, being a posiedon hash of relevant components within a note being spent, which in turn will allow us to implement constraints within the circuit that will power both proof of ownership & nullifier derivation.
+Specifically, we aim derive a keypair on the pallas curve from the `elig_sk`.  This derivation process is implmented such that we generate a `hkdf_sk` that is deterministic of its inputs, which lets us constrain the derivation in circuit. By involving the unique and also random inputs from a note, this step lets us accomplish a number of requirements for our circuit to be able to have proofs generated accurately that satisfy our requirements. Specifically
 
-#### In Circuit
+- b. nullifier generation: each key derived via hkdf will be unique due to the composition of its inputs, allowing us to use the `hkdf_pk` as a nullifier
+- c. destination & allocation integrity: the destination & amount of funds being spent in a note are public inputs to the hkdf, ensuring that there is no possible way for an man-in-the-middle attack on altering where funds destinations are to be.
 
-- **Eligible Public‑key/Secret-Key Consistency**: constrains `elig_sk` is the counterpart to `elig_pk`
-- **HKDF Derivation**: constrains the HKDF used `elig_sk` as an input to derive `jub_sk`
-- **Derived Public‑key/Secret-Key Consistency:** Computes `jub_pk_calc = jub_sk·G_jub` and enforce `jub_pk_calc == jub_pk`.
-- **Message Hash**: constrains `m` is accurately derived from the known values -->
+### Hashing Function
 
-## Notes
+For effeciency of in-circuit hashing, we are using Posiedon as the hkdf hashing algorithm. Poseidon is a ZK-friendly hash function used for nullifier derivation, note commitments. Our circuit uses two Poseidon configurations:
 
-notes function as private UTXOs (Unspent Transaction Outputs) that represent claims to portions of the airdropped tokens. Each note contains sensitive data that must remain private, except for certain public components used for verification and transaction processing. We have generated a predetermined set of notes for users, classified by fixed-denomination amounts. we must note nullifiers from completely deterministic sources, such that it is impossible to alter one of the PRF inputs, that will result in the ability to reuse a note that has been spent.
+### Derivation Inputs
+
+| Components   | Meaning                         | Type                                 | Public / Private / Constant / Output | Derivation |
+|----------|---------------------------------|--------------------------------------|--------------------------------------|------------|
+| `NOTE_NULLIFIER_PERSONALIZATION`      |    |                                      | **Constant**                         |   |
+| `elig_sk`| Eligible secret key             | `bytes[32]`                          | **Private**                          | — |
+| `fdi`    | Fixed Denomination Index        | `u64`                                | **Private**                          | *fully padded u64* |
+| `v`      | Note Value                      | `NoteValue(u64)`                     | **Public**                           | *fully padded u64* |
+| `nd`     | Note Denomination               | `NoteDenom([u8; <128])`              | **Public**                           | *blake3 Hash + top 3 bits |
+| `psi`    | Note Randomness                 | ` `                                  | **Private**                          ||
+
+> **q: do we damage the blinding of the rest of the inputs to the hashing function due to some being public and some being private?**
+>
+> a: no! thanks to the hardness of hashing functions, its unfeasable to retroactively derive the private inputs given all of the public inputs and the output hash.
 
 ### Nullifiers
 
@@ -154,29 +231,30 @@ To prevent double-spends, each note must have a unique, deterministic nullifier 
 - Unlinkable to the eligible address.
 - Only computable by the note owner.
 
-| Components   | Meaning                         | Type                                 | Public / Private / Constant / Output | Derivation |
-|----------|---------------------------------|--------------------------------------|--------------------------------------|------------|
-| `elig_sk`| Eligible secret key             | `bytes[32]`                          | **Private**                          | — |
-| `fdi`    | Fixed Denomination Index        | `u64`                                | **Private**                          | *fully padded u64* |
-| `NOTE_NULLIFIER_PERSONALIZATION`      |    |                                      | **Constant**                         |   |
-| `v`      | Note Value                      | `NoteValue(u64)`                     | **Public**                           | *fully padded u64* |
-| `nd`     | Note Denomination               | `NoteDenom([u8; <128])`              | **Public**                           | *blake3 Hash + top 3 bits |
-
 ```math
 \begin{array}{lcl}
 \textbf{Private witnesses} &
 \begin{cases}
-\mathsf{fdi}      \in \mathbb{F}_p      &\text{(field element from private input }fdi\text{)}\\[2pt]
-\mathsf{elig\_sk}  \in \{0,1\}^{256}   &\text{(32‑byte eligibility secret)}\\[2pt]
-\mathsf{nd}        \in \{0,1\}^{256}   &\text{(32‑byte auxiliary data)}\\
+\mathsf{fdi}      \in \mathbb{F}_p      &\text{(fully padded u64 of fixed denomination index }fdi\text{)}\\[2pt]
+\mathsf{hkdf\_sk}  \in \{0,1\}^{256}   &\text{(32‑byte secret-key of Pallas curve key derived from eligible secret key)}\\[2pt]
+\mathsf{psi}        \in \{0,1\}^{256}   &\text{(32‑byte entropy generated by user)}\\
 \end{cases}
+\end{array}
+```
+
+```math
+\begin{array}{lcl}
 \\[10pt]
 \textbf{Public inputs} &
 \begin{cases}
-\mathsf{v}        \in \mathbb{F}_p      &\text{(public value)}\\[2pt]
-\mathsf{nd}^{\ast}\in \mathbb{F}_p      &\text{(public‑derived field element for }nd\text{)}\\[2pt]
-\mathsf{elig\_sk}^{\ast}\in \mathbb{F}_p &\text{(public‑derived field element for }elig\_sk\text{)}\\
+\mathsf{v}\in \mathbb{F}_p      &\text{(fully padded u64 of value being spent in note)}\\[2pt]
+\mathsf{nd}^{\ast}\in \mathbb{F}_p      &\text{(Posiedon Hash of notes token denomination }nd\text{)}\\[2pt]
 \end{cases}
+\end{array}
+```
+
+```math
+\begin{array}{lcl}
 \\[10pt]
 \textbf{Constants} &
 \begin{cases}
@@ -222,14 +300,6 @@ Note Commitments `cm` are what is disclosed publicly during claiming, by appendi
 Constraining the derivation of the note commitment `cm` requires the following inputs:
 
 > note: in order to derive `psi` & `rcm`, we have a `rseed` that is a randomness source in a PRF, that expends into each.
-    <!-- pub fn psi(&self, rho: &Rho) -> pallas::Base {
-        to_base(PrfExpand::PSI.with(&self.0, &rho.to_bytes()))
-    } -->
-    <!-- pub fn rcm(&self, rho: &Rho) -> commitment::NoteCommitTrapdoor {
-        commitment::NoteCommitTrapdoor(to_scalar(
-            PrfExpand::ORCHARD_RCM.with(&self.0, &rho.to_bytes()),
-        ))
-    } -->
 
 The constraint equation is:
 
@@ -270,45 +340,11 @@ v,\,\rho,\,\psi,\,\mathsf{rcm}
 
  we need to ensure that note-commitments and nullifiers are impossible to be doublespent, given that we are not using nullifier-keys. specifically, our genesis merkle tree is created by generating leaves for each eligible address total possible fixed denominations. We included an index for all duplicate fixed denomination amounts (ie; if there was 4 1000 TERP fixed denomnination, each leaf without an index would have an identical hash). This will ensure with certainty that nullifiers cannot be forged for resuse.
 
-<!-- 
-### Note Structure: HKDF + BabyJubJub verification
-
-> NOTE: for `m`, we may need to implement a deterministic pedersen commitment to `elig_sk`, ensuring all inputs to the hash function are on the curve for posiedon hashing
-> NOTE: we must explore how `denom_to_base` & `sec_sk_to_base` being hashed with posiedon will impact our circuit definition.
-
-| Symbol         | Meaning.                                 | Type                   | Public / Private / Constant / Output| Derivation |
-|----------------|------------------------------------------|------------------------|----------------------------------|------------|
-| `dst_jub_hkdf` | Domain-separation string                 | `bytes[]`              | **Constant**                     | Hard-coded  |
-| `G_jub`        | JubJub Curve Generator.                  |                        | **Constant**                     | Hard-coded  |
-| `m`            | `H(amount‖denom‖fdi‖elig_sk)`            | `bytes[32]`            | **Private**                      | Needs to be private to prevent derivation, leaking privacy |
-| `elig_sk`      | `elig_addr` secret key                   | `Fr`                   | **Private**                      | Supplied by prover|
-| `jub_sk`       | `HKDF(elig_sk, dst_jub_hkdf) mod ℓ_jub`  | `Fr`                   | **Private (derived)**            | Deterministic HKDF |
-| `sig_jub`      | Full signature `(R,S)`                   | `struct`               | **Public** (`R`) + **Private** (`S`) | `R` is public, `S` stays private (the circuit verifies it) |
-| `fdi`          | fixed_denomination_idex                  | `u16`                  | **Private**                      | Used internally, not revealed |
-| `amount`       | Amount being transferred                 | `u128`                 | **Public**                       | Input to hash `m`|
-| `denom`        | Denomination of the asset                | `string`               | **Public**                       | Input to hash `m`|
-| `recp`    | Recipient address of funds                    | `stripped bech32 addr` | **Public**                       | Public as funds are going to this destination |
-| `jub_null`     | `jub_null = k·G_jub` (where `k = H(m, jub_sk)`) | `G1`            | **Public**                       | Deterministic because `k` is derived from `m` & `jub_sk`|
-| `jub_pk`       | `jub_sk·G_jub` (public key)              | `G1`                   | **Public**                       | Computed from derived `jub_sk`         |
-| `ψ` (Psi) | Randomness added to the note commitment to ensure it is hiding. |   | — |
-| `note_cm`      | note commitment    `H(jub_null‖recp)`    |                   | **Output**                      |   |
-
-> q: are we deriving nullifiers and note commitments so that we prevent any possibility of doublespend?
-> a: we attempt to with use of the `jub_null`. The jubjub keypair is deterministic based on `elig_sk`, `m` is deterministic based on uniqueness powered by fixed_denom_index + the elig_sk, resulting in `jub_null` being deterministic & unique per note do to `k` hashing `m` & `jub_sk`.
-
-**Public outputs during a claim:**
-
-- `note_cm`
-- `jub_null`
-- `amount`
-- `denom`
-- `recp` -->
-
 ___
 
-## Sinsemilla Merkle Trees
+## Sinsemilla Merkle Trees: Inclusion Constraints
 
-We make use of the sinsemilla merkle tree implementation for powering effecient note commitment and distirbution inclusion. We will utilize both the `HashDomain` and the `CommitDomain` for two distinct purposes:
+Sinsemilla is a ZK-friendly hash function designed specifically for Pallas/Vesta curves. We use it for both genesis distribution tree (HashDomain) and note commitment tree (CommitDomain).
 
 ### 1. Genesis Distribution Tree: `HashDomain`
 
@@ -385,11 +421,187 @@ Its purpose is to allow a user to prove a specific address `elig_pk` is eligible
 > note-commitment generation timing between multiple parties?\
 > a: user maintains their own note-commitment tree. This is only used when genesis notes are split into sub-notes, which is not in spec for the inital MVP.
 
-### 1. Constrain `cm` is derived from public + private inputs
+## Circuit: User Interface
+
+**Public Inputs (exposed to verifier):**
+
+```rust
+pub struct PublicInputs {
+    genesis_root: pallas::Base,      // Genesis merkle root (constant)
+    nul: pallas::Base,               // Nullifier (prevents double-spend)
+    cm: pallas::Base,                // Note commitment (output)
+    nd: pallas::Base,                // Note denomination (public)
+    v: pallas::Base,                 // Note value (public)
+    recp: pallas::Base,              // Recipient address (destination)
+}
+// Note: No secp256k1 keys or signatures exposed!
+// Total: 6 public inputs
+```
+
+**Private Witnesses (only prover knows):**
+
+```rust
+pub struct PrivateWitnesses {
+    // Secp256k1 key pair (ownership proof)
+    elig_sk: secp256k1::Fq,          // Eligible secret key
+    elig_pk: secp256k1::Affine,      // Eligible public key
+
+    // Note identification
+    fdi: u64,                        // Fixed denomination index (fully padded)
+    merkle_path: [pallas::Base; 32], // Path to genesis root ? 
+
+    // Note commitment components
+    rho: pallas::Base,               // Unique note identifier
+    psi: pallas::Base,               // PRF output
+    rcm: pallas::Scalar,             // Commitment randomness
+}
+// Total: 7 private witnesses
+```
+
+**Derived Values (computed in-circuit):**
+
+```rust
+// Message binding note to recipient
+let m = poseidon_hash([recp, v, nd, fdi]);
+
+// HKDF-derived Pallas keypair
+let pallas_sk = poseidon_hash([DST, elig_sk_native, m]);
+let pallas_pk = pallas_sk * G_pallas;
+
+// ? (any more)
+```
+
+### In-Circuit Constraint Flow
+
+**Step 1: Secp256k1 Key Pairing (Foreign Field)**
+**Step 2: HKDF Derivation (Native - In-Circuit!)**
+**Step 3: Genesis Distribution Inclusion(Sinsemilla HashDomain)**
+
+## Circuit: Chip Specs
+
+### PallasLookupRangeCheck
+
+There are 3 chips that use the lookup range check:
+
+| Chip| Use| limb-bits|
+|-------------------------------|--|-|
+| **ecc chip**| | |
+| **foreign field chip**|||
+| **sinsemilla chip**|    Sinsemilla operations require range checks on bit decompositions and intermediate values |
+
+**Key Configuration Constants:foreign field chip**
+
+```rust
+// From halo2-ecc/configs/secp256k1/ecdsa_circuit.config
+const LIMB_BITS: usize = 88;
+const NUM_LIMBS: usize = 3;
+const LOOKUP_BITS: usize = 17;
+const DEGREE: u32 = 18; // Circuit size: 2^18 rows
+```
+
+> q: what are the rows and parameters for each chips that makes use of the lookup range check?
+> a: ecc & sinsemilla uses 10 bit limbs, should we also require the foriegn field arithmetic ? right now its parameter is 88 bits
+
+The `RangeChip` is the foundation for foreign field arithmetic in our Pallas-based circuit. It provides lookup tables for efficient range checking of limb values, ensuring that our BigInt representations don't overflow when emulating non-native field arithmetic.
+
+**Limb Parameters (Secp256k1 → Pallas)**  
+
+| Parameter                     | Value / Details                                                                            |
+|-------------------------------|-------------------------------------------------------------------------------------------|
+| **limb_bits**                 | 88                                                                                        |
+| **num_limbs**                 | 3                                                                                         |
+| **Total bits**                | 264 (covers 256‑bit secp256k1 fields with an 8‑bit overflow buffer)                     |
+| **Lookup bits**               | 17 → lookup table size = 2⁷¹⁷ = 131,072 entries                                         |
+| **Rationale**                 | 88‑bit limbs fit comfortably within the Pallas field capacity while minimizing limbs   |
+| **RangeChip enforcement**    | `0 ≤ limb_i < 2^88` via lookup tables                                                    |
+
+### Ecc (Secp256k1 chip)
+
+The `EccChip` performs elliptic curve operations over `secp256k1` using foreign field arithmetic. It's essential for both key pairing verification (`pk = sk·G`) and HKDF constraints.
+
+#### Key Operations
+
+**1. Fixed-Base Scalar Multiplication** (for `pk = sk·G`)
+**Optimization:** Fixed-base multiplication uses precomputed multiples of G (windowed method) to reduce constraints compared to variable-base.
+
+### FpChip (Secp256k1::Fp)
+
+**Purpose:** Represents and operates on secp256k1 base field elements within the Pallas circuit.
+
+**Type Signature:**
+
+```rust
+pub type FpChip<'range, F> = fp::FpChip<'range, F, Secp256k1::Fp>;
+// where F = Pallas::Base (our native field)
+```
+
+**Construction:**
+
+```rust
+let fp_chip = FpChip::<Pallas::Base, Secp256k1::Fp>::new(
+    range,      // RangeChip for lookup tables
+    88,         // limb_bits
+    3,          // num_limbs
+);
+```
+
+**Core Operations:**
+
+- `load_private( value)` - Load Fp element as witness
+- `load_constant( value)` - Load Fp constant
+- `mul( a, b)` - Multiply two Fp elements
+- `add( a, b)` - Add two Fp elements
+- `sub( a, b)` - Subtract Fp elements
+- `assert_equal( a, b)` - Constrain equality
+- `enforce_less_than_p( a)` - Ensure a < secp256k1_p
+
+**Used For:**
+
+- Public key x, y coordinates
+- Elliptic curve point arithmetic
+
+### FqChip (Secp256k1::Fq)
+
+**Purpose:** Represents and operates on secp256k1 scalar field elements (the curve order).
+
+**Type Signature:**
+
+```rust
+pub type FqChip<'range, F> = fp::FpChip<'range, F, Secp256k1::Fq>;
+```
+
+**Construction:** Same as FpChip but parameterized with `Secp256k1::Fq`
+
+**Used For:**
+
+- Secret key `sk`
+
+**Critical Difference from FpChip:**
+
+- Modulus is `Secp256k1::Fq` (curve order) not `Secp256k1::Fp` (base field)
+- Used for scalars, not point coordinates
+- Operations are mod `0xfffffffffffffffffffffffffffffffebaaedce6af48a03bbfd25e8cd0364141`
+
+## Circuit: Fixed Points
+
+Fixed points are precomputed generators used in Sinsemilla hashing and commitment schemes. They're defined in `src/constants/fixed_bases.rs`.
+
+- **MerkleHashCrh:** Generator for Sinsemilla hash function in merkle trees
+- **NoteCommitR:** Generator for blinding factor in pedersen commitments
+- Window tables enable efficient fixed-base scalar multiplication
+
+## Non-Circuit Tooling
 
 ## Metamask Snap: Headstash
 
-"A good UX does not require the user to learn anything they do not already know." Powered by this principle, we can make use of a metamask snap
+"A good UX does not require the user to learn anything they do not already know." Powered by this principle, we can make use of a metamask snap plugin to power the hkdf & note management steps:
+
+### Snap Requirements
+
+- download/import/store pubkeys eligilbe notes from headstash registry
+- free will derived entropy generation
+- perform hkdf + nullifier generation
+- broadcast to sc/verifiable service mesh
 
 ## Smart Contract Design
 
@@ -494,78 +706,4 @@ A user will broadcast their proof generated to the verifiable service, which has
 - <https://halo2.zksecurity.xyz/intro/>
 - <https://github.com/Lightprotocol/light-poseidon>
 - <https://www.youtube.com/watch?v=r9hJiDrtukI>
-
-### Alt Spec: 👻
-
-<!-- 
-## Ownership Verification: PLUME
-
-PLUME is defined in  [ERC-7524](https://eips.ethereum.org/EIPS/eip-7524) as a way to effeciently verify a message was signed in circuit be a secp256k1 key. This will make it possible for our circuit to constrain that a key owner has authorized a specific address to receive the funds being claimed. This is an extremely important step in binding a proof with the destination of funds being claimed.
-
-### Minimal Requirements
-
-| Components   | Meaning                               | Type                  | Public / Private / Constant / Output | Derivation |
-|------------|-----------------------------------------|-----------------------|--------------------------------------|------------|
-| `g`        | generator (aka base point) of the curve |                       | **Constant**                         | - |
-| `r`        |  random point                           |                       | **Private**                          | - |
-| `g^r`      | $g^r$                                   |                       | **Public**                           | -  |
-| `elig_sk`  | public key of eligible address          |                       | **Private**                          | - |
-| `elig_pk`  | private key of eligible address         |                       | **Private**                          | - |
-| `m`        |  $m \;=\; H\!\bigl(\text{v}\,‖,\text{nd}\,‖,\text{fdi}\,‖,\text{recp}\bigr))$ | `u64`                  | **Private**                          |  |
-| `sec1(pk)` | SEC1 defined compressed public key      | 33 bytes              | **Private**                          | - |
-| `h`        | hash to curve $htc([m,sec1(pk)])$       |                       | **Private**                          |  |
-| `z`        | $h^r$                                   |                       | **Public**                          | - |
-| `nul`      | $h^{sk}$                                |                       | **Public**                          | -  |
-| `c`        |$H\bigl(\,[\,g,\;pk,\;h,\;nul,\;g^{r},\;z\,]\bigr)$     |        | **Public**                          |-  |
-| `s`        |$r + sk * c$                             |                       | **Private**                          | -  |
-| `plume_sig`|$(z,s,g^r,c,nul)$                        |                       | **Output**                          | -  |
-
-### Signature Verification
-
-#### Non-ZK
-
-*This is not expected to be used, but rather helpful to understand how verification occurs in circuit*
-
-In a situation where the verifier knows $g$,$m$, ${pk}$, & ${plume\_sig}$, they may perform the following checks to determine if the signature is valid:
-
-1. compute $htc([m,sec1(pk)])$
-2. compute $H\bigl(\,[\,g,\;pk,\;h,\;nul,\;g^{r},\;z\,]\bigr)$
-3. reject if any is untrue:
-
-$$g^s * {pk}^{-c} = g^r$$
-$$h^s * {nul}^{-c} = z$$
-$$h^s * {c} = {plume\_sig}$$
-
-#### Zk-Circuit
-
-1. compute $htc([m,sec1(pk)])$
-2. compute ${pk} = g^{sk}$
-3. compute $g^s * {pk}^{-c}$
-3. compute $g^r$
-3. compute $h^s * {nul}^{-c}$
-
-the circuit establishes the following constraints:
-
-```math
-\boxed{
-\begin{aligned}
-&g^s \;*\; \mathsf{pk}^{-c} \;=\; g^r\
-\end{aligned}}
-```
-
-```math
-\boxed{
-\begin{aligned}
-&h^s * {nul}^{-c} \;=\; z\
-\end{aligned}}
-```
-
-Out of circuit, the following must also be verified:
-
-<center>
-
-```math
-c == {H}\bigl({nul}‖g^r‖h^r)
-```
-
-</center> -->
+- <https://snaps.metamask.io/snap/npm/chainsafe/webzjs-zcash-snap/>
