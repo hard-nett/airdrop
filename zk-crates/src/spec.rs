@@ -345,12 +345,3 @@ pub(crate) fn ka_orchard_prepared(
 ) -> NonIdentityPallasPoint {
     NonIdentityPallasPoint(&b.0 * &sk.0)
 }
-
-/// modular big-endian byte-to-field-element conversion
-pub fn mbe_btfe(e_sk: [u8; 32]) -> pallas::Base {
-    let mut acc = pallas::Base::ZERO;
-    for &byte in &e_sk {
-        acc = acc * pallas::Base::from(256u64) + pallas::Base::from(byte as u64);
-    }
-    acc
-}

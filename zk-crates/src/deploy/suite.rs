@@ -26,7 +26,6 @@ use pasta_curves::{arithmetic::CurveAffine, group::Curve, pallas, Fp};
 use sinsemilla::HashDomain;
 
 pub type BoxError = Box<dyn Error + Send + Sync>;
-pub struct TerpHeadstash {}
 
 pub trait HeadstashInstance {
     type HeadstashError;
@@ -56,7 +55,7 @@ pub trait HeadstashBitwiseInstance {
         v: u64,
         nd: &str,
     ) -> Result<pallas::Base, BoxError>;
-    fn mbe_btfe(&self, e_sk: [u8; 32]) -> pallas::Base;
+
     /// Note‑Value (v): u64 encoded as little‑endian 8 bytes (fully padded).
     fn derive_v(&self, value: u64) -> [u8; 8];
     /// Fixed‑Denom‑Index (fdi): u64 encoded as little‑endian 8 bytes (fully padded).
@@ -77,8 +76,7 @@ pub trait HeadstashBitwiseInstance {
     // fn derive_note(&self) -> Note;
 }
 
-pub struct HeadstashConfig {}
-
+/// All actions any user would take for a headstash instance
 pub trait TerpHeadstashActions {
     fn leaf_hash(
         &self,
@@ -92,6 +90,7 @@ pub trait TerpHeadstashActions {
     fn tree_root_from_leaves(&self, leaves: Vec<pallas::Base>) -> Vec<pallas::Base>;
     fn get_input_path(&self) -> Result<String, BoxError>;
     fn gen_headstash_tree(&self, input: PathBuf) -> Result<String, BoxError>;
+    fn gen_headstash_my_notes(&self, input: PathBuf, output: PathBuf) -> Result<(), BoxError>;
     fn print_tree(
         &self,
         input: &mut Value,
@@ -100,34 +99,50 @@ pub trait TerpHeadstashActions {
     ) -> Result<(), BoxError>;
 }
 
+pub struct TerpHeadstash {}
+pub struct TerpHeadstashConfig {}
+
 impl HeadstashInstance for TerpHeadstash {
     type HeadstashError = BoxError;
-    type PreInputConfig = HeadstashConfig;
+    type PreInputConfig = TerpHeadstashConfig;
     fn new() -> Self {
         Self {}
     }
 
     fn find_new_headstashes() -> Result<(), Self::HeadstashError> {
+        // TODO: wire into network client for headstash market contract state queries
         todo!()
     }
 
     fn create_new_headstash() -> Result<(), Self::HeadstashError> {
+        // TODO:
+        // prompt to determine communities to include in headstash airdrop
+        // deploy/retrieve holder distributions via full ephemeral full nodes api queries
+        // prompt calculations on percentile distribution and suggested ranges for normalization of airdrop allocation between communities
+        // connfigure how airdrop occurs (existing token, new token)
+        // generate headstash config and post to ipfs
+        // call headstash launchpad
+        // deploy new headstash aggregator
         todo!()
     }
 
     fn list_headstash_info() -> Result<(), Self::HeadstashError> {
+        // TODO: query ipfs file to retrieve headstash config
         todo!()
     }
 
     fn list_unspent_notes() -> Vec<Note> {
+        // TODO: read folder and display sum of notes and number of fdi counts
         todo!()
     }
 
     fn list_spent_notes() -> Vec<Note> {
+        // TODO: read folder and display notes spent
         todo!()
     }
 
     fn prepare_and_harvest_note() -> Result<(), Self::HeadstashError> {
+        // TODO: select unspent notes used to claim and move note file over into spent
         todo!()
     }
 
@@ -147,10 +162,7 @@ impl HeadstashBitwiseInstance for TerpHeadstash {
     /// Derives `nd` by domain-separation blake3 hash with domain-separation `DST_ND` of a note denomination.
     ///  We drop 3 bits to allow hash to become point on pallas curve.
     fn derive_nd(&self, raw_nd: &str) -> [u8; 32] {
-        let mut hasher = blake3::Hasher::new_derive_key(DST_ND);
-        hasher.update(raw_nd.as_bytes());
-        let mut digest = hasher.finalize().as_bytes().clone();
-        digest.try_into().expect("digest is 32 bytes")
+        crate::spec::nd_to_fp(&NoteDenom::new_for_proof(raw_nd)).to_repr()
     }
 
     /// Derive fully padded `v`.
@@ -161,15 +173,6 @@ impl HeadstashBitwiseInstance for TerpHeadstash {
     /// Derive fully padded `fdi`.
     fn derive_fdi(&self, fdi: u64) -> [u8; 8] {
         fdi.to_le_bytes()
-    }
-
-    /// Derive pallas foriegn field representation of e_pk `fdi`.This should also be constant-time. If hashing, use a constant-time hash-to-curve.
-    /// Step 1: split bytes into 3x 88 b it limbs
-    /// Step 2: define limbs as pallas curve points
-    /// Step 3: Convert the reduced scalar to a Pallas point (e.g., by hashing or multiplication).
-    /// modular big-endian byte-to-field-element conversion
-    fn mbe_btfe(&self, e_sk: [u8; 32]) -> pallas::Base {
-        crate::spec::mbe_btfe(e_sk)
     }
 
     fn extend_with_base_field_bits(&self, bits: &mut Vec<bool>, a: pallas::Base) {
@@ -471,5 +474,9 @@ impl TerpHeadstashActions for TerpHeadstash {
         eprintln!("✅ Merkle output written to {}", merkle_path.display());
 
         Ok(())
+    }
+
+    fn gen_headstash_my_notes(&self, input: PathBuf, output: PathBuf) -> Result<(), BoxError> {
+        todo!()
     }
 }
