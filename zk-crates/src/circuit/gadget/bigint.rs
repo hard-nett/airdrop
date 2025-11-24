@@ -118,28 +118,12 @@ pub struct FixedOverflowInteger<F> {
     pub limbs: Vec<F>,
 }
 
-/// Convert a field element to BigUint without requiring BigPrimeField trait.
-pub fn fe_to_biguint_simple(fe: &pallas::Base) -> BigUint {
-    use ff::PrimeField;
-    let bytes = fe.to_repr();
-    BigUint::from_bytes_le(&bytes)
-}
-
-/// Convert a BigUint to a field element without requiring BigPrimeField trait.
-pub fn biguint_to_fe_simple(value: &BigUint) -> pallas::Base {
-    use ff::PrimeField;
-    let bytes = value.to_bytes_le();
-    let mut bytes_32 = [0u8; 32];
-    bytes_32[..bytes.len().min(32)].copy_from_slice(&bytes[..bytes.len().min(32)]);
-    pallas::Base::from_repr(bytes_32).unwrap_or(pallas::Base::ZERO)
-}
-
 /// Get the modulus of a prime field without requiring BigPrimeField trait.
 ///
 /// This works for any prime field that implements PrimeField.
 /// The modulus is computed as: modulus = -1 + 1 = p
 pub fn modulus_simple<F: PrimeField>() -> BigUint {
-    fe_to_biguint_for_field(&-F::ONE) + 1u64
+    crate::spec::fe_to_biguint_for_field(&-F::ONE) + 1u64
 }
 
 impl FixedOverflowInteger<pallas::Base> {
@@ -152,7 +136,7 @@ impl FixedOverflowInteger<pallas::Base> {
     /// Convert back to BigUint (for testing/debugging).
     pub fn to_biguint(&self, limb_bits: usize) -> BigUint {
         self.limbs.iter().rev().fold(BigUint::zero(), |acc, x| {
-            (acc << limb_bits) + fe_to_biguint_simple(x)
+            (acc << limb_bits) + crate::spec::fe_to_biguint_simple(x)
         })
     }
 }
@@ -261,14 +245,6 @@ impl BigIntChip {
     }
 }
 
-/// Convert a generic field element to BigUint.
-///
-/// This is a generic version that works for any PrimeField, not just pallas::Base.
-pub fn fe_to_biguint_for_field<F: PrimeField>(fe: &F) -> BigUint {
-    let bytes = fe.to_repr();
-    BigUint::from_bytes_le(bytes.as_ref())
-}
-
 // implement AddInstructions
 // implement Field Traits for common functionality
 
@@ -284,13 +260,13 @@ mod tests {
     fn test_fe_conversion() {
         // Test field element to BigUint conversion
         let value = pallas::Base::from(123);
-        let big = fe_to_biguint_simple(&value);
-        let back = biguint_to_fe_simple(&big);
+        let big = crate::spec::fe_to_biguint_simple(&value);
+        let back = crate::spec::biguint_to_fe_simple(&big);
         assert_eq!(value, back);
 
         // Test zero conversion
         let zero = pallas::Base::zero();
-        let big_zero = fe_to_biguint_simple(&zero);
+        let big_zero = crate::spec::fe_to_biguint_simple(&zero);
         assert!(big_zero.is_zero());
     }
 
@@ -298,9 +274,11 @@ mod tests {
     fn test_fixed_integer_conversion() {
         // Test FixedOverflowInteger conversion
         let value = BigUint::from(0x01020304u32);
-        let fixed = FixedOverflowInteger::from_native(&value, 4, 8);
-        let reconstructed = fixed.to_biguint(8);
+        let fixed = FixedOverflowInteger::from_native(&value, 3, 88);
+        let reconstructed = fixed.to_biguint(88);
         assert_eq!(value, reconstructed);
+        let r3 = fixed.to_biguint(86);
+        assert_ne!(value, r3);
     }
 
     // Simple test circuit to verify assignment works

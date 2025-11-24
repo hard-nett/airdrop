@@ -69,7 +69,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         // ------------------------------------------------------------------
                         generated_notes.push(json!({
                             "m":          "",
-                            "e_sk":    &addr_target,
+                            "esk":    &addr_target,
                             "nul_sk":     "",
                             "sig_jub":    "",
                             "fdi":        fdi,
@@ -77,7 +77,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                             "denom":      token_name.clone(),
                             "recp":       "",
                             "nul":   "",
-                            "e_pk":     "",
+                            "epk":     "",
                             "ψ":          "",
                             "note_cm":    ""
                         }));

@@ -23,3 +23,6 @@
 	path = zk-crates/submodules/halo2-lib
 	url = https://github.com/shreyas-londhe/halo2-lib
 	branch = feat/secp256k1-hash2curve-poseidon
+[submodule "zk-crates/submodules/WebZjs"]
+	path = zk-crates/submodules/WebZjs
+	url = https://github.com/ChainSafe/WebZjs

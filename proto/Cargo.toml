@@ -1,0 +1,39 @@
+[package]
+authors = [
+    "ERGORS Agent Team",
+    "Generated from ergors and ho-std packages",
+]
+edition = "2021"
+name = "ergors-proto"
+description = "Protocol buffer definitions for Ergors storage and orchestration layers"
+version     = { workspace = true }
+publish = false
+
+
+[dependencies]
+anyhow = "1.0"
+heck = "0.4.0"
+itertools = "0.10.3"
+log = "0.4.17"
+pprof = { version = "0.15", features = ["flamegraph"] }
+pretty_env_logger = "0.4.0"
+prettyplease = "0.1.16"
+proc-macro2 = "1.0.52"
+prost = { version = "0.14.1", default-features = false, features = ["derive"] }
+prost-types = { version = "0.14.1", default-features = false }
+
+quote = "1.0.26"
+regex = "1"
+schemars = "1.0.4"
+syn = { version = "1.0.98", features = ["full", "parsing", "extra-traits"] }
+walkdir = "2"
+prost-build = "0.14.1"
+tonic = "0.14.1"
+tonic-build = "0.14.1"
+tonic-prost-build = { version = "0.14.1" }
+pbjson-build = "0.7.0"
+pbjson-types = "0.7.0"
+
+[lib]
+name = "cw_hoe_proto"
+path = "src/lib.rs"

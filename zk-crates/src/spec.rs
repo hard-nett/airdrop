@@ -2,6 +2,7 @@ use std::ops::Deref;
 
 use ff::{Field, FromUniformBytes, PrimeField};
 use group::{Curve, Group, GroupEncoding, WnafBase, WnafScalar};
+use halo2_base::utils::ScalarField;
 use halo2_ecc::bigint::FixedOverflowInteger;
 use halo2_gadgets::{poseidon::primitives as poseidon, sinsemilla::primitives as sinsemilla};
 use num_bigint::BigUint;
@@ -116,29 +117,29 @@ pub(crate) fn prf_nf(nk: pallas::Base, rho: pallas::Base) -> pallas::Base {
         .hash([nk, rho])
 }
 
-// /// convert e_sk into 3 88 bit pallas curve values
+// /// convert esk into 3 88 bit pallas curve values
 // /// // TODO: implement the derivation of 3 limbs on pallas curve bytes of secp256k1 curve
-// pub(crate) fn elig_sk_to_limbs(e_sk: [u8; 32]) -> [pallas::Base; 3] {
+// pub(crate) fn esk_to_limbs(esk: [u8; 32]) -> [pallas::Base; 3] {
 //     let mut acc = [pallas::Base::ZERO; 3];
 //     FixedOverflowInteger::from_native(BigUint, 3, 88);
-//     for &byte in &e_sk {
+//     for &byte in &esk {
 //         acc = acc * pallas::Base::from(256u64).add(&pallas::Base::from(byte as u64));
 //         acc[i]
 //     }
 // }
 // s
 /// # hdkf_pallas
-/// Derives nk from the Pallas base field representation for `e_sk`\
+/// Derives nk from the Pallas base field representation for `esk`\
 /// *(via modular big-endian byte-to-field-element conversion)*\
 /// using the posiedon hashing algorithm with a domain-separation-tag in the order (`DST`,`esk_fp`,`rho`).
-pub fn hdkf_pallas(elig_sk_pallas_fp: pallas::Base, rho: pallas::Base) -> pallas::Base {
+pub fn hdkf_pallas(esk_pallas_fp: pallas::Base, rho: pallas::Base) -> pallas::Base {
     let mut dst_bytes = [0u8; 32];
     let copy_len = DST_HKDF.len().min(32);
     dst_bytes[..copy_len].copy_from_slice(&DST_HKDF[..copy_len]);
     let dst_fe = pallas::Base::from_repr(dst_bytes).expect("invalid DST bytes");
     poseidon::Hash::<_, poseidon::P128Pow5T3, poseidon::ConstantLength<3>, 3, 2>::init().hash([
         dst_fe,
-        elig_sk_pallas_fp,
+        esk_pallas_fp,
         rho,
     ])
 }
@@ -148,10 +149,10 @@ pub(crate) fn prf_pallas_m(
     fdi: pallas::Base,
     v: pallas::Base,
     nd: pallas::Base,
-    e_sk: pallas::Base,
+    esk: pallas::Base,
 ) -> pallas::Base {
     poseidon::Hash::<_, poseidon::P128Pow5T3, poseidon::ConstantLength<4>, 3, 2>::init()
-        .hash([fdi, v, nd, e_sk])
+        .hash([fdi, v, nd, esk])
 }
 
 /// Convert a `NoteDenom` into a field element by hashing its byte payload.
@@ -182,34 +183,60 @@ pub(crate) fn recp_to_fp(ra: &RecpAddr) -> pallas::Base {
         .hash(ini)
 }
 
-/// Convert e_sk (`EligibleSk`) into a `pallas::Base` scalar
-/// using the Poseidon hash.
-/// Used to prepare an input into a circuit hashing function
-pub(crate) fn elig_sk_to_base(esk: &EligibleSk) -> pallas::Base {
-    let mut tag_inputs = [pallas::Base::zero(); MAX_DENOM_LEN];
-    for (i, &b) in DST_HKDF.iter().enumerate() {
-        tag_inputs[i] = pallas::Base::from(b as u64);
-    }
+/// Convert a field element to BigUint without requiring BigPrimeField trait.
+pub fn fe_to_biguint_simple(fe: &pallas::Base) -> BigUint {
+    use ff::PrimeField;
+    let bytes = fe.to_repr();
+    BigUint::from_bytes_le(&bytes)
+}
 
-    // One `Base` per byte – this mirrors the handling in `denom_to_base`.
-    let mut key_inputs = [pallas::Base::zero(); MAX_DENOM_LEN];
-    for (i, &b) in esk.0.secret_bytes().iter().enumerate() {
-        key_inputs[i] = pallas::Base::from(b as u64);
-    }
+/// Convert a BigUint to a field element without requiring BigPrimeField trait.
+pub fn biguint_to_fe_simple(value: &BigUint) -> pallas::Base {
+    use ff::PrimeField;
+    let bytes = value.to_bytes_le();
+    let mut bytes_32 = [0u8; 32];
+    bytes_32[..bytes.len().min(32)].copy_from_slice(&bytes[..bytes.len().min(32)]);
+    pallas::Base::from_repr(bytes_32).unwrap_or(pallas::Base::ZERO)
+}
 
-    let mut poseidon_inputs = [pallas::Base::zero(); MAX_DENOM_LEN];
-    let tag_len = DST_HKDF.len();
-    poseidon_inputs[..tag_len].copy_from_slice(&tag_inputs[..tag_len]);
-    poseidon_inputs[tag_len..tag_len + 32].copy_from_slice(&key_inputs[..32]);
+/// Convert a generic field element to BigUint.
+///
+/// This is a generic version that works for any PrimeField, not just pallas::Base.
+pub fn fe_to_biguint_for_field<F: PrimeField>(fe: &F) -> BigUint {
+    let bytes = fe.to_repr();
+    BigUint::from_bytes_le(bytes.as_ref())
+}
 
-    poseidon::Hash::<
-        _, // circuit placeholder (unused here)
-        poseidon::P128Pow5T3,
-        poseidon::ConstantLength<MAX_DENOM_LEN>,
-        3, // width = 3 (t = 3)
-        2, // full rounds per spec
-    >::init()
-    .hash(poseidon_inputs)
+/// Convert esk (`EligibleSk`) into a `pallas::Base` scalar by decomposing into 3 88 bit limbs
+// calculate product of limbs
+// hash to curve result with posiedon + randomness -> nk == pallas::Base
+
+pub(crate) fn esk_to_base(esk: &EligibleSk) -> pallas::Base {
+    // let mut tag_inputs = [pallas::Base::zero(); MAX_DENOM_LEN];
+    // for (i, &b) in DST_HKDF.iter().enumerate() {
+    //     tag_inputs[i] = pallas::Base::from(b as u64);
+    // }
+
+    // // One `Base` per byte – this mirrors the handling in `denom_to_base`.
+    // let mut key_inputs = [pallas::Base::zero(); MAX_DENOM_LEN];
+    // for (i, &b) in esk.0.secret_bytes().iter().enumerate() {
+    //     key_inputs[i] = pallas::Base::from(b as u64);
+    // }
+
+    // let mut poseidon_inputs = [pallas::Base::zero(); MAX_DENOM_LEN];
+    // let tag_len = DST_HKDF.len();
+    // poseidon_inputs[..tag_len].copy_from_slice(&tag_inputs[..tag_len]);
+    // poseidon_inputs[tag_len..tag_len + 32].copy_from_slice(&key_inputs[..32]);
+
+    // poseidon::Hash::<
+    //     _, // circuit placeholder (unused here)
+    //     poseidon::P128Pow5T3,
+    //     poseidon::ConstantLength<MAX_DENOM_LEN>,
+    //     3, // width = 3 (t = 3)
+    //     2, // full rounds per spec
+    // >::init()
+    // .hash(poseidon_inputs)
+    pallas::Base::default()
 }
 
 /// An integer in [1..q_P].

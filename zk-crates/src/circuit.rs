@@ -80,11 +80,11 @@ pub struct HeadstashCircuit {
     pub(crate) cm: Value<NoteCommitment>,
 
     // Secp256k1 key pair (foreign field) - represented as 3x88-bit limbs in circuit
-    pub(crate) e_sk: Value<Secp256k1Fq>, // Eligible secret key (scalar field)
+    pub(crate) esk: Value<Secp256k1Fq>, // Eligible secret key (scalar field)
     pub(crate) e_pk_x: Value<Secp256k1Fp>, // Eligible public key x-coordinate (base field)
     pub(crate) e_pk_y: Value<Secp256k1Fp>, // Eligible public key y-coordinate (base field)
 
-    // Nullifier deriving key (derived from e_sk via HKDF outside circuit)
+    // Nullifier deriving key (derived from esk via HKDF outside circuit)
     pub(crate) nk: Value<NullifierDerivingKey>,
 
     // Fixed denomination index (private)
@@ -248,11 +248,11 @@ impl plonk::Circuit<pallas::Base> for HeadstashCircuit {
         let ecc_chip = config.ecc_chip();
 
         // 1. CONSTRAINT: Foreign-field (secp256k1) key pairing
-        // Prove e_pk = e_sk * G_secp256k1 using CRT representation (3x88-bit limbs)
+        // Prove epk = esk * G_secp256k1 using CRT representation (3x88-bit limbs)
         let secp256k1_chip = Secp256k1Chip::construct(config.secp256k1.clone());
         let (e_sk_crt, (_e_pk_x_crt, _e_pk_y_crt)) = secp256k1_chip.prove_key_pairing(
-            layouter.namespace(|| "secp256k1 key pairing: e_pk = e_sk * G"),
-            self.e_sk,
+            layouter.namespace(|| "secp256k1 key pairing: epk = esk * G"),
+            self.esk,
             self.e_pk_x,
             self.e_pk_y,
         )?;
@@ -349,7 +349,7 @@ impl plonk::Circuit<pallas::Base> for HeadstashCircuit {
         // q: have we constrained `leaf` is derived from provided values?
         // q: have we constrained `leaf` is on tree with known instance `root`.
         // q: have we constrained `nk` is hash-derived from the provided values?
-        // q: have we constrained the pairing of `(e_sk,e_pk)`?
+        // q: have we constrained the pairing of `(esk,epk)`?
 
         Ok(())
     }
@@ -397,7 +397,7 @@ mod tests {
         use cosmwasm_std::{testing::mock_dependencies, Api};
         use ff::FromUniformBytes;
 
-        // 1. Generate secp256k1 key pair (e_sk, e_pk)
+        // 1. Generate secp256k1 key pair (esk, epk)
         let e_sk_bytes = [
             0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e,
             0x0f, 0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18, 0x19, 0x1a, 0x1b, 0x1c,
@@ -405,7 +405,7 @@ mod tests {
         ];
 
         let e_sk_secp = SecretKey::from_slice(&e_sk_bytes).expect("valid secret key");
-        let e_sk = EligibleSk::from(e_sk_secp);
+        let esk = EligibleSk::from(e_sk_secp);
 
         // 2. Generate randomness (rho, rseed, psi)
         let mut randomness_64 = [0; 64];
@@ -439,7 +439,7 @@ mod tests {
         .unwrap();
 
         // 5. Create Note - this derives nk, cm, nullifier automatically
-        let note = Note::from_parts(recp, v, nd, fdi, e_sk, rho, rseed).unwrap();
+        let note = Note::from_parts(recp, v, nd, fdi, esk, rho, rseed).unwrap();
 
         // 6. Extract secp256k1 coordinates for circuit
         let secp = Secp256k1::new();
@@ -453,15 +453,20 @@ mod tests {
         let e_pk_y = Secp256k1Fp::from_repr(e_pk_y_bytes).expect("valid Fp");
 
         // 7. Derive nk using HKDF
-        let nk = NullifierDerivingKey::derive_from(e_sk, rho);
+        let nk = NullifierDerivingKey::derive_from(esk, rho);
 
-        let mut sin_root = pallas::Base::from_repr("".as_bytes().try_into().unwrap())
-            .expect("field conversion error");
+        let mut sin_root = pallas::Base::from_repr(
+            hex::decode("8638de243d78472519d9d163872694dcc7343658a0199e3a67b390c1bdbc7300")
+                .unwrap()
+                .try_into()
+                .unwrap(),
+        )
+        .expect("field conversion error");
 
         // let path = MerkleHashHeadstash::from(crate::tree::MerkleHashHeadstash(sin_root));
         // 8. Create dummy Merkle path (for testing)
         let path = [MerkleHashHeadstash::from_cmx(
-            &ExtractedNoteCommitment::from_bytes(&pallas::Base::one().to_repr())
+            &ExtractedNoteCommitment::from_bytes(&sin_root.to_repr())
                 .expect("sinsemialla headstash tree root derivation error"),
         ); MERKLE_DEPTH_HEADSTASH];
         let pos = 0u32;
@@ -472,7 +477,7 @@ mod tests {
             psi: Value::known(note.rseed().psi(&rho)),
             rho: Value::known(rho),
             cm: Value::known(note.commitment()),
-            e_sk: Value::known(e_sk_fq),
+            esk: Value::known(e_sk_fq),
             e_pk_x: Value::known(e_pk_x),
             e_pk_y: Value::known(e_pk_y),
             nk: Value::known(nk),

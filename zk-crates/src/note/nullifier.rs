@@ -5,7 +5,7 @@ use pasta_curves::pallas;
 use subtle::CtOption;
 
 use crate::keys::{EligiblePk, EligibleSk, NullifierDerivingKey};
-use crate::spec::{elig_sk_to_base, extract_p, mod_r_p};
+use crate::spec::{esk_to_base, extract_p, mod_r_p};
 use crate::value::{NoteDenom, NoteValue};
 
 use super::NoteCommitment;
@@ -36,7 +36,7 @@ impl Nullifier {
         fdi: u64,
         v: NoteValue,
         nd: NoteDenom,
-        e_sk: EligiblePk,
+        esk: EligiblePk,
     ) -> Self {
         let k = pallas::Point::hash_to_curve("terp.network:headstash")(b"K");
         // TODO: derive nullifier by deriving nullifier key from correct inputs & hash dst, then use the

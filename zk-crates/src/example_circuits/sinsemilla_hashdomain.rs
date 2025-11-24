@@ -1,6 +1,6 @@
-// proove that H(v||nd||fdi||e_pk) was derived accurately using the sinsemilla hash domain.
+// proove that H(v||nd||fdi||epk) was derived accurately using the sinsemilla hash domain.
 //  - public inputs (exposed as instance columns): v,nd, H_sinsemilla
-//  - private inputs: fdi,e_pk
+//  - private inputs: fdi,epk
 
 use std::marker::PhantomData;
 
@@ -36,7 +36,7 @@ struct MySinsemillaHashDomainCircuit<Lookup: PallasLookupRangeCheck> {
     v: Value<Fp>,
     nd: Value<Fp>,
     fdi: Value<Fp>,
-    e_pk: Value<Fp>,
+    epk: Value<Fp>,
     path: Vec<(Value<bool>, Value<pallas::Base>)>, // (is_right, sibling_hash)
     root: Value<pallas::Base>,
 }
@@ -48,7 +48,7 @@ impl<Lookup: PallasLookupRangeCheck> MySinsemillaHashDomainCircuit<Lookup> {
             v: Value::default(),
             nd: Value::default(),
             fdi: Value::default(),
-            e_pk: Value::default(),
+            epk: Value::default(),
             root: Value::default(),
             path: vec![],
         }
@@ -161,7 +161,7 @@ impl<Lookup: PallasLookupRangeCheck> Circuit<pallas::Base>
             &HeadstashHashDomains::MerkleCrh,
         );
 
-        // === Step 1: Compute leaf = H(v || nd || fdi || e_pk) ===
+        // === Step 1: Compute leaf = H(v || nd || fdi || epk) ===
 
         // `a` = bits 0..=249 of `x(v)`
         let a = MessagePiece::from_subpieces(
@@ -204,19 +204,19 @@ impl<Lookup: PallasLookupRangeCheck> Circuit<pallas::Base>
             [RangeConstrained::bitrange_of(self.fdi.value(), 250..253)],
         )?;
 
-        // g = bits 0..250 of e_pk
+        // g = bits 0..250 of epk
         let g = MessagePiece::from_subpieces(
             sinsemilla_chip.clone(),
-            layouter.namespace(|| "e_pk bits 0..250"),
-            [RangeConstrained::bitrange_of(self.e_pk.value(), 0..250)],
+            layouter.namespace(|| "epk bits 0..250"),
+            [RangeConstrained::bitrange_of(self.epk.value(), 0..250)],
         )?;
 
-        // h = bits 250..253 of e_pk
+        // h = bits 250..253 of epk
         let h = MessagePiece::from_subpieces(
             sinsemilla_chip.clone(),
-            layouter.namespace(|| "e_pk bits 250..253"),
+            layouter.namespace(|| "epk bits 250..253"),
             [RangeConstrained::bitrange_of(
-                self.e_pk.value(),
+                self.epk.value(),
                 250..253,
             )],
         )?;
@@ -226,7 +226,7 @@ impl<Lookup: PallasLookupRangeCheck> Circuit<pallas::Base>
 
         // === Hash to point, generating leaf ===
         let (leaf_point, _aux) =
-            merkle_crh.hash_to_point(layouter.namespace(|| "hash v||nd||fdi||e_pk"), message)?;
+            merkle_crh.hash_to_point(layouter.namespace(|| "hash v||nd||fdi||epk"), message)?;
 
         // Extract leaf as field element (x-coordinate)
         let binding = leaf_point.inner().x();

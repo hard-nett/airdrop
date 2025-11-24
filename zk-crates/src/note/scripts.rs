@@ -14,8 +14,8 @@ use ff::PrimeField;
 #[derive(Serialize, Debug, Clone)]
 pub struct NoteTemplate {
     pub ψ: String,
-    pub e_pk: String,
-    pub e_sk: String,
+    pub epk: String,
+    pub esk: String,
     pub nul_sk: String,
     pub nd: String,
     pub fdi: u64,
@@ -29,8 +29,8 @@ pub struct NoteTemplate {
 impl From<NoteTemplate> for Value {
     fn from(nt: NoteTemplate) -> Self {
         json!({
-            "e_pk":     nt.e_pk,
-            "e_sk":    nt.e_sk,
+            "epk":     nt.epk,
+            "esk":    nt.esk,
             "recp":       nt.recp,
             "m":          nt.m,
             "nul_sk":     nt.nul_sk,
@@ -49,10 +49,10 @@ impl From<Note> for NoteTemplate {
         let (px, py, pz) = n.commitment().0.jacobian_coordinates();
         NoteTemplate {
             // m: hex::encode(n.message().inner().to_repr()),
-            // e_pk: hex::encode::<[u8; 32]>(VerificationKey::from(&n.nul_sk.0).into()),
+            // epk: hex::encode::<[u8; 32]>(VerificationKey::from(&n.nul_sk.0).into()),
             m: String::default(),
-            e_pk: String::default(),
-            e_sk: String::default(),
+            epk: String::default(),
+            esk: String::default(),
             nul_sk: String::default(),
             fdi: n.fdi,
             v: n.v.inner(),

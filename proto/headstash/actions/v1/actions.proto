@@ -1,0 +1,21 @@
+syntax = "proto3";
+
+package headstash.actions.v1;
+
+import "google/protobuf/struct.proto";
+
+
+service HeadstashPreparationService {
+      // retrieve token holder distribution
+      // determine piecewise distribution
+      // generate distribution tree
+      // prepare headstash config
+      // create new headstash 
+}
+
+service HeadstashService {
+      // find new headstash
+      // list headstash info 
+      // perform headstash action
+}
+

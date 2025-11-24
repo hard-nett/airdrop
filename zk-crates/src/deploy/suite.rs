@@ -50,7 +50,7 @@ pub trait HeadstashBitwiseInstance {
     fn derive_prf_m(&self, i: &Vec<pallas::Base>) -> pallas::Base;
     fn derive_m(
         &self,
-        e_sk: &[u8; 32],
+        esk: &[u8; 32],
         fdi: u64,
         v: u64,
         nd: &str,
@@ -62,14 +62,14 @@ pub trait HeadstashBitwiseInstance {
     fn derive_fdi(&self, index: u64) -> [u8; 8];
     /// nullifier-key derived from private inputs
     fn derive_nk(&self, raw_pubkey: &[u8; 32], rho: pallas::Base) -> pallas::Base;
-    /// Eligible Pubkey (e_pk): raw 32‑byte public key as 3x8 limbs.
+    /// Eligible Pubkey (epk): raw 32‑byte public key as 3x8 limbs.
     /// Get the bit representation (Lsb0 = little-endian bit order)
     // Take first 250 bits and convert each to `bool`
     fn extend_with_base_field_bits(&self, bits: &mut Vec<bool>, a: pallas::Base);
-    /// generates a specific leaf for a given e_pk,nd,v
+    /// generates a specific leaf for a given epk,nd,v
     fn derive_leaf(
         &self,
-        e_pk: &str,
+        epk: &str,
         nd: &str,
         v: u64,
     ) -> Result<(Vec<(u64, usize, String)>, Vec<Fp>), BoxError>;
@@ -80,7 +80,7 @@ pub trait HeadstashBitwiseInstance {
 pub trait TerpHeadstashActions {
     fn leaf_hash(
         &self,
-        e_pk: &[u8],
+        epk: &[u8],
         nd: &[u8],
         v: &[u8],
         fdi: &[u8],
@@ -151,7 +151,6 @@ impl HeadstashInstance for TerpHeadstash {
     }
 }
 
-use num_bigint::BigUint;
 impl HeadstashBitwiseInstance for TerpHeadstash {
     fn bytes_to_bits_le(bytes: &[u8]) -> impl Iterator<Item = bool> + '_ {
         bytes
@@ -255,13 +254,13 @@ impl HeadstashBitwiseInstance for TerpHeadstash {
 
     fn derive_m(
         &self,
-        e_sk: &[u8; 32],
+        esk: &[u8; 32],
         fdi: u64,
         v: u64,
         nd: &str,
     ) -> Result<pallas::Base, BoxError> {
-        // generate the sum of 3x88bit limbs of e_sk
-        // let sk = EligibleSk::from(SecretKey::from_byte_array(*e_sk)?);
+        // generate the sum of 3x88bit limbs of esk
+        // let sk = EligibleSk::from(SecretKey::from_byte_array(*esk)?);
         // let secp256k1_ls = self.derive_secp256k1_limbs_sum_const_time(limbs)
 
         // ensure fdi & v are fully padded
@@ -276,8 +275,8 @@ impl HeadstashBitwiseInstance for TerpHeadstash {
     }
 
     fn derive_prf_m(&self, i: &Vec<pallas::Base>) -> pallas::Base {
-        let (fdi, v, nd, e_sk) = (i[0], i[1], i[2], i[3]);
-        crate::spec::prf_pallas_m(fdi, v, nd, e_sk)
+        let (fdi, v, nd, esk) = (i[0], i[1], i[2], i[3]);
+        crate::spec::prf_pallas_m(fdi, v, nd, esk)
     }
 
     fn derive_nk(&self, raw_pubkey: &[u8; 32], rho: pallas::Base) -> pallas::Base {
@@ -288,16 +287,16 @@ impl HeadstashBitwiseInstance for TerpHeadstash {
 
 impl TerpHeadstashActions for TerpHeadstash {
     /// Compute the leaf hash for an address-token-amount tuple
-    /// Concatenate all bytes in canonical order: e_pk + nd + v + fdi
+    /// Concatenate all bytes in canonical order: epk + nd + v + fdi
     fn leaf_hash(
         &self,
-        e_pk: &[u8],
+        epk: &[u8],
         nd: &[u8],
         v: &[u8],
         fdi: &[u8],
     ) -> Result<pallas::Base, BoxError> {
         let mut message_bytes = Vec::new();
-        message_bytes.extend_from_slice(e_pk);
+        message_bytes.extend_from_slice(epk);
         message_bytes.extend_from_slice(nd);
         message_bytes.extend_from_slice(v);
         message_bytes.extend_from_slice(fdi);

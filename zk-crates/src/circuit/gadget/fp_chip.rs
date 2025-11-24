@@ -6,14 +6,13 @@
 //!
 //! Adapted from halo2-ecc::fields::fp but refactored to use native halo2 patterns.
 
-use crate::circuit::gadget::bigint::{fe_to_biguint_for_field, modulus_simple};
+use crate::circuit::gadget::bigint::modulus_simple;
 
 use super::bigint::{
-    biguint_to_fe_simple, fe_to_biguint_simple, CrtInteger, FixedOverflowInteger, OverflowInteger,
-    ProperCrtUint as Puint, ProperUint,
+    CrtInteger, FixedOverflowInteger, OverflowInteger, ProperCrtUint as Puint, ProperUint,
 };
+use crate::spec::{biguint_to_fe_simple, fe_to_biguint_for_field, fe_to_biguint_simple};
 use ff::{Field, PrimeField};
-
 use halo2_base::utils::{modulus, BigPrimeField};
 use halo2_gadgets::utilities::lookup_range_check::{LookupRangeCheck, LookupRangeCheckConfig};
 use halo2_proofs::{
@@ -341,17 +340,22 @@ impl<Fp: BigPrimeField> FpChip<Fp> {
     /// Range check all limbs of a foreign field element.
     ///
     /// This ensures each limb is in range [0, 2^limb_bits).
-    /// Ex: Secp256k1 expects 9x 10-bit range limbs
+    /// Ex: For 88-bit limbs with K=10, we need 9 words (88 bits / 10 bits per word = 8.8 → 9)
     pub fn range_check_limbs(
         &self,
         mut layouter: impl Lo<pallas::Base>,
         a: &Puint<pallas::Base>,
     ) -> Result<(), PErr> {
+        // Calculate number of K-bit words needed for each limb
+        // K = 10 (from LookupRangeCheckConfig<_, 10>)
+        const K: usize = 10;
+        let num_words = (self.limb_bits + K - 1) / K; // Ceiling division: 88/10 = 9
+
         for (i, limb) in a.truncation.limbs.iter().enumerate() {
             self.config.range_check.copy_check(
                 layouter.namespace(|| format!("range check limb {}", i)),
                 limb.clone(),
-                self.limb_bits,
+                num_words, // Pass number of K-bit words, not total bits
                 false,
             )?;
         }

@@ -99,7 +99,7 @@ fn find_fdi(input_path: &str, token: &str, amount: &str) -> Result<u64, BoxError
 /// # ex:  cargo run --bin create_nullifiers -- 0x0000000000000000000000000000000000000000 uterp 100
 /// cargo run --bin create_nullifier -- <elig_addr> <token-denom> <amount>
 /// ```
-///  Derives a nullifier, which is a pallas curve point derived from the hkdf used with an `e_sk`,
+///  Derives a nullifier, which is a pallas curve point derived from the hkdf used with an `esk`,
 fn main() -> Result<(), BoxError> {
     let (input_file, token_str, amount_str) = get_input_path()?;
     let input_path = &format!("./data/notes/{}.json", input_file);
@@ -110,7 +110,7 @@ fn main() -> Result<(), BoxError> {
     let rseed = RandomSeed::from_bytes(headstash_randomness::ultra_secure_random(), &rho).unwrap();
 
     let mnemonic = "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about";
-    let e_sk = EligibleSk::from(eth_secret_from_seed(&derive_secp256k1_seed_from_mnemonic(
+    let esk = EligibleSk::from(eth_secret_from_seed(&derive_secp256k1_seed_from_mnemonic(
         mnemonic,
     )));
 
@@ -137,7 +137,7 @@ fn main() -> Result<(), BoxError> {
     )?;
 
     let note =
-        Note::from_parts(recp, v, nd, fdi, e_sk, rho, rseed).expect("note composition error");
+        Note::from_parts(recp, v, nd, fdi, esk, rho, rseed).expect("note composition error");
 
     println!("recp: {:#?}", recp.to_canonical().to_string());
     println!("note.commitment(): {:#?}", note.commitment());
@@ -170,5 +170,5 @@ fn main() -> Result<(), BoxError> {
 
 // TEST:
 // nullifier should not be impacted by randomness inputs
-// nullifier should change with different e_sk/e_pk
+// nullifier should change with different esk/epk
 //

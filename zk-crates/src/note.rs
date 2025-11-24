@@ -131,7 +131,7 @@ pub struct Note {
     rho: Rho,
     /// The seed randomness for various note components.
     rseed: RandomSeed,
-    e_sk: EligibleSk,
+    esk: EligibleSk,
     /// fixed_denomination_index of a genesis note (exists for genesis leaf uniqueness)
     fdi: u64,
 }
@@ -166,7 +166,7 @@ impl Note {
         v: NoteValue,
         nd: NoteDenom,
         fdi: u64,
-        e_sk: EligibleSk,
+        esk: EligibleSk,
         rho: Rho,
         rseed: RandomSeed,
     ) -> CtOption<Self> {
@@ -176,7 +176,7 @@ impl Note {
             rho,
             rseed,
             nd,
-            e_sk,
+            esk,
             fdi,
             // m: todo!(),
         };
@@ -194,7 +194,7 @@ impl Note {
         rho: Rho,
         nd: NoteDenom,
         fdi: u64,
-        e_sk: EligibleSk,
+        esk: EligibleSk,
         mut rng: impl RngCore,
     ) -> Self {
         loop {
@@ -203,7 +203,7 @@ impl Note {
                 value,
                 nd,
                 fdi,
-                e_sk,
+                esk,
                 rho,
                 RandomSeed::random(&mut rng, &rho),
             );
@@ -284,7 +284,7 @@ impl Note {
 
     /// Derives the nullifier key for this note.
     pub fn nk(&self, rho: Rho) -> NullifierDerivingKey {
-        NullifierDerivingKey::derive_from(self.e_sk, rho)
+        NullifierDerivingKey::derive_from(self.esk, rho)
     }
     /// Derives the nullifier for this note.
     pub fn nullifier(&self) -> Nullifier {
@@ -293,7 +293,7 @@ impl Note {
             self.fdi,
             self.v,
             self.nd,
-            self.e_sk.e_pk(),
+            self.esk.epk(),
         )
     }
 

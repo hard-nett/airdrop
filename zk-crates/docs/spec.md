@@ -5,13 +5,13 @@
 
 ## Context
 
-Our current airdrop framework, `The Headstash Contract` powers distribution by mapping ECDSA addresses not native to the chain (ETH,SOL,etc) as eligible to claim a specific list of tokens. In order to claim, users need to verify they are owners of any eligible addresses secret key `e_sk`. This is done by generating a signature with `e_sk`, from a message that includes the address native to the chain that the user will use to broadcast the message to claim their allocations `recp`.
+Our current airdrop framework, `The Headstash Contract` powers distribution by mapping ECDSA addresses not native to the chain (ETH,SOL,etc) as eligible to claim a specific list of tokens. In order to claim, users need to verify they are owners of any eligible addresses secret key `esk`. This is done by generating a signature with `esk`, from a message that includes the address native to the chain that the user will use to broadcast the message to claim their allocations `recp`.
 
 ```math
 \sigma = \text{Sign}_{\text{elig}_{\text{sk}}}\big( H(m) \big), \quad \text{where } \text{recp} \in m
 ```
 
-**This creates an on-chain association between the eligible account `e_pk`, and the claiming address `recp`, which we want to prevent.**
+**This creates an on-chain association between the eligible account `epk`, and the claiming address `recp`, which we want to prevent.**
 
 In order to prevent this association between verifying ownership & claiming tokens, there are 3 major obstacles:
 
@@ -47,7 +47,7 @@ A predetermined set of notes for users are generated based on initial allocation
   - b. key rotation/authentication/backup-recovery system
 - **Private Proof Of Ownership: Hkdf + key pairing**
   - a. constrain a derived key is know from given inputs for proof of ownership
-  - b. constrain a key pair (e_pk,e_sk)  are paired by divison with G to be an expected constant in the circuit used as element throughout.
+  - b. constrain a key pair (epk,esk)  are paired by divison with G to be an expected constant in the circuit used as element throughout.
 
 - **Sinsemilla Merkle Trees - hash & commit domains:** ensures inclusion ins specific headstash distribution instance, and in future can implement respendable note-commitments
 - **Nullifier & Note Commitments: Effecient & Private Double Spend Prevention**
@@ -94,10 +94,10 @@ We have 3 main types of keys involved in this process.
 
 - *every note must have a way to derive a unique identifier that proves the note has been spent, without revealing which note it was or linking multiple spends together.*
 
-Two core business logic requirement in the headstash circuit are to have a feasable way to verify that the owner of the `e_pk` is authorizing the spend of a specific note in a headstash instance, and prevent double-spending of headstash allocations. Normal ECDSA verification for field curves are computationally heavy in circuit, & generate extremely large proof sizes not compatible with on-chain gas limits & a nice UX.
+Two core business logic requirement in the headstash circuit are to have a feasable way to verify that the owner of the `epk` is authorizing the spend of a specific note in a headstash instance, and prevent double-spending of headstash allocations. Normal ECDSA verification for field curves are computationally heavy in circuit, & generate extremely large proof sizes not compatible with on-chain gas limits & a nice UX.
 
 When a note is is being spent, the owner generates a nullifier & note commitment, using carefully structured derivation process that results in HKDF generated key `(hkdf_pk, hkdf_sk)` seeded from private input, powering the key separation, verifiablility, & cryptographic binding of the nullifier and note commitment.
-**Users end up proving they know the key pair `e_sk,e_pk` as private inputs when generating their proofs.**
+**Users end up proving they know the key pair `esk,epk` as private inputs when generating their proofs.**
 
 This lets the circuit then make use of the known curve equation & generator points to constrain that the two keys are either mathematically paired together or not, without ever needing to reveal these values, since constraint the generation point of secp256k1 to the two keys for an expected known value. To prevent double-spending of headstash allocations:
 
@@ -108,9 +108,9 @@ This lets the circuit then make use of the known curve equation & generator poin
 > - **computable only by the note owner**
 > - **resistant to tampering, especially against attacks where an adversary might attempt to redirect funds during transmission.**
 
-**Headstashes derive a keypair `(hkdf_sk,hkdf_pk)` that is on the pallas curve from the `e_sk`,*along with other private inputs*.**
+**Headstashes derive a keypair `(hkdf_sk,hkdf_pk)` that is on the pallas curve from the `esk`,*along with other private inputs*.**
 
-Specifically we inlcude `e_sk`,`leaf`,`recp`,and a user PRF-derived valus `psi` in the HKDF input, cryptographically bind the nullifier to a specific fund destination, where only the owner has discrection in deciding who can derive the note from it since it depends on their private note_secret and the associated key of the `e_pk`.
+Specifically we inlcude `esk`,`leaf`,`recp`,and a user PRF-derived valus `psi` in the HKDF input, cryptographically bind the nullifier to a specific fund destination, where only the owner has discrection in deciding who can derive the note from it since it depends on their private note_secret and the associated key of the `epk`.
 
 *This defends against a subtle but serious class of attacks man-in-the-middle modifications where an adversary intercepts a transaction and attempts to redirect funds to a different address, while reusing the same proof structure. Because the nullifier depends on the exact allocation being spent, any such alteration would result in a different derived `hkdf_pk`, causing the proof to fail verification.*
 
@@ -139,8 +139,8 @@ For effecieny out of circuit, used as abci-like interface between token-denomina
 | `rho`    |                                 |                                      | **Private**                          |  generated by user |
 | `rseed`  |                                 |                                      | **Private**                           |   generated by user ||
 | `psi`    | Note Randomness                 | ` `                                  | **Private**                          |generated by user |Nullifier,hkdf-Keypair|
-| `e_sk`| Eligible secret key             | `bytes[32]`                          | **Private**                          | 3x 88bit limbs | Key-Pairing |
-| `e_pk`| Eligible public key             | `bytes[32]`                          | **Private**                          | 3x 88bit limbs | Key-Pairing |
+| `esk`| Eligible secret key             | `bytes[32]`                          | **Private**                          | 3x 88bit limbs | Key-Pairing |
+| `epk`| Eligible public key             | `bytes[32]`                          | **Private**                          | 3x 88bit limbs | Key-Pairing |
 | `fdi`    | Fixed Denomination Index        | `u64`                                | **Private**                          | *fully padded u64* | Nullifier |
 | `v`      | Note Value                      | `NoteValue(u64)`                     | **Public**                           | *fully padded u64* | Nullifier |
 | `nd`     | Note Denomination               | `NoteDenom([u8; <128])`              | **Public**                           | **blake3 Hash + top 3 bits** ||
@@ -155,7 +155,7 @@ Sinsemilla is a ZK-friendly hash function designed specifically for Pallas/Vesta
 
 ### 1. Genesis Distribution Tree: `HashDomain`
 
-**This is the static, starting state of the headstash before any claims happen.** Its purpose is to allow a user to prove a specific address `e_pk` is how we mesh key ownership constraints with airdrop instance eligibility, without revealing which specific address or note being claimed exactly is. Each leaf is a commitment to the `HashDomain`,that is public & binding an eligible recipients balance for a single token balance, so we can derive the expected hash result in circuit.
+**This is the static, starting state of the headstash before any claims happen.** Its purpose is to allow a user to prove a specific address `epk` is how we mesh key ownership constraints with airdrop instance eligibility, without revealing which specific address or note being claimed exactly is. Each leaf is a commitment to the `HashDomain`,that is public & binding an eligible recipients balance for a single token balance, so we can derive the expected hash result in circuit.
 
 ```math
 \begin{array}{lcl}
@@ -203,7 +203,7 @@ A leaf is computed using the sinsemilla hashing function with the following inpu
 | Components   | Meaning                         | Type                                 | Public / Private / Constant / Output | Derivation |
 |----------|---------------------------------|--------------------------------------|--------------------------------------|------------|
 | `DST_HKDF`      |    |                                      | **Constant**                         |   |
-| `e_sk`| Eligible secret key             | `bytes[32]`                          | **Private**                          |  |
+| `esk`| Eligible secret key             | `bytes[32]`                          | **Private**                          |  |
 | `fdi`    | Fixed Denomination Index        | `u64`                                | **Private**                          | *fully padded u64* |
 | `v`      | Note Value                      | `NoteValue(u64)`                     | **Public**                           | *fully padded u64* |
 | `nd`     | Note Denomination               | `NoteDenom([u8; <128])`              | **Public**                           | *blake3 Hash + top 3 bits |
@@ -217,10 +217,10 @@ A leaf is computed using the sinsemilla hashing function with the following inpu
 >
 > - **Padding for `v` and `fdi`** – Both values are `u64` (max 160 bits when concatenated). For table look‑ups we left‑pad each to the byte length required by the hashDomain of Sinsemilla (e.g., 32 bytes). This ensures the inputs line up with the fixed‑size field elements used inside the circuit.
 >
-> - **`e_pk` handling for Sinsemilla compatibility** – `e_pk` is a 32‑byte public‑key representation. The value is interpreted as a set of foriegn field element limbs; since we are focused on secp256k1 curve, we can expect 3 limbs of 88 bits to always fit within the pallas curve, to then allow reduction for each  88bit string for linear operations within the curve structure.
-> - **The Full key is required in‑circuit:** Even though `e_pk` is private for the prover, the circuit must receive the entire key as we need to enforce the relationship of the
-> `hkd_sk` being derived from a `e_sk` thyat is paired with an `e_pk`. This guarantees that the HKDF‑derived key used in the protocol is indeed tied to
-> the secret key `e_sk`.
+> - **`epk` handling for Sinsemilla compatibility** – `epk` is a 32‑byte public‑key representation. The value is interpreted as a set of foriegn field element limbs; since we are focused on secp256k1 curve, we can expect 3 limbs of 88 bits to always fit within the pallas curve, to then allow reduction for each  88bit string for linear operations within the curve structure.
+> - **The Full key is required in‑circuit:** Even though `epk` is private for the prover, the circuit must receive the entire key as we need to enforce the relationship of the
+> `hkd_sk` being derived from a `esk` thyat is paired with an `epk`. This guarantees that the HKDF‑derived key used in the protocol is indeed tied to
+> the secret key `esk`.
 <!-- >q: can we use a point definition for the x & y of the keypair for a single input into the circuit and more clean decomposition? -->
 
 *This is how we enable non-interactive instances of headstash deployments, and can be optimized to bring more composability to these genesis distributions*
@@ -283,8 +283,8 @@ G_{secp256k1}   = (G_{x},G_{y})                     &\text{(generator point secp
 ```rust
 pub struct PrivateWitnesses {
     // Secp256k1 key pair (ownership proof)
-    e_sk: secp256k1::Fq,          // Eligible secret key
-    e_pk: secp256k1::Affine,      // Eligible public key
+    esk: secp256k1::Fq,          // Eligible secret key
+    epk: secp256k1::Affine,      // Eligible public key
 
     // Note identification
     fdi: u64,                        // Fixed denomination index (fully padded)
@@ -435,7 +435,7 @@ pub struct ProperCrtUint<F> {
 
 ```rust
 let m = poseidon_hash(dst_hkdf,[recp, v, nd, fdi,psi]); 
-let pallas_sk = poseidon_hash([DST_HKDF, elig_sk_native, m]);
+let pallas_sk = poseidon_hash([DST_HKDF, esk_native, m]);
 let pallas_pk = pallas_sk * G_pallas;
 ```
 
@@ -616,7 +616,7 @@ The proxy service must control an on-chain account, in order to register the zk-
 
 In the proof circuit, the user generates a proof that essentially encodes the following statements:
 
-- They own `addr_eligible` via `e_pk` `e_sk` pairing.
+- They own `addr_eligible` via `epk` `esk` pairing.
 - The note being spent corresponds to an unclaimed entry in the genesis Merkle tree.
 - The nullifier for the note being spent has been accurately defined to this note.
 
