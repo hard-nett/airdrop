@@ -152,7 +152,7 @@ Let us break down the parameters:
 
 ### **Genesis Transactions**
 
-By default, the genesis file do not contain any gentxs. A gentx is a transaction that bonds staking token present in the genesis file under accounts to a validator, essentially creating a validator at genesis. The chain will start as soon as more than 2/3rds of the validators (weighted by voting power) that are the recipient of a valid gentx come online after genesis_time.
+By default, the genesis file do not contain any gentxs. A gentx is a transaction that bonds staking token present in the genesis file under accounts to a validator, essentially creating a validator at genesis. The chain will start as soon as more than 2/3rds of the validators (weighted by voting power) that are the recp of a valid gentx come online after genesis_time.
 
 A gentx can be added manually to the genesis file, or via the following command:
 

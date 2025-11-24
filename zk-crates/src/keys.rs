@@ -2,7 +2,7 @@ use ff::PrimeField;
 
 use pasta_curves::pallas;
 use rand::RngCore;
-
+use secp256k1::Secp256k1;
 use subtle::{Choice, CtOption};
 
 use crate::note::Rho;
@@ -12,18 +12,25 @@ use crate::value::{NoteDenom, NoteValue};
 
 #[derive(Debug, Copy, Clone)]
 pub struct EligiblePk(pub secp256k1::PublicKey);
+
+impl From<EligibleSk> for EligiblePk {
+    fn from(sk: EligibleSk) -> Self {
+        Self(sk.0.public_key(&Secp256k1::new()))
+    }
+}
+
 #[derive(Debug, Copy, Clone)]
 pub struct EligibleSk(pub secp256k1::SecretKey);
 
 impl EligibleSk {
-    pub fn from_sk(sk: secp256k1::SecretKey) -> Self {
+    pub fn from(sk: secp256k1::SecretKey) -> Self {
         Self(sk)
     }
     /// Build an `EligibleSk` from a hex string that represents a 32‑byte SECP‑256k1 secret key.
     ///
     /// # Example
     /// ```rust
-    /// let sk = EligibleSk::new_from_sk("1a2b3c…"); // 64‑char hex
+    /// let sk = EligibleSk::from("1a2b3c…"); // 64‑char hex
     /// ```
     ///
     /// The function will `panic!` if the string is not a valid 32‑byte hex value.
@@ -44,6 +51,10 @@ impl EligibleSk {
         Self(secp_sk)
     }
 
+    pub fn e_pk(&self) -> EligiblePk {
+        EligiblePk(self.0.public_key(&Secp256k1::new()))
+    }
+
     pub fn derive_pallas_equivalent(&self) -> pallas::Base {
         // decompose into 3 88 bit limbs
         // let limbs =crate::spec::decompose_biguint_simple();
@@ -62,7 +73,7 @@ impl NoteMessage {
         NoteMessage(prf_pallas_m(
             fdi.into(),
             v.inner().into(),
-            crate::spec::denom_to_base(&nd),
+            crate::spec::nd_to_fp(&nd),
             elig_sk_to_base(&e_sk),
         ))
     }
@@ -162,6 +173,15 @@ pub struct NullifierDerivingKey(pallas::Base);
 impl NullifierDerivingKey {
     pub fn inner(&self) -> pallas::Base {
         self.0
+    }
+}
+
+/// take the pallas point field representation of elig_sk (plus other inputs for dst & blinding enhancements)
+impl From<&EligibleSk> for NullifierDerivingKey {
+    fn from(e_sk: &EligibleSk) -> Self {
+        NullifierDerivingKey(to_base(
+            PrfExpand::HEADSTASH_NK.with(&e_sk.derive_pallas_equivalent().to_repr()),
+        ))
     }
 }
 

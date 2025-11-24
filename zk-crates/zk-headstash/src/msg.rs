@@ -8,7 +8,7 @@ pub struct HeadstashObject {
     // genesis distribution merkle tree root.
     pub nullifier: Binary,
     // public address token are sent to
-    pub recipient: String,
+    pub recp: String,
     // amount of funds to send
     pub amount: Coin,
 }

@@ -1,10 +1,10 @@
 // cargo run --bin create_merkle -- ./data/genesis_sinsemilla.json
 
-use base64::{Engine as _, engine::general_purpose};
+use base64::{engine::general_purpose, Engine as _};
 
 use hex::decode;
 use pasta_curves::Fp;
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 
 use ff::{Field, PrimeField, PrimeFieldBits};
 use pasta_curves::{arithmetic::CurveAffine, group::Curve, pallas};
@@ -13,6 +13,7 @@ use std::error::Error;
 use std::{env, fs};
 use zk_crates::constants::fixed_bases::FIXED_AMOUNTS;
 use zk_crates::constants::sinsemilla::{LEAF_PERSONALIZATION, MERKLE_CRH_PERSONALIZATION};
+use zk_crates::deploy::suite::{HeadstashInstance, TerpHeadstash, TerpHeadstashActions};
 
 use rayon::prelude::*;
 use std::sync::Mutex;

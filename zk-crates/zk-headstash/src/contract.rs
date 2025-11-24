@@ -67,13 +67,13 @@ fn process_headstash(
     let mut tokens = HashMap::new();
     for claim in claims {
         verify_nullifier(deps.storage, claim.nullifier.to_string())?;
-        tokens.insert(claim.amount.denom, (claim.amount.amount, claim.recipient));
+        tokens.insert(claim.amount.denom, (claim.amount.amount, claim.recp));
     }
 
     // ensure balance exists in contract
     let cosmos_msgs: Result<Vec<CosmosMsg>, StdError> = tokens
         .iter()
-        .map(|(denom, (amount, recipient))| {
+        .map(|(denom, (amount, recp))| {
             let balance = deps
                 .querier
                 .query_balance(env.contract.address.to_string(), denom)?
@@ -86,7 +86,7 @@ fn process_headstash(
             }
 
             let msg = BankMsg::Send {
-                to_address: recipient.to_string(),
+                to_address: recp.to_string(),
                 amount: coins(amount.u128(), denom),
             };
 

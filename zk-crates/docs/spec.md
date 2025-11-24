@@ -73,7 +73,7 @@ We have 3 main types of keys involved in this process.
 | # | Key type         | Curve used | Primary crate | Public / Private usage | Typical Rust type (example) | Key‑derivation notes |
 |---|------------------|------------|--------------|------------------------|-----------------------------|----------------------|
 | 1 | **Eligible Key** | `secp256k1`  | `k256` (or `secp256k1`) | Public key is **published** in the allocation; **private key + any signatures / hashes must stay secret** to preserve privacy. | `k256::ecdsa::SigningKey` / `k256::ecdsa::VerifyingKey` | - |
-| 2 | **Redemption Key** | secp256k1 | `k256` (or `secp256k1`) | Public key is **the recipient** of the claimed allocation; private key is used only to sign the redemption proof. | Same as Eligible (`SigningKey`/`VerifyingKey`) | May be pre‑generated or created on‑the‑fly; no HKDF involved. |
+| 2 | **Redemption Key** | secp256k1 | `k256` (or `secp256k1`) | Public key is **the recp** of the claimed allocation; private key is used only to sign the redemption proof. | Same as Eligible (`SigningKey`/`VerifyingKey`) | May be pre‑generated or created on‑the‑fly; no HKDF involved. |
 | 3 | **HKDF‑derived Key** |  `pallas` | `pasta-curves` | Private key **only**; the corresponding public key is *not* exposed – it is used inside the circuit for proof‑of‑ownership. |   | Deterministically derived via posiedon based HKDF from circuit‑private inputs (e.g., a seed, a note commitment, a nullifier). The derived scalar is mapped to a pallas point using the crate’s `generator` |
 
 > NOTE: zcash orchard protocol implements key derivation for viewing, authorization, and privacy retention purposes. Our scope does not require the use of viewing or authorization keys, as the end results of tokens claimed will be public. A large portion of the modifications from the orchard protocol altering how note-commitments & nullifiers are derived, as they rely heavily on the use of the key structure used by zcash orchard protocol.
@@ -96,7 +96,7 @@ We have 3 main types of keys involved in this process.
 
 Two core business logic requirement in the headstash circuit are to have a feasable way to verify that the owner of the `e_pk` is authorizing the spend of a specific note in a headstash instance, and prevent double-spending of headstash allocations. Normal ECDSA verification for field curves are computationally heavy in circuit, & generate extremely large proof sizes not compatible with on-chain gas limits & a nice UX.
 
-When a note is is being spent, the owner generates a nullifier & note commitment, using carefully structured derivation process that results in HKDF generated key `(hkdf_pk, hkdf_sk)` seeded from private input, powering the key separation, verifiablility, & cryptographic binding of the nullifier and note commitment. 
+When a note is is being spent, the owner generates a nullifier & note commitment, using carefully structured derivation process that results in HKDF generated key `(hkdf_pk, hkdf_sk)` seeded from private input, powering the key separation, verifiablility, & cryptographic binding of the nullifier and note commitment.
 **Users end up proving they know the key pair `e_sk,e_pk` as private inputs when generating their proofs.**
 
 This lets the circuit then make use of the known curve equation & generator points to constrain that the two keys are either mathematically paired together or not, without ever needing to reveal these values, since constraint the generation point of secp256k1 to the two keys for an expected known value. To prevent double-spending of headstash allocations:
@@ -118,7 +118,15 @@ Specifically we inlcude `e_sk`,`leaf`,`recp`,and a user PRF-derived valus `psi` 
 - b. add hash output to psi
 - c. Multiply scalar by NullifierK
 
-###
+### Hashing Functions
+
+#### Posiedon
+
+For effecieny in-circuit hashing, we are using Posiedon as the hkdf hashing algorithm. Poseidon is a ZK-friendly hash function used for nullifier derivation, note commitments.
+
+#### Blake3
+
+For effecieny out of circuit, used as abci-like interface between token-denominations and inputs for `nd` into the circuit. Extremely , and we specifically drop 3 bits from the hash when describing an input, since the hashed values is a public known value we do not worry about the impact of collison resisance that occurs, and just specificy protocols to keep a map dedicated to the original values and their trimmed-hash representations.
 
 ### Derivation Inputs
 
@@ -241,8 +249,8 @@ A leaf is computed using the sinsemilla hashing function with the following inpu
 \textbf{Public inputs} &
 \begin{cases}
 \mathsf{v}\in \mathbb{F}_p      &\text{(fully padded u64 of value being spent in note)}\\[2pt]
-\mathsf{nd}^{\ast}\in \mathbb{F}_p      &\text{(Posiedon Hash of notes token denomination }nd\text{)}\\[2pt]
-\mathsf{recp}^{\ast}\in \mathbb{F}_p      &\text{(Posiedon Hash of notes token denomination }nd\text{)}\\[2pt]
+\mathsf{H(nd\_{raw})}\in \mathbb{F}_p      &\text{(Posiedon Hash of notes token denomination }nd\text{)}\\[2pt]
+% \mathsf{recp}^{\ast}\in \mathbb{F}_p      &\text{(Posiedon Hash of recipient of notes token }nd\text{)}\\[2pt]
 \end{cases}
 \end{array}
 ```
@@ -252,9 +260,9 @@ A leaf is computed using the sinsemilla hashing function with the following inpu
 \\[10pt]
 \textbf{Constants} &
 \begin{cases}
-\mathtt{DST}_{\!{Nullifier}}= \texttt{NULLIFIER\_PERSONALIZATION}&\text{(domain‑separation tag)}\\[2pt]
-\mathtt{DST}_{\!{Hkdf}}= \texttt{HKDF\_PERSONALIZATION}&\text{(domain‑separation tag)}\\[2pt]
-\mathtt{DST}_{\!{Sinsemilla}}= \texttt{SINSEMILLA\_PERSONALIZATION}&\text{(domain‑separation tag)}\\[2pt]
+\mathtt{DST}_{\!{Nullifier}}= \texttt{DST\_NULL}&\text{(domain‑separation tag)}\\[2pt]
+\mathtt{DST}_{\!{Hkdf}}= \texttt{DST\_HKDF}&\text{(domain‑separation tag)}\\[2pt]
+\mathtt{DST}_{\!{Sinsemilla}}= \texttt{DST\_SIN}&\text{(domain‑separation tag)}\\[2pt]
 \mathbb{F}_p &\text{base field of the Pallas curve}\\[2pt]
 G_{secp256k1}   = (G_{x},G_{y})                     &\text{(generator point secp256k1)}\\
 \ell = \texttt{CURVE\_ORDER}            &\text{(sub‑group order)}
@@ -318,16 +326,6 @@ Note Commitments `cm` are also is disclosed publicly during claiming. They are d
 > q: how can we actually implement a note-commitment tree given our specification, and taking into account possible discrepencies with
 > note-commitment generation timing between multiple parties?\
 > a: user maintains their own note-commitment tree, and requires the network to work together to allow users to keep track of notes that have been spent to allocate the value to them. This is only used when genesis notes are split into sub-notes, which is not in spec for the inital MVP, but will be a useful iteration for true private out of band notes
-
-### Hashing Functions
-
-#### Posiedon
-
-For effecieny in-circuit hashing, we are using Posiedon as the hkdf hashing algorithm. Poseidon is a ZK-friendly hash function used for nullifier derivation, note commitments.
-
-#### Blake3
-
-For effecieny out of circuit, used as abci-like interface between token-denominations and inputs for `nd` into the circuit. Extremely , and we specifically drop 3 bits from the hash when describing an input, since the hashed values is a public known value we do not worry about the impact of collison resisance that occurs, and just specificy protocols to keep a map dedicated to the original values and their trimmed-hash representations.
 
 > **q: do we damage the blinding of the rest of the inputs to the hashing function due to some being public and some being private?**
 >

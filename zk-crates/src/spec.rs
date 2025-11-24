@@ -9,6 +9,7 @@ use pasta_curves::arithmetic::CurveExt;
 use pasta_curves::{arithmetic::CurveAffine, pallas};
 use subtle::{ConditionallySelectable, CtOption};
 
+use crate::address::RecpAddr;
 use crate::constants::DST_HKDF;
 use crate::keys::EligibleSk;
 use crate::note::Rho;
@@ -154,11 +155,9 @@ pub(crate) fn prf_pallas_m(
 }
 
 /// Convert a `NoteDenom` into a field element by hashing its byte payload.
-pub(crate) fn denom_to_base(nd: &NoteDenom) -> pallas::Base {
+pub(crate) fn nd_to_fp(nd: &NoteDenom) -> pallas::Base {
     let mut inputs = [pallas::Base::zero(); MAX_DENOM_LEN];
-    for (i, &b) in nd.as_bytes()[..nd.len_inner() as usize].iter().enumerate() {
-        // Simple conversion: a byte → the scalar `b` in the field.
-        // `Base::from` is available via the `From<u64>` impl.
+    for (i, &b) in nd.as_bytes()[..MAX_DENOM_LEN as usize].iter().enumerate() {
         inputs[i] = pallas::Base::from(b as u64);
     }
 
@@ -170,6 +169,17 @@ pub(crate) fn denom_to_base(nd: &NoteDenom) -> pallas::Base {
         2, // rounds = 2 (full rounds per the spec)
     >::init()
     .hash(inputs)
+}
+/// Convert a `RecpAddr` into a field element by hashing its byte payload.\
+/// posiedon params: width = 3 (t = 3) // rounds = 2 (full rounds per the spec)
+pub(crate) fn recp_to_fp(ra: &RecpAddr) -> pallas::Base {
+    let mut ini = [pallas::Base::zero(); MAX_DENOM_LEN];
+    for (i, &ni) in ra.to_bytes()[..MAX_DENOM_LEN as usize].iter().enumerate() {
+        ini[i] = pallas::Base::from(ni as u64);
+    }
+
+    poseidon::Hash::<_, poseidon::P128Pow5T3, poseidon::ConstantLength<MAX_DENOM_LEN>, 3, 2>::init()
+        .hash(ini)
 }
 
 /// Convert e_sk (`EligibleSk`) into a `pallas::Base` scalar

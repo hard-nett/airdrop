@@ -1,19 +1,16 @@
-use cosmwasm_std::Addr;
-use ff::{FromUniformBytes, PrimeField};
-use group::GroupEncoding;
+use ff::PrimeField;
+
 use pasta_curves::pallas;
-use rand::rngs::StdRng;
-use rand::{RngCore, SeedableRng};
+use rand::RngCore;
 use subtle::CtOption;
 pub(crate) mod commitment;
 pub mod scripts;
 pub use self::commitment::{ExtractedNoteCommitment, NoteCommitment};
-use crate::address::HeadstashAddr;
-use crate::keys::{EligiblePk, EligibleSk, FullViewingKey, NullifierDerivingKey, SpendingKey};
+use crate::address::RecpAddr;
+use crate::keys::{EligibleSk, NullifierDerivingKey};
 use crate::prf_expand::PrfExpand;
 use crate::spec::{prf_nf, to_base, to_scalar, NonZeroPallasScalar};
 use crate::value::{NoteDenom, NoteValue};
-use redjubjub::{Binding, Signature, SigningKey, VerificationKey};
 
 pub(crate) mod nullifier;
 pub use self::nullifier::Nullifier;
@@ -124,8 +121,8 @@ impl RandomSeed {
 /// A discrete amount of funds received by an address.
 #[derive(Debug, Copy, Clone)]
 pub struct Note {
-    /// The recipient of the funds. is a raw CanonicalAddr
-    recp: HeadstashAddr,
+    /// The recp of the funds. is a raw CanonicalAddr
+    recp: RecpAddr,
     /// The value of this note.
     v: NoteValue,
     /// The token denomination of this note
@@ -134,16 +131,9 @@ pub struct Note {
     rho: Rho,
     /// The seed randomness for various note components.
     rseed: RandomSeed,
-    /// The private key of the eligible_addr
     e_sk: EligibleSk,
-    e_pk: EligiblePk,
-    // /// The nullifier of this note
-    // // nul: HeadstashAddr,
-    // sig_jub: JubJubSignature,
     /// fixed_denomination_index of a genesis note (exists for genesis leaf uniqueness)
     fdi: u64,
-    // /// H(amount‖denom‖fdi‖elig_sk)
-    // m: HeadstashAddr,
 }
 
 // impl PartialEq for Note {
@@ -172,13 +162,11 @@ impl Note {
     ///
     /// [Section 4.19]: https://zips.z.cash/protocol/protocol.pdf#saplingandorchardinband
     pub fn from_parts(
-        recp: HeadstashAddr,
+        recp: RecpAddr,
         v: NoteValue,
         nd: NoteDenom,
         fdi: u64,
         e_sk: EligibleSk,
-        e_pk: EligiblePk,
-
         rho: Rho,
         rseed: RandomSeed,
     ) -> CtOption<Self> {
@@ -189,7 +177,6 @@ impl Note {
             rseed,
             nd,
             e_sk,
-            e_pk,
             fdi,
             // m: todo!(),
         };
@@ -202,23 +189,21 @@ impl Note {
     ///
     /// [orchardsend]: https://zips.z.cash/protocol/nu5.pdf#orchardsend
     pub(crate) fn new(
-        recipient: HeadstashAddr,
+        recp: RecpAddr,
         value: NoteValue,
         rho: Rho,
         nd: NoteDenom,
         fdi: u64,
         e_sk: EligibleSk,
-        e_pk: EligiblePk,
         mut rng: impl RngCore,
     ) -> Self {
         loop {
             let note = Note::from_parts(
-                recipient,
+                recp,
                 value,
                 nd,
                 fdi,
                 e_sk,
-                e_pk,
                 rho,
                 RandomSeed::random(&mut rng, &rho),
             );
@@ -228,21 +213,21 @@ impl Note {
         }
     }
 
-    // /// Generates a dummy spent note.
-    // ///
-    // /// Defined in [Zcash Protocol Spec § 4.8.3: Dummy Notes (Orchard)][orcharddummynotes].
-    // ///
-    // /// [orcharddummynotes]: https://zips.z.cash/protocol/nu5.pdf#orcharddummynotes
+    /// Generates a dummy spent note.
+    ///
+    /// Defined in [Zcash Protocol Spec § 4.8.3: Dummy Notes (Orchard)][orcharddummynotes].
+    ///
+    /// [orcharddummynotes]: https://zips.z.cash/protocol/nu5.pdf#orcharddummynotes
     // pub(crate) fn dummy(
     //     rng: &mut impl RngCore,
     //     rho: Option<Rho>,
     // ) -> (SpendingKey, FullViewingKey, Self) {
     //     let sk = SpendingKey::random(rng);
     //     let fvk: FullViewingKey = (&sk).into();
-    //     let recipient = fvk.address_at(0u32, Scope::External);
+    //     let recp = fvk.address_at(0u32, Scope::External);
 
     //     let note = Note::new(
-    //         recipient,
+    //         recp,
     //         NoteValue::zero(),
     //         rho.unwrap_or_else(|| Rho::from_nf_old(Nullifier::dummy(rng))),
     //         rng,
@@ -251,8 +236,8 @@ impl Note {
     //     (sk, fvk, note)
     // }
 
-    /// Returns the recipient of this note.
-    pub fn recipient(&self) -> HeadstashAddr {
+    /// Returns the recp of this note.
+    pub fn recp(&self) -> RecpAddr {
         self.recp
     }
 
@@ -297,12 +282,22 @@ impl Note {
         )
     }
 
+    /// Derives the nullifier key for this note.
+    pub fn nk(&self, rho: Rho) -> NullifierDerivingKey {
+        NullifierDerivingKey::derive_from(self.e_sk, rho)
+    }
     /// Derives the nullifier for this note.
     pub fn nullifier(&self) -> Nullifier {
-        Nullifier::derive(self.fdi, self.v, self.nd, self.e_sk)
+        Nullifier::derive(
+            self.nk(self.rho()),
+            self.fdi,
+            self.v,
+            self.nd,
+            self.e_sk.e_pk(),
+        )
     }
 
-    /// Derives the message being signed by the jubjub key. Uses the posiedon hashing function
+    /// Derives the input to the hkdf function for the nullifier. Uses the posiedon hashing function
     pub fn message(&self) {}
 
     /// Derives m. Uses the posiedon hashing function

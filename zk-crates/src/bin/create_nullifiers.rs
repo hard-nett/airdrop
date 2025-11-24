@@ -5,11 +5,11 @@ use hkdf::Hkdf;
 use k256::sha2::Sha256;
 use pasta_curves::pallas::{self, Base};
 use rand_core::OsRng;
-use secp256k1::SecretKey as SecpSecretKey;
+use secp256k1::{Secp256k1, SecretKey as SecpSecretKey};
 use serde_json::Value;
 use zk_crates::{
-    address::HeadstashAddr,
-    keys::{EligibleSk, FullViewingKey, JubJubKey},
+    address::RecpAddr,
+    keys::{EligiblePk, EligibleSk, FullViewingKey},
     note::{scripts::NoteTemplate, Note, RandomSeed, Rho},
     value::{NoteDenom, NoteValue},
 };
@@ -99,21 +99,22 @@ fn find_fdi(input_path: &str, token: &str, amount: &str) -> Result<u64, BoxError
 /// # ex:  cargo run --bin create_nullifiers -- 0x0000000000000000000000000000000000000000 uterp 100
 /// cargo run --bin create_nullifier -- <elig_addr> <token-denom> <amount>
 /// ```
-///  Derives a nullifier, which is a pallas curve point derived from the hkdf used with an `elig_sk`,
+///  Derives a nullifier, which is a pallas curve point derived from the hkdf used with an `e_sk`,
 fn main() -> Result<(), BoxError> {
     let (input_file, token_str, amount_str) = get_input_path()?;
     let input_path = &format!("./data/notes/{}.json", input_file);
     let output_dir = std::path::Path::new("./data/spent-notes");
     let output_file = output_dir.join(&format!("{}.json", input_file));
-    let fdi = find_fdi(&input_path, &token_str, &amount_str)?;
 
-    let mnemonic = "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about";
-    let seed = derive_secp256k1_seed_from_mnemonic(mnemonic);
-    let eth_sk = eth_secret_from_seed(&seed);
-    let elig_sk = EligibleSk::from_sk(eth_sk);
     let rho = rho_from_secure_random();
     let rseed = RandomSeed::from_bytes(headstash_randomness::ultra_secure_random(), &rho).unwrap();
-    let nul_sk = JubJubKey::derive_from_elig_sk(elig_sk, rho);
+
+    let mnemonic = "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about";
+    let e_sk = EligibleSk::from(eth_secret_from_seed(&derive_secp256k1_seed_from_mnemonic(
+        mnemonic,
+    )));
+
+    let fdi = find_fdi(&input_path, &token_str, &amount_str)?;
     let nd = NoteDenom::from_str(&token_str)?;
     let v = NoteValue::from_raw(
         amount_str
@@ -123,7 +124,7 @@ fn main() -> Result<(), BoxError> {
 
     // cosmwasm chain mock dependencies
     let mock_deps = mock_dependencies();
-    let recipient = HeadstashAddr::try_from(
+    let recp = RecpAddr::try_from(
         mock_deps
             .api
             .addr_canonicalize(
@@ -135,9 +136,10 @@ fn main() -> Result<(), BoxError> {
             .unwrap(),
     )?;
 
-    let note = Note::from_parts(recipient, v, nd, fdi, elig_sk, nul_sk, rho, rseed).unwrap();
+    let note =
+        Note::from_parts(recp, v, nd, fdi, e_sk, rho, rseed).expect("note composition error");
 
-    println!("recipient: {:#?}", recipient.to_canonical().to_string());
+    println!("recp: {:#?}", recp.to_canonical().to_string());
     println!("note.commitment(): {:#?}", note.commitment());
     println!("note.rho(): {:#?}", note.rho());
     println!("note.rseed(): {:#?}", hex::encode(note.rseed().as_bytes()));
@@ -168,5 +170,5 @@ fn main() -> Result<(), BoxError> {
 
 // TEST:
 // nullifier should not be impacted by randomness inputs
-// nullifier should change with different elig_sk/e_pk
+// nullifier should change with different e_sk/e_pk
 //

@@ -8,7 +8,7 @@ use pasta_curves::pallas;
 
 /// Maximum note value.
 pub const MAX_NOTE_VALUE: u64 = u64::MAX;
-pub const MAX_DENOM_LEN: usize = 128;
+pub const MAX_DENOM_LEN: usize = 32;
 
 /// The valid range of the scalar multiplication used in ValueCommit^Orchard.
 ///
@@ -34,29 +34,47 @@ impl std::error::Error for OverflowError {}
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct NoteDenom {
     bytes: [u8; MAX_DENOM_LEN],
-    len: u8, // stored as `u8` because `MAX_DENOM_LEN <= 255`
 }
 
+/// Return the padded value used in proof generation (posiedon h
 impl NoteDenom {
-    /// Return the stored string as `&str`.
-    pub fn as_str(&self) -> &str {
-        // SAFETY: we only ever construct a `NoteDenom` from a valid UTF‑8
-        // string (see `FromStr`), so this slice is always valid.
-        let slice = &self.bytes[..self.len as usize];
-        std::str::from_utf8(slice).expect("invalid UTF‑8 in NoteDenom")
+    /// Return the padded value used in proof generation (posiedon hash with bit-trim for field note denom field inclusion).
+    /// Clear the top three bits of the first byte to get 253-bit field element (pallas)\
+    /// 0x1F = 00011111 in binary (clears top 3 bits)
+    pub fn new_for_proof(denom: &str) -> Self {
+        let hash = Self::hash(denom);
+        let mut bytes = *hash.as_bytes();
+
+        bytes[0] &= 0x1F;
+        // Convert to NoteDenom type (assuming NoteDenom wraps [u8; 32])
+        NoteDenom { bytes }
     }
+
+    pub fn hash(denom: &str) -> blake3::Hash {
+        // Hash the denomination string with Blake3
+        let mut hasher = blake3::Hasher::new();
+        hasher.update(denom.as_bytes());
+        hasher.finalize()
+    }
+
+    pub fn as_str_for_proof(&self) -> String {
+        blake3::Hash::from_bytes(self.bytes).to_string()
+    }
+
+    // pub fn as_str(&self) -> &str {
+    //     // SAFETY: we only ever construct a `NoteDenom` from a valid UTF‑8
+    //     // string (see `FromStr`), so this slice is always valid.
+    //     let slice = &self.bytes[..self.len as usize];
+    //     std::str::from_utf8(slice).expect("invalid UTF‑8 in NoteDenom")
+    // }
 
     /// Return the raw bytes (including unused trailing zeros).
     pub fn as_bytes(&self) -> &[u8] {
-        &self.bytes[..self.len as usize]
+        &self.bytes
     }
     /// Return the raw bytes (including unused trailing zeros).
     pub fn max_len() -> usize {
         MAX_DENOM_LEN
-    }
-    /// Return the raw bytes (including unused trailing zeros).
-    pub fn len_inner(&self) -> usize {
-        self.len as usize
     }
 }
 
@@ -64,7 +82,6 @@ impl Default for NoteDenom {
     fn default() -> Self {
         Self {
             bytes: [0u8; MAX_DENOM_LEN],
-            len: 0,
         }
     }
 }
@@ -73,7 +90,7 @@ impl Default for NoteDenom {
 // Pretty‑printing (e.g. with `println!("{:?}", denom)` or `format!`)
 impl fmt::Display for NoteDenom {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self.as_str())
+        write!(f, "{}", self.as_str_for_proof())
     }
 }
 
@@ -82,22 +99,8 @@ impl fmt::Display for NoteDenom {
 impl std::str::FromStr for NoteDenom {
     type Err = String; // simple error type; change to a custom error if desired
 
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let bytes = s.as_bytes();
-        if bytes.len() > MAX_DENOM_LEN {
-            return Err(format!(
-                "denomination too long (max {} bytes): {}",
-                MAX_DENOM_LEN, s
-            ));
-        }
-
-        let mut arr = [0u8; MAX_DENOM_LEN];
-        arr[..bytes.len()].copy_from_slice(bytes);
-
-        Ok(NoteDenom {
-            bytes: arr,
-            len: bytes.len() as u8,
-        })
+    fn from_str(ds: &str) -> Result<Self, Self::Err> {
+        Ok(Self::new_for_proof(ds))
     }
 }
 
@@ -114,6 +117,11 @@ impl NoteValue {
     /// Returns the raw underlying value.
     pub fn inner(&self) -> u64 {
         self.0
+    }
+    
+    /// represents `v` as its pallas curve point equivalent.
+    pub(crate) fn to_fp_pallas(self) -> pallas::Base {
+        pallas::Base::from(self.0)
     }
 
     /// Creates a note value from its raw numeric value.

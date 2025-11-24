@@ -64,7 +64,7 @@ macro_rules! with_inputs {
 }
 
 impl PrfExpand<()> {
-    pub const SAPLING_ASK: Self = Self::new(0x00);
+    pub const HEADSTASH_NK: Self = Self::new(0x00);
     pub const SAPLING_NSK: Self = Self::new(0x01);
     pub const SAPLING_OVK: Self = Self::new(0x02);
     pub const SAPLING_RCM: Self = Self::new(0x04);

@@ -3,6 +3,7 @@ use std::{
     path::Path,
     {env, fs},
 };
+use zk_crates::deploy::suite::{TerpHeadstash, TerpHeadstashActions};
 
 fn get_cli_args() -> Result<(String, String), Box<dyn std::error::Error>> {
     let args: Vec<String> = env::args().collect();
@@ -29,7 +30,7 @@ fn get_cli_args() -> Result<(String, String), Box<dyn std::error::Error>> {
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let (input_path, addr_target) = get_cli_args()?;
     let input_data: Value = serde_json::from_str(&fs::read_to_string(&input_path)?)?;
-
+    // TerpHeadstash::gen_headstash_tree(&self, input);
     let mut address_notes = serde_json::Map::new();
 
     if let Value::Object(map) = &input_data {

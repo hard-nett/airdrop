@@ -5,7 +5,7 @@ pub mod keys;
 pub mod note;
 pub mod prf_expand;
 mod spec;
-mod tree;
+pub mod tree;
 pub mod value;
 
 // pub mod plume;

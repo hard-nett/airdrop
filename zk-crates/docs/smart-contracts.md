@@ -16,7 +16,7 @@ Single smart contract for creating multiple headstash contract instances.
   - existing: ensure contract has balance dedicated to user
 - acts as registry for headstash to query:
   - filter by creators, name, tokens, parameters, etc.
-- smart-account authentication support: wire in authenticator for DAOs and accounts
+- smart-account authentication support: wire in authenticator for DAOs and accounts to register 
 
 ### Creating New Headstash
 

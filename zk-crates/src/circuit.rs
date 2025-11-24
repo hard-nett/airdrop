@@ -38,8 +38,8 @@ use crate::{
         MERKLE_DEPTH_HEADSTASH,
     },
     keys::NullifierDerivingKey,
-    note::{NoteCommitment, Rho},
-    tree::MerkleHashHeadstash,
+    note::{ExtractedNoteCommitment, NoteCommitment, Nullifier, Rho},
+    tree::{Anchor, MerkleHashHeadstash},
 };
 
 // Absolute offsets for public inputs.
@@ -69,7 +69,7 @@ pub struct HeadstashConfig {
 
 /// The Headstash Action circuit.
 #[derive(Clone, Debug, Default)]
-pub struct Circuit {
+pub struct HeadstashCircuit {
     // Merkle path witnesses
     pub(crate) path: Value<[MerkleHashHeadstash; MERKLE_DEPTH_HEADSTASH]>,
     pub(crate) pos: Value<u32>,
@@ -93,10 +93,10 @@ pub struct Circuit {
     // Public inputs
     pub(crate) v: Value<pallas::Base>,    // Note value
     pub(crate) nd: Value<pallas::Base>,   // Note denomination (blake3 hash)
-    pub(crate) recp: Value<pallas::Base>, // Recipient address
+    pub(crate) recp: Value<pallas::Base>, // recp address
 }
 
-impl plonk::Circuit<pallas::Base> for Circuit {
+impl plonk::Circuit<pallas::Base> for HeadstashCircuit {
     type Config = HeadstashConfig;
     type FloorPlanner = floor_planner::V1;
 
@@ -247,6 +247,16 @@ impl plonk::Circuit<pallas::Base> for Circuit {
         // // Construct the ECC chip.
         let ecc_chip = config.ecc_chip();
 
+        // 1. CONSTRAINT: Foreign-field (secp256k1) key pairing
+        // Prove e_pk = e_sk * G_secp256k1 using CRT representation (3x88-bit limbs)
+        let secp256k1_chip = Secp256k1Chip::construct(config.secp256k1.clone());
+        let (e_sk_crt, (_e_pk_x_crt, _e_pk_y_crt)) = secp256k1_chip.prove_key_pairing(
+            layouter.namespace(|| "secp256k1 key pairing: e_pk = e_sk * G"),
+            self.e_sk,
+            self.e_pk_x,
+            self.e_pk_y,
+        )?;
+
         // // Witness private inputs that are used across multiple checks.
         let (psi, rho, nk, cm, fdi, v, nd, recp) = {
             // Witness psi
@@ -303,16 +313,6 @@ impl plonk::Circuit<pallas::Base> for Circuit {
             (psi, rho, nk, cm, fdi, v, nd, recp)
         };
 
-        // 1. CONSTRAINT: Foreign-field (secp256k1) key pairing
-        // Prove e_pk = e_sk * G_secp256k1 using CRT representation (3x88-bit limbs)
-        let secp256k1_chip = Secp256k1Chip::construct(config.secp256k1.clone());
-        let (e_sk_crt, (_e_pk_x_crt, _e_pk_y_crt)) = secp256k1_chip.prove_key_pairing(
-            layouter.namespace(|| "secp256k1 key pairing: e_pk = e_sk * G"),
-            self.e_sk,
-            self.e_pk_x,
-            self.e_pk_y,
-        )?;
-
         // 2. Merkle path validity check (GENESIS DISTRIBUTION INCLUSION).
         let root = {
             let path = self
@@ -351,7 +351,215 @@ impl plonk::Circuit<pallas::Base> for Circuit {
         // q: have we constrained `nk` is hash-derived from the provided values?
         // q: have we constrained the pairing of `(e_sk,e_pk)`?
 
-
         Ok(())
+    }
+}
+
+/// Public inputs to the Orchard Action circuit.
+#[derive(Clone, Debug)]
+pub struct Instance {
+    // pub(crate) cv_net: ValueCommitment,
+    pub(crate) anchor: Anchor,
+    pub(crate) nf_old: Nullifier,
+    pub(crate) cmx: ExtractedNoteCommitment,
+    // pub(crate) rk: VerificationKey<SpendAuth>,
+    // pub(crate) enable_spend: bool,
+    // pub(crate) enable_output: bool,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ff::{Field, PrimeField};
+    use halo2_base::halo2_proofs::halo2curves::secp256k1::{Fp as Secp256k1Fp, Fq as Secp256k1Fq};
+    use halo2_proofs::{dev::MockProver, plonk::Circuit};
+    use pasta_curves::pallas;
+    use rand::rngs::OsRng;
+    use secp256k1::{PublicKey, Secp256k1, SecretKey};
+
+    use crate::{
+        keys::{EligibleSk, NullifierDerivingKey},
+        note::{NoteCommitment, Rho},
+        tree::MerkleHashHeadstash,
+        value::{NoteDenom, NoteValue},
+    };
+
+    /// Degree for testing (2^18 = 262,144 rows for foreign field ops)
+    const K: u32 = 18;
+
+    /// Helper to generate a valid circuit instance using Note template
+    fn generate_valid_circuit() -> HeadstashCircuit {
+        use crate::{
+            address::RecpAddr,
+            keys::{EligiblePk, EligibleSk},
+            note::{Note, RandomSeed},
+        };
+        use cosmwasm_std::{testing::mock_dependencies, Api};
+        use ff::FromUniformBytes;
+
+        // 1. Generate secp256k1 key pair (e_sk, e_pk)
+        let e_sk_bytes = [
+            0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e,
+            0x0f, 0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18, 0x19, 0x1a, 0x1b, 0x1c,
+            0x1d, 0x1e, 0x1f, 0x20,
+        ];
+
+        let e_sk_secp = SecretKey::from_slice(&e_sk_bytes).expect("valid secret key");
+        let e_sk = EligibleSk::from(e_sk_secp);
+
+        // 2. Generate randomness (rho, rseed, psi)
+        let mut randomness_64 = [0; 64];
+        blake3::Hasher::new()
+            .update(&[0u8; 32]) // deterministic for testing
+            .finalize_xof()
+            .fill(&mut randomness_64);
+
+        let rho =
+            Rho::from_bytes(&pallas::Base::from_uniform_bytes(&randomness_64).to_repr()).unwrap();
+        let rseed = RandomSeed::from_bytes([1u8; 32], &rho).unwrap();
+
+        // 3. Note parameters
+        let v = NoteValue::from_raw(100);
+        let nd = NoteDenom::new_for_proof("TEST_DENOM");
+        let fdi = 0u64;
+
+        // 4. Create recp address
+        let mock_deps = mock_dependencies();
+        let recp = RecpAddr::try_from(
+            mock_deps
+                .api
+                .addr_canonicalize(
+                    &mock_deps
+                        .api
+                        .addr_make(&format!("test{}", hex::encode(rho.into_inner().to_repr())))
+                        .to_string(),
+                )
+                .unwrap(),
+        )
+        .unwrap();
+
+        // 5. Create Note - this derives nk, cm, nullifier automatically
+        let note = Note::from_parts(recp, v, nd, fdi, e_sk, rho, rseed).unwrap();
+
+        // 6. Extract secp256k1 coordinates for circuit
+        let secp = Secp256k1::new();
+        let e_pk_secp = PublicKey::from_secret_key(&secp, &e_sk_secp);
+        let e_pk_bytes = e_pk_secp.serialize_uncompressed();
+        let e_pk_x_bytes: [u8; 32] = e_pk_bytes[1..33].try_into().unwrap();
+        let e_pk_y_bytes: [u8; 32] = e_pk_bytes[33..65].try_into().unwrap();
+
+        let e_sk_fq = Secp256k1Fq::from_repr(e_sk_bytes).expect("valid Fq");
+        let e_pk_x = Secp256k1Fp::from_repr(e_pk_x_bytes).expect("valid Fp");
+        let e_pk_y = Secp256k1Fp::from_repr(e_pk_y_bytes).expect("valid Fp");
+
+        // 7. Derive nk using HKDF
+        let nk = NullifierDerivingKey::derive_from(e_sk, rho);
+
+        let mut sin_root = pallas::Base::from_repr("".as_bytes().try_into().unwrap())
+            .expect("field conversion error");
+
+        // let path = MerkleHashHeadstash::from(crate::tree::MerkleHashHeadstash(sin_root));
+        // 8. Create dummy Merkle path (for testing)
+        let path = [MerkleHashHeadstash::from_cmx(
+            &ExtractedNoteCommitment::from_bytes(&pallas::Base::one().to_repr())
+                .expect("sinsemialla headstash tree root derivation error"),
+        ); MERKLE_DEPTH_HEADSTASH];
+        let pos = 0u32;
+
+        HeadstashCircuit {
+            path: Value::known(path),
+            pos: Value::known(pos),
+            psi: Value::known(note.rseed().psi(&rho)),
+            rho: Value::known(rho),
+            cm: Value::known(note.commitment()),
+            e_sk: Value::known(e_sk_fq),
+            e_pk_x: Value::known(e_pk_x),
+            e_pk_y: Value::known(e_pk_y),
+            nk: Value::known(nk),
+            fdi: Value::known(pallas::Base::from(fdi)),
+            v: Value::known(v.to_fp_pallas()),
+            nd: Value::known(crate::spec::nd_to_fp(&nd)),
+            recp: Value::known(note.recp().to_pallas()),
+        }
+    }
+
+    #[test]
+    fn test_valid_headstash_circuit() {
+        let circuit = generate_valid_circuit();
+
+        // Run MockProver
+        let prover = MockProver::run(K, &circuit, vec![vec![]]).expect("prover should run");
+
+        // Verify
+        match prover.verify() {
+            Ok(()) => println!("✓ Valid Headstash circuit verified successfully"),
+            Err(e) => {
+                eprintln!("✗ Circuit verification failed:");
+                for err in e.iter() {
+                    eprintln!("  - {:?}", err);
+                }
+                panic!("Valid circuit should verify");
+            }
+        }
+    }
+
+    #[test]
+    #[should_panic(expected = "should verify")]
+    fn test_invalid_key_pairing_fails() {
+        let mut circuit = generate_valid_circuit();
+
+        // Tamper with public key
+        let secp = Secp256k1::new();
+        let wrong_sk = SecretKey::from_byte_array([0u8; 32]).expect("valid secret key");
+        let wrong_pk = PublicKey::from_secret_key(&secp, &wrong_sk);
+
+        let wrong_pk_bytes = wrong_pk.serialize_uncompressed();
+        let wrong_pk_x_bytes: [u8; 32] = wrong_pk_bytes[1..33].try_into().unwrap();
+        let wrong_pk_y_bytes: [u8; 32] = wrong_pk_bytes[33..65].try_into().unwrap();
+
+        circuit.e_pk_x = Value::known(Secp256k1Fp::from_repr(wrong_pk_x_bytes).unwrap());
+        circuit.e_pk_y = Value::known(Secp256k1Fp::from_repr(wrong_pk_y_bytes).unwrap());
+
+        let prover = MockProver::run(K, &circuit, vec![vec![]]).expect("prover should run");
+        prover.verify().expect("should verify");
+    }
+
+    #[test]
+    fn test_circuit_without_witnesses() {
+        let circuit = generate_valid_circuit();
+        let circuit_no_witnesses = circuit.without_witnesses();
+
+        let prover = MockProver::run(K, &circuit_no_witnesses, vec![vec![]]);
+        assert!(
+            prover.is_ok(),
+            "Circuit without witnesses should be constructable"
+        );
+    }
+
+    #[test]
+    fn test_circuit_configuration() {
+        use halo2_proofs::plonk::ConstraintSystem;
+        let mut cs = ConstraintSystem::<pallas::Base>::default();
+        let config = HeadstashCircuit::configure(&mut cs);
+
+        println!("Circuit configuration:");
+        println!("  - Advice columns: {}", config.advices.len());
+        assert_eq!(config.advices.len(), 10, "Should have 10 advice columns");
+    }
+
+    #[test]
+    fn test_circuit_cost() {
+        use halo2_proofs::dev::CircuitCost;
+        use pasta_curves::vesta;
+
+        let circuit = generate_valid_circuit();
+        let cost = CircuitCost::<vesta::Point, _>::measure(K, &circuit);
+
+        println!("\nCircuit cost:");
+        println!("  Degree: 2^{} = {} rows", K, 1 << K);
+        // println!("  Proof size (1 instance): {} bytes", cost.proof_size(1));
+
+        let proof_size = usize::from(cost.proof_size(1));
+        assert!(proof_size > 0, "Proof size should be non-zero");
     }
 }

@@ -136,7 +136,6 @@ impl HeadstashInstance for TerpHeadstash {
     }
 }
 
-
 use num_bigint::BigUint;
 impl HeadstashBitwiseInstance for TerpHeadstash {
     fn bytes_to_bits_le(bytes: &[u8]) -> impl Iterator<Item = bool> + '_ {
@@ -259,7 +258,7 @@ impl HeadstashBitwiseInstance for TerpHeadstash {
         nd: &str,
     ) -> Result<pallas::Base, BoxError> {
         // generate the sum of 3x88bit limbs of e_sk
-        // let sk = EligibleSk::from_sk(SecretKey::from_byte_array(*e_sk)?);
+        // let sk = EligibleSk::from(SecretKey::from_byte_array(*e_sk)?);
         // let secp256k1_ls = self.derive_secp256k1_limbs_sum_const_time(limbs)
 
         // ensure fdi & v are fully padded
@@ -267,7 +266,7 @@ impl HeadstashBitwiseInstance for TerpHeadstash {
         let v = self.derive_v(v);
 
         // posiedon hash nd
-        let nd = crate::spec::denom_to_base(&NoteDenom::from_str(nd).unwrap());
+        let nd = &NoteDenom::from_str(nd)?;
 
         // derive m as hash of ()
         Ok(pallas::Base::one())
