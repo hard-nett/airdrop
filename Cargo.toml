@@ -1,8 +1,16 @@
 [workspace]
 resolver = "2"
-members = ["zk-crates","libs/randomness","proto"]
+members = [
+    "zk-crates/snap-n-pull",
+    "zk-crates/zk-headstash",
+    "zk-crates/cw-headstash",
+    "pub-crates/randomness",
+    "proto"
+    ]
 
 [workspace.package]
-version    = "0.0.1"
+edition = "2021"
+version = "0.0.1"
+
 
 [workspace.dependencies]

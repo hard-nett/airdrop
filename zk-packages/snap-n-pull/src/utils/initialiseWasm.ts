@@ -1,6 +1,5 @@
-import type { InitOutput } from '@chainsafe/webzjs-keys';
-import { initSync } from '@chainsafe/webzjs-keys';
-import wasmDataBase64 from '@chainsafe/webzjs-keys/webzjs_keys_bg.wasm';
+import type { InitOutput, initSync } from '@terpnetwork/snap-n-pull';
+import wasmDataBase64 from '@terpnetwork/snap_n_pull.wasm';
 
 export function initialiseWasm(): InitOutput {
   const base64String = wasmDataBase64 as unknown as string;

@@ -1,0 +1,5 @@
+#!/bin/sh
+
+dab:
+## TODO:
+- build wasm-bindgen scripts feature separated in crate

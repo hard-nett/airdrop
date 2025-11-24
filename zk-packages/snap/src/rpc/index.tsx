@@ -1,1 +1,0 @@
-import { initialiseWasm } from './utils/initialiseWasm';
