@@ -1,7 +1,5 @@
 use cosmwasm_std::CanonicalAddr;
 
-use crate::spec::{NonIdentityPallasPoint, diversify_hash};
-
 #[derive(Debug, Copy, Clone)]
 pub struct HeadstashAddr([u8; 32]);
 
@@ -14,14 +12,6 @@ impl HeadstashAddr {
     pub fn to_canonical(&self) -> CanonicalAddr {
         CanonicalAddr::from(self.0)
     }
-
-    pub(crate) fn g_d(&self) -> NonIdentityPallasPoint {
-        diversify_hash(&self.0)
-    }
-
-    // pub(crate) fn pk_d(&self) -> &DiversifiedTransmissionKey {
-    //     &self.pk_d
-    // }
 }
 
 impl TryFrom<CanonicalAddr> for HeadstashAddr {

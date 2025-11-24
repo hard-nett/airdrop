@@ -6,7 +6,7 @@ use ff::{PrimeField, PrimeFieldBits};
 use pasta_curves::pallas;
 use subtle::{ConstantTimeEq, CtOption};
 
-use crate::constants::{L_ORCHARD_BASE, NOTE_COMMITMENT_PERSONALIZATION};
+use crate::constants::{DST_CM, L_ORCHARD_BASE};
 use crate::spec::extract_p;
 use crate::value::NoteValue;
 
@@ -37,18 +37,16 @@ impl NoteCommitment {
     /// [concretesinsemillacommit]: https://zips.z.cash/protocol/nu5.pdf#concretesinsemillacommit
     pub fn derive(
         recp: [u8; 32],
-        jub_pk: [u8; 32],
         v: NoteValue,
         rho: pallas::Base,
         psi: pallas::Base,
         rcm: NoteCommitTrapdoor,
     ) -> CtOption<Self> {
-        let domain = sinsemilla::CommitDomain::new(NOTE_COMMITMENT_PERSONALIZATION);
+        let domain = sinsemilla::CommitDomain::new(DST_CM);
         domain
             .commit(
                 iter::empty()
                     .chain(BitArray::<_, Lsb0>::new(recp).iter().by_vals())
-                    .chain(BitArray::<_, Lsb0>::new(jub_pk).iter().by_vals())
                     .chain(v.to_le_bits().iter().by_vals())
                     .chain(rho.to_le_bits().iter().by_vals().take(L_ORCHARD_BASE))
                     .chain(psi.to_le_bits().iter().by_vals().take(L_ORCHARD_BASE)),

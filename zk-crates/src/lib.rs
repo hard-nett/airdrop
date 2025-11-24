@@ -8,5 +8,6 @@ mod spec;
 mod tree;
 pub mod value;
 
+// pub mod plume;
+pub mod deploy;
 pub mod example_circuits;
-

@@ -8,6 +8,7 @@ use crate::constants::fixed_bases::{HeadstashFixedBases, HeadstashFixedBasesFull
 /// SWU hash-to-curve personalization for the Merkle CRH generator
 pub const MERKLE_CRH_PERSONALIZATION: &str = "t.network:Headstash-MerkleCRH";
 pub const LEAF_PERSONALIZATION: &str = "t.network:Headstash-Sinsemilla-leaf";
+pub const DST_ND: &str = "t.network:Headstash-Sinsemilla-nd";
 
 /// Generator used in SinsemillaHashToPoint for note commitment
 pub const Q_NOTE_COMMITMENT_M_GENERATOR: ([u8; 32], [u8; 32]) = (

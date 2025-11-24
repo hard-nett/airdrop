@@ -784,7 +784,7 @@ pub fn generator() -> pallas::Affine {
 
 #[cfg(test)]
 mod tests {
-    use super::super::{super::VALUE_COMMITMENT_PERSONALIZATION, NUM_WINDOWS_SHORT};
+    use super::super::{super::DST_V, NUM_WINDOWS_SHORT};
     use super::*;
     use group::Curve;
     use halo2_gadgets::ecc::chip::constants::{test_lagrange_coeffs, test_zs_and_us};
@@ -795,7 +795,7 @@ mod tests {
 
     #[test]
     fn generator() {
-        let hasher = pallas::Point::hash_to_curve(VALUE_COMMITMENT_PERSONALIZATION);
+        let hasher = pallas::Point::hash_to_curve(DST_V);
         let point = hasher(b"v");
         let coords = point.to_affine().coordinates().unwrap();
 

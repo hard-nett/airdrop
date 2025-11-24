@@ -1,6 +1,4 @@
-// cargo run -- --bin create_genesis_notes ./data/genesis_sinsemilla.json 0x0000000000000000000000000000000000000000
-
-use serde_json::{self, Value, json};
+use serde_json::{self, json, Value};
 use std::{
     path::Path,
     {env, fs},
@@ -17,28 +15,29 @@ fn get_cli_args() -> Result<(String, String), Box<dyn std::error::Error>> {
     }
     Ok((args[1].clone(), args[2].clone()))
 }
+
+/// # create geneisis notes: Sinsemilla HashDomain
+/// - generates default note using posiedon hashing algo & Fixed-Denomination Notes
+/// - loads all balances,
+/// - creates genesis Fixed-Denomination Notes, containing
+///     -  tuple of static value: (1_000_000_000,100_000_000,10_000_000,1_000_000, ..) & index (multiple of notes an key is allocated per static value)\
+///
+///
+/// ```
+///  cargo run -- --bin create_genesis_notes ./data/genesis_sinsemilla.json 0x0000000000000000000000000000000000000000
+/// ```
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let (input_path, addr_target) = get_cli_args()?;
     let input_data: Value = serde_json::from_str(&fs::read_to_string(&input_path)?)?;
-
-    // generates default note using posiedon hashing algo & Fixed-Denomination Notes.
-    // loads all balances, and creates genesis Fixed-Denomination Notes
-    // 1_000_000_000,100_000_000,10_000_000,1_000_000, ..
 
     let mut address_notes = serde_json::Map::new();
 
     if let Value::Object(map) = &input_data {
         if let Some(holdings) = map.get(&addr_target) {
             if let Value::Array(holding_array) = holdings {
-                // ------------------------------------------------------------------
-                // New flow: each holding already contains the concrete leaf values.
-                // ------------------------------------------------------------------
                 for holding in holding_array.iter() {
-                    // token identifier – keep the same field you used before (e.g. name or address)
+                    // token identifier: raw value ("uterp", "ibc/...", "tokenfactory/...")
                     let token_name = holding["name"].as_str().unwrap().to_string();
-
-                    // The total amount field is no longer needed for splitting,
-                    // but we keep it in case you still want to log/validate it.
                     let _total_amount = holding["amount"].as_str().unwrap();
 
                     let leaves = match holding.get("leaves") {
@@ -69,15 +68,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         // ------------------------------------------------------------------
                         generated_notes.push(json!({
                             "m":          "",
-                            "elig_sk":    &addr_target,
-                            "jub_sk":     "",
+                            "e_sk":    &addr_target,
+                            "nul_sk":     "",
                             "sig_jub":    "",
                             "fdi":        fdi,
                             "amount":     amnt.to_string(),
                             "denom":      token_name.clone(),
                             "recp":       "",
-                            "jub_null":   "",
-                            "jub_pk":     "",
+                            "nul":   "",
+                            "e_pk":     "",
                             "ψ":          "",
                             "note_cm":    ""
                         }));

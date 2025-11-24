@@ -1,0 +1,21 @@
+[package]
+name = "zk-headstash"
+version = "0.1.0"
+edition = "2024"
+
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+
+[features]
+default = []
+
+[dependencies]
+cosmwasm-std = { version = "2.2.2", features = ["cosmwasm_1_4", "stargate"] }
+cw-storage-plus = "2.0.0"
+cosmwasm-schema = "2.2.2"
+halo2_proofs = { version = "0.3.1", default-features = false, features = [ ]  } 
+sha2 = "0.10.9"
+
+[dev-dependencies]

@@ -2046,7 +2046,7 @@ mod tests {
             note_commit::{NoteCommitChip, gadgets},
         },
         constants::{
-            HeadstashHashDomains, L_ORCHARD_BASE, L_VALUE, NOTE_COMMITMENT_PERSONALIZATION, T_Q,
+            HeadstashHashDomains, L_ORCHARD_BASE, L_VALUE, DST_CM, T_Q,
             fixed_bases::HeadstashFixedBases, sinsemilla::HeadstashCommitDomains,
         },
         value::NoteValue,
@@ -2266,7 +2266,7 @@ mod tests {
                     rcm_gadget,
                 )?;
                 let expected_cm = {
-                    let domain = CommitDomain::new(NOTE_COMMITMENT_PERSONALIZATION);
+                    let domain = CommitDomain::new(DST_CM);
                     // Hash g★_d || pk★_d || i2lebsp_{64}(v) || rho || psi
                     let lsb = |y_lsb: pallas::Base| y_lsb == pallas::Base::one();
                     let point = self

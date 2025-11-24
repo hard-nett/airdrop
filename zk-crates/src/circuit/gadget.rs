@@ -5,9 +5,10 @@ use halo2_gadgets::ecc::chip::EccChip;
 use halo2_gadgets::ecc::{EccInstructions, FixedPointBaseField, Point, X};
 use halo2_gadgets::poseidon::primitives::ConstantLength;
 use halo2_gadgets::poseidon::{
-    Hash as PoseidonHash, PoseidonSpongeInstructions, Pow5Chip as PoseidonChip,
     primitives::{self as poseidon},
+    Hash as PoseidonHash, PoseidonSpongeInstructions, Pow5Chip as PoseidonChip,
 };
+use halo2_gadgets::sinsemilla::merkle::chip::MerkleChip;
 use pasta_curves::pallas;
 
 use halo2_proofs::{
@@ -15,21 +16,31 @@ use halo2_proofs::{
     plonk::{self, Advice, Assigned, Column},
 };
 
-use crate::circuit::AddChip;
-use crate::constants::fixed_bases::{HeadstashFixedBases, NullifierK};
+use crate::constants::fixed_bases::{HeadstashFixedBases as HFixedBases, NullifierK};
+use crate::constants::sinsemilla::HeadstashCommitDomains as HCommitDomains;
+use crate::constants::HeadstashHashDomains as HashDomain;
 
 pub(in crate::circuit) mod add_chip;
+pub(in crate::circuit) mod bigint;
+pub(in crate::circuit) mod fp_chip;
+pub(in crate::circuit) mod secp256k1_chip;
+
+#[cfg(test)]
+mod tests;
 
 impl super::HeadstashConfig {
     pub(super) fn add_chip(&self) -> add_chip::AddChip {
         add_chip::AddChip::construct(self.add_config.clone())
     }
-    pub(super) fn ecc_chip(&self) -> EccChip<HeadstashFixedBases> {
+    pub(super) fn ecc_chip(&self) -> EccChip<HFixedBases> {
         EccChip::construct(self.ecc_config.clone())
     }
 
     pub(super) fn poseidon_chip(&self) -> PoseidonChip<pallas::Base, 3, 2> {
-        PoseidonChip::construct(self.poseidon_config.clone())
+        PoseidonChip::construct(self.poseidon_cfg.clone())
+    }
+    pub(super) fn merkle_chip(&self) -> MerkleChip<HashDomain, HCommitDomains, HFixedBases> {
+        MerkleChip::construct(self.merkle_cfg.clone())
     }
 }
 
@@ -44,15 +55,16 @@ pub(in crate::circuit) trait AddInstruction<F: Field>: Chip<F> {
     ) -> Result<AssignedCell<F, F>, plonk::Error>;
 }
 
-/// `DeriveNullifier` from [Section 4.16: Note Commitments and Nullifiers].
+/// `DeriveNullifier`:
+/// Derived from nul = H(fdi||v||h_nd||h_elig)
 pub(in crate::circuit) fn derive_nullifier<
     PoseidonChip: PoseidonSpongeInstructions<pallas::Base, poseidon::P128Pow5T3, ConstantLength<2>, 3, 2>,
     AddChip: AddInstruction<pallas::Base>,
     EccChip: EccInstructions<
-            pallas::Affine,
-            FixedPoints = HeadstashFixedBases,
-            Var = AssignedCell<pallas::Base, pallas::Base>,
-        >,
+        pallas::Affine,
+        FixedPoints = HFixedBases,
+        Var = AssignedCell<pallas::Base, pallas::Base>,
+    >,
 >(
     mut layouter: impl Layouter<pallas::Base>,
     poseidon_chip: PoseidonChip,
@@ -65,13 +77,9 @@ pub(in crate::circuit) fn derive_nullifier<
 ) -> Result<X<pallas::Affine, EccChip>, plonk::Error> {
     // hash = poseidon_hash(nk, rho)
     let hash = {
-        let poseidon_message = [nk, rho];
         let poseidon_hasher =
             PoseidonHash::init(poseidon_chip, layouter.namespace(|| "Poseidon init"))?;
-        poseidon_hasher.hash(
-            layouter.namespace(|| "Poseidon hash (nk, rho)"),
-            poseidon_message,
-        )?
+        poseidon_hasher.hash(layouter.namespace(|| "Poseidon hash (nk, rho)"), [nk, rho])?
     };
 
     // Add hash output to psi.
@@ -84,7 +92,6 @@ pub(in crate::circuit) fn derive_nullifier<
 
     // Multiply scalar by NullifierK
     // `product` = [poseidon_hash(nk, rho) + psi] NullifierK.
-    //
     let product = {
         let nullifier_k = FixedPointBaseField::from_inner(ecc_chip, NullifierK);
         nullifier_k.mul(
@@ -92,6 +99,7 @@ pub(in crate::circuit) fn derive_nullifier<
             scalar,
         )?
     };
+
     // Add cm to multiplied fixed base to get nf
     // cm + [poseidon_output + psi] NullifierK
     cm.add(layouter.namespace(|| "nf"), &product)

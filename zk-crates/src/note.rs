@@ -9,12 +9,9 @@ pub(crate) mod commitment;
 pub mod scripts;
 pub use self::commitment::{ExtractedNoteCommitment, NoteCommitment};
 use crate::address::HeadstashAddr;
-use crate::keys::{
-    EligibleSk, FullViewingKey, JubJubKey, JubJubMessage, JubJubSignature, NullifierDerivingKey,
-    SpendingKey,
-};
+use crate::keys::{EligiblePk, EligibleSk, FullViewingKey, NullifierDerivingKey, SpendingKey};
 use crate::prf_expand::PrfExpand;
-use crate::spec::{NonZeroPallasScalar, prf_nf, to_base, to_scalar};
+use crate::spec::{prf_nf, to_base, to_scalar, NonZeroPallasScalar};
 use crate::value::{NoteDenom, NoteValue};
 use redjubjub::{Binding, Signature, SigningKey, VerificationKey};
 
@@ -138,11 +135,10 @@ pub struct Note {
     /// The seed randomness for various note components.
     rseed: RandomSeed,
     /// The private key of the eligible_addr
-    elig_sk: EligibleSk,
-    /// The private key of the HKDF jubjub keypair
-    jub_sk: JubJubKey,
+    e_sk: EligibleSk,
+    e_pk: EligiblePk,
     // /// The nullifier of this note
-    // // jub_null: HeadstashAddr,
+    // // nul: HeadstashAddr,
     // sig_jub: JubJubSignature,
     /// fixed_denomination_index of a genesis note (exists for genesis leaf uniqueness)
     fdi: u64,
@@ -180,8 +176,9 @@ impl Note {
         v: NoteValue,
         nd: NoteDenom,
         fdi: u64,
-        elig_sk: EligibleSk,
-        jub_sk: JubJubKey,
+        e_sk: EligibleSk,
+        e_pk: EligiblePk,
+
         rho: Rho,
         rseed: RandomSeed,
     ) -> CtOption<Self> {
@@ -191,8 +188,8 @@ impl Note {
             rho,
             rseed,
             nd,
-            elig_sk,
-            jub_sk,
+            e_sk,
+            e_pk,
             fdi,
             // m: todo!(),
         };
@@ -209,9 +206,9 @@ impl Note {
         value: NoteValue,
         rho: Rho,
         nd: NoteDenom,
-        jub_sk: JubJubKey,
         fdi: u64,
-        elig_sk: EligibleSk,
+        e_sk: EligibleSk,
+        e_pk: EligiblePk,
         mut rng: impl RngCore,
     ) -> Self {
         loop {
@@ -220,8 +217,8 @@ impl Note {
                 value,
                 nd,
                 fdi,
-                elig_sk,
-                jub_sk,
+                e_sk,
+                e_pk,
                 rho,
                 RandomSeed::random(&mut rng, &rho),
             );
@@ -290,17 +287,9 @@ impl Note {
     }
 
     /// Derives the commitment to this note.
-    ///
-    /// This is the internal fallible API, used to check at construction time that the
-    /// note has a commitment. Once you have a [`Note`] object, use `note.commitment()`
-    /// instead.
-    ///
-    /// Defined in [Zcash Protocol Spec § 3.2: Notes][notes].
-    ///
-    /// [notes]: https://zips.z.cash/protocol/nu5.pdf#notes
-    fn commitment_inner(&self) -> CtOption<NoteCommitment> {        NoteCommitment::derive(
-            self.recp.g_d().to_bytes(), // NonIdentityPallasPoint
-            VerificationKey::from(&self.jub_sk.0).into(),
+    fn commitment_inner(&self) -> CtOption<NoteCommitment> {
+        NoteCommitment::derive(
+            self.recp.to_bytes(), // NonIdentityPallasPoint
             self.v,
             self.rho.0,
             self.rseed.psi(&self.rho),
@@ -310,19 +299,14 @@ impl Note {
 
     /// Derives the nullifier for this note.
     pub fn nullifier(&self) -> Nullifier {
-        Nullifier::derive(self.fdi, self.v, self.nd, self.elig_sk)
+        Nullifier::derive(self.fdi, self.v, self.nd, self.e_sk)
     }
 
     /// Derives the message being signed by the jubjub key. Uses the posiedon hashing function
-    pub fn message(&self) -> JubJubMessage {
-        JubJubMessage::derive(self.value(), self.nd, self.fdi, self.elig_sk)
-    }
+    pub fn message(&self) {}
 
-    /// Signs the JubJubMessage using the derived jubjub keys
-    pub fn sign_jubjub(&self) -> Signature<Binding> {
-        let rng = StdRng::from_seed(self.rseed().0);
-        self.jub_sk
-            .0
-            .sign(rng, &self.message().inner().to_repr().to_vec())
+    /// Derives m. Uses the posiedon hashing function
+    pub fn derive_m(&self) -> pallas::Base {
+        pallas::Base::one()
     }
 }

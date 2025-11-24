@@ -1,7 +1,5 @@
-// cargo run --bin create_nullifier -- <elig_addr> <token-denom> <amount>
-// ex:  cargo run --bin create_nullifiers -- 0x0000000000000000000000000000000000000000 uterp 100
 use bip39::{Language, Mnemonic};
-use cosmwasm_std::{Api, CanonicalAddr, testing::mock_dependencies};
+use cosmwasm_std::{testing::mock_dependencies, Api, CanonicalAddr};
 use ff::{Field, FromUniformBytes, PrimeField};
 use hkdf::Hkdf;
 use k256::sha2::Sha256;
@@ -12,7 +10,7 @@ use serde_json::Value;
 use zk_crates::{
     address::HeadstashAddr,
     keys::{EligibleSk, FullViewingKey, JubJubKey},
-    note::{Note, RandomSeed, Rho, scripts::NoteTemplate},
+    note::{scripts::NoteTemplate, Note, RandomSeed, Rho},
     value::{NoteDenom, NoteValue},
 };
 
@@ -96,6 +94,12 @@ fn find_fdi(input_path: &str, token: &str, amount: &str) -> Result<u64, BoxError
     .into())
 }
 
+/// # Headstash: Create Nullifier
+/// ```sh
+/// # ex:  cargo run --bin create_nullifiers -- 0x0000000000000000000000000000000000000000 uterp 100
+/// cargo run --bin create_nullifier -- <elig_addr> <token-denom> <amount>
+/// ```
+///  Derives a nullifier, which is a pallas curve point derived from the hkdf used with an `elig_sk`,
 fn main() -> Result<(), BoxError> {
     let (input_file, token_str, amount_str) = get_input_path()?;
     let input_path = &format!("./data/notes/{}.json", input_file);
@@ -108,8 +112,8 @@ fn main() -> Result<(), BoxError> {
     let eth_sk = eth_secret_from_seed(&seed);
     let elig_sk = EligibleSk::from_sk(eth_sk);
     let rho = rho_from_secure_random();
-    let jub_sk = JubJubKey::derive_from_elig_sk(elig_sk, rho);
-
+    let rseed = RandomSeed::from_bytes(headstash_randomness::ultra_secure_random(), &rho).unwrap();
+    let nul_sk = JubJubKey::derive_from_elig_sk(elig_sk, rho);
     let nd = NoteDenom::from_str(&token_str)?;
     let v = NoteValue::from_raw(
         amount_str
@@ -117,20 +121,23 @@ fn main() -> Result<(), BoxError> {
             .map_err(|e| format!("Invalid amount \"{}\": {}", amount_str, e))?,
     );
 
+    // cosmwasm chain mock dependencies
     let mock_deps = mock_dependencies();
     let recipient = HeadstashAddr::try_from(
         mock_deps
             .api
-            .addr_canonicalize(&mock_deps.api.addr_make("rick").to_string())
+            .addr_canonicalize(
+                &mock_deps
+                    .api
+                    .addr_make(&format!("rick{}", hex::encode(rho.into_inner().to_repr())))
+                    .to_string(),
+            )
             .unwrap(),
     )?;
 
-    let randomness2 = headstash_randomness::ultra_secure_random();
+    let note = Note::from_parts(recipient, v, nd, fdi, elig_sk, nul_sk, rho, rseed).unwrap();
 
-    let rseed = RandomSeed::from_bytes(randomness2, &rho).unwrap();
-
-    let note = Note::from_parts(recipient, v, nd, fdi, elig_sk, jub_sk, rho, rseed).unwrap();
-
+    println!("recipient: {:#?}", recipient.to_canonical().to_string());
     println!("note.commitment(): {:#?}", note.commitment());
     println!("note.rho(): {:#?}", note.rho());
     println!("note.rseed(): {:#?}", hex::encode(note.rseed().as_bytes()));
@@ -161,5 +168,5 @@ fn main() -> Result<(), BoxError> {
 
 // TEST:
 // nullifier should not be impacted by randomness inputs
-// nullifier should change with different elig_sk/elig_pk
+// nullifier should change with different elig_sk/e_pk
 //

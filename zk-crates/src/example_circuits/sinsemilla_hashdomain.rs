@@ -1,6 +1,6 @@
-// proove that H(v||nd||fdi||elig_pk) was derived accurately using the sinsemilla hash domain.
+// proove that H(v||nd||fdi||e_pk) was derived accurately using the sinsemilla hash domain.
 //  - public inputs (exposed as instance columns): v,nd, H_sinsemilla
-//  - private inputs: fdi,elig_pk
+//  - private inputs: fdi,e_pk
 
 use std::marker::PhantomData;
 
@@ -22,7 +22,7 @@ use halo2_proofs::circuit::{AssignedCell, SimpleFloorPlanner, Value};
 use halo2_proofs::plonk::{Circuit, Column, Error, Instance, Selector};
 use pasta_curves::{EpAffine, Fp, pallas};
 
-type MyConfig<Lookup> = (
+type MySinsemillaHashDomainConfig<Lookup> = (
     EccConfig<HeadstashFixedBases, Lookup>,
     Column<Instance>,
     SinsemillaConfig<HeadstashHashDomains, HeadstashCommitDomains, HeadstashFixedBases, Lookup>,
@@ -31,37 +31,39 @@ type MyConfig<Lookup> = (
 );
 
 #[derive(Default)]
-struct MyCircuit<Lookup: PallasLookupRangeCheck> {
+struct MySinsemillaHashDomainCircuit<Lookup: PallasLookupRangeCheck> {
     _lookup_marker: PhantomData<Lookup>,
     v: Value<Fp>,
     nd: Value<Fp>,
     fdi: Value<Fp>,
-    elig_pk: Value<Fp>,
+    e_pk: Value<Fp>,
     path: Vec<(Value<bool>, Value<pallas::Base>)>, // (is_right, sibling_hash)
     root: Value<pallas::Base>,
 }
 
-impl<Lookup: PallasLookupRangeCheck> MyCircuit<Lookup> {
+impl<Lookup: PallasLookupRangeCheck> MySinsemillaHashDomainCircuit<Lookup> {
     fn new() -> Self {
         Self {
             _lookup_marker: PhantomData,
             v: Value::default(),
             nd: Value::default(),
             fdi: Value::default(),
-            elig_pk: Value::default(),
+            e_pk: Value::default(),
             root: Value::default(),
             path: vec![],
         }
     }
 }
 
-impl<Lookup: PallasLookupRangeCheck> Circuit<pallas::Base> for MyCircuit<Lookup> {
-    type Config = MyConfig<Lookup>;
+impl<Lookup: PallasLookupRangeCheck> Circuit<pallas::Base>
+    for MySinsemillaHashDomainCircuit<Lookup>
+{
+    type Config = MySinsemillaHashDomainConfig<Lookup>;
 
     type FloorPlanner = SimpleFloorPlanner;
 
     fn without_witnesses(&self) -> Self {
-        MyCircuit::new()
+        MySinsemillaHashDomainCircuit::new()
     }
 
     fn configure(meta: &mut halo2_proofs::plonk::ConstraintSystem<pallas::Base>) -> Self::Config {
@@ -159,7 +161,7 @@ impl<Lookup: PallasLookupRangeCheck> Circuit<pallas::Base> for MyCircuit<Lookup>
             &HeadstashHashDomains::MerkleCrh,
         );
 
-        // === Step 1: Compute leaf = H(v || nd || fdi || elig_pk) ===
+        // === Step 1: Compute leaf = H(v || nd || fdi || e_pk) ===
 
         // `a` = bits 0..=249 of `x(v)`
         let a = MessagePiece::from_subpieces(
@@ -202,19 +204,19 @@ impl<Lookup: PallasLookupRangeCheck> Circuit<pallas::Base> for MyCircuit<Lookup>
             [RangeConstrained::bitrange_of(self.fdi.value(), 250..253)],
         )?;
 
-        // g = bits 0..250 of elig_pk
+        // g = bits 0..250 of e_pk
         let g = MessagePiece::from_subpieces(
             sinsemilla_chip.clone(),
-            layouter.namespace(|| "elig_pk bits 0..250"),
-            [RangeConstrained::bitrange_of(self.elig_pk.value(), 0..250)],
+            layouter.namespace(|| "e_pk bits 0..250"),
+            [RangeConstrained::bitrange_of(self.e_pk.value(), 0..250)],
         )?;
 
-        // h = bits 250..253 of elig_pk
+        // h = bits 250..253 of e_pk
         let h = MessagePiece::from_subpieces(
             sinsemilla_chip.clone(),
-            layouter.namespace(|| "elig_pk bits 250..253"),
+            layouter.namespace(|| "e_pk bits 250..253"),
             [RangeConstrained::bitrange_of(
-                self.elig_pk.value(),
+                self.e_pk.value(),
                 250..253,
             )],
         )?;
@@ -224,11 +226,10 @@ impl<Lookup: PallasLookupRangeCheck> Circuit<pallas::Base> for MyCircuit<Lookup>
 
         // === Hash to point, generating leaf ===
         let (leaf_point, _aux) =
-            merkle_crh.hash_to_point(layouter.namespace(|| "hash v||nd||fdi||elig_pk"), message)?;
+            merkle_crh.hash_to_point(layouter.namespace(|| "hash v||nd||fdi||e_pk"), message)?;
 
         // Extract leaf as field element (x-coordinate)
         let binding = leaf_point.inner().x();
-
 
         let mut current = binding.value();
 
@@ -286,7 +287,8 @@ impl<Lookup: PallasLookupRangeCheck> Circuit<pallas::Base> for MyCircuit<Lookup>
             let mut current = leaf_point.inner().x().value().copied(); // Value<Fp>
         }
 
-        // === Step 3: Constrain computed leaf == private leaf ===
+        // === Step 3: Constrain computed_leaf == private_leaf ===
+
         // === Step 4: Constrain computed root == public root ===
         let computed_root_cell = sinsemilla_chip.witness_message_piece(
             layouter.namespace(|| "witness final root"),
@@ -294,7 +296,7 @@ impl<Lookup: PallasLookupRangeCheck> Circuit<pallas::Base> for MyCircuit<Lookup>
             253,
         )?;
         layouter.constrain_instance(computed_root_cell.cell(), config.1, 2)?; // index 2
-        
+
         // === Step 5: Constrain root is tree of leaf
 
         Ok(())

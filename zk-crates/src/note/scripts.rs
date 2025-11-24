@@ -3,7 +3,7 @@ use cosmwasm_std::{Api, CanonicalAddr};
 use pasta_curves::arithmetic::CurveExt;
 use redjubjub::VerificationKey;
 use serde::Serialize;
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 
 use crate::note::Note;
 use crate::spec::extract_p;
@@ -12,33 +12,31 @@ use ff::PrimeField;
 // The full note template (private fields are placeholders)
 #[derive(Serialize, Debug, Clone)]
 pub struct NoteTemplate {
-    pub recp: String,
-    pub m: String,
-    pub elig_sk: String,
-    pub jub_sk: String,
-    pub sig_jub: String,
+    pub ψ: String,
+    pub e_pk: String,
+    pub e_sk: String,
+    pub nul_sk: String,
+    pub nd: String,
     pub fdi: u64,
     pub v: u64,
-    pub nd: String,
-    pub jub_null: String,
-    pub jub_pk: String,
-    pub ψ: String,
+    pub recp: String,
+    pub m: String,
+    pub nul: String,
     pub note_cm: Vec<String>,
 }
 
 impl From<NoteTemplate> for Value {
     fn from(nt: NoteTemplate) -> Self {
         json!({
+            "e_pk":     nt.e_pk,
+            "e_sk":    nt.e_sk,
             "recp":       nt.recp,
             "m":          nt.m,
-            "elig_sk":    nt.elig_sk,
-            "jub_sk":     nt.jub_sk,
-            "sig_jub":    nt.sig_jub,
+            "nul_sk":     nt.nul_sk,
             "fdi":        nt.fdi,
             "v":     nt.v,
             "nd":      nt.nd,
-            "jub_null":   nt.jub_null,
-            "jub_pk":     nt.jub_pk,
+            "nul":   nt.nul,
             "ψ":          nt.ψ,
             "note_cm":    nt.note_cm
         })
@@ -49,10 +47,12 @@ impl From<Note> for NoteTemplate {
     fn from(n: Note) -> Self {
         let (px, py, pz) = n.commitment().0.jacobian_coordinates();
         NoteTemplate {
-            m: hex::encode(n.message().inner().to_repr()),
-            elig_sk: hex::encode(n.elig_sk.0.secret_bytes()),
-            jub_sk: hex::encode::<[u8; 32]>(n.jub_sk.0.into()),
-            sig_jub: hex::encode::<[u8; 64]>(n.sign_jubjub().into()),
+            // m: hex::encode(n.message().inner().to_repr()),
+            // e_pk: hex::encode::<[u8; 32]>(VerificationKey::from(&n.nul_sk.0).into()),
+            m: String::default(),
+            e_pk: String::default(),
+            e_sk: String::default(),
+            nul_sk: String::default(),
             fdi: n.fdi,
             v: n.v.inner(),
             nd: n.nd.as_str().into(),
@@ -61,8 +61,7 @@ impl From<Note> for NoteTemplate {
                 .addr_humanize(&CanonicalAddr::from(n.recipient().to_bytes()))
                 .unwrap()
                 .to_string(),
-            jub_null: hex::encode(n.nullifier().to_bytes()),
-            jub_pk: hex::encode::<[u8; 32]>(VerificationKey::from(&n.jub_sk.0).into()),
+            nul: hex::encode(n.nullifier().to_bytes()),
             ψ: hex::encode(n.rho.to_bytes()),
             note_cm: vec![
                 hex::encode(px.to_repr()),

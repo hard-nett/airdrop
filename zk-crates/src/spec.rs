@@ -2,17 +2,17 @@ use std::ops::Deref;
 
 use ff::{Field, FromUniformBytes, PrimeField};
 use group::{Curve, Group, GroupEncoding, WnafBase, WnafScalar};
+use halo2_ecc::bigint::FixedOverflowInteger;
 use halo2_gadgets::{poseidon::primitives as poseidon, sinsemilla::primitives as sinsemilla};
+use num_bigint::BigUint;
 use pasta_curves::arithmetic::CurveExt;
 use pasta_curves::{arithmetic::CurveAffine, pallas};
 use subtle::{ConditionallySelectable, CtOption};
 
-use crate::constants::{
-    KEY_DERIVATION_DST_JUBJUB, KEY_DIVERSIFICATION_PERSONALIZATION, NOTE_NULLIFIER_PERSONALIZATION,
-};
+use crate::constants::DST_HKDF;
 use crate::keys::EligibleSk;
 use crate::note::Rho;
-use crate::value::{MAX_DENOM_LEN, NoteDenom};
+use crate::value::{NoteDenom, MAX_DENOM_LEN};
 
 const PREPARED_WINDOW_SIZE: usize = 4;
 
@@ -27,17 +27,6 @@ impl PreparedNonIdentityBase {
 
 #[derive(Clone, Debug)]
 pub(crate) struct PreparedNonZeroScalar(WnafScalar<pallas::Scalar, PREPARED_WINDOW_SIZE>);
-
-#[cfg(feature = "std")]
-impl DynamicUsage for PreparedNonZeroScalar {
-    fn dynamic_usage(&self) -> usize {
-        self.0.dynamic_usage()
-    }
-
-    fn dynamic_usage_bounds(&self) -> (usize, Option<usize>) {
-        self.0.dynamic_usage_bounds()
-    }
-}
 
 impl PreparedNonZeroScalar {
     pub(crate) fn new(scalar: &NonZeroPallasScalar) -> Self {
@@ -75,12 +64,35 @@ impl Deref for NonIdentityPallasPoint {
         &self.0
     }
 }
+/// Decompose a BigUint into limbs without requiring BigPrimeField trait.
+///
+/// This is our own implementation to avoid dependency on halo2-base traits.
+pub fn decompose_biguint_simple(
+    value: &BigUint,
+    num_limbs: usize,
+    limb_bits: usize,
+) -> Vec<pallas::Base> {
+    use ff::PrimeField;
+    let mask = (BigUint::from(1u64) << limb_bits) - 1u64;
+    let mut limbs = Vec::with_capacity(num_limbs);
+    let mut remaining = value.clone();
+
+    for _ in 0..num_limbs {
+        let limb_big = &remaining & &mask;
+        // Convert limb to field element
+        let limb_bytes = limb_big.to_bytes_le();
+        let mut limb_bytes_32 = [0u8; 32];
+        limb_bytes_32[..limb_bytes.len().min(32)]
+            .copy_from_slice(&limb_bytes[..limb_bytes.len().min(32)]);
+        let limb_fe = pallas::Base::from_repr(limb_bytes_32).unwrap_or(pallas::Base::ZERO);
+        limbs.push(limb_fe);
+        remaining >>= limb_bits;
+    }
+
+    limbs
+}
 
 /// Coordinate extractor for Pallas.
-///
-/// Defined in [Zcash Protocol Spec § 5.4.9.7: Coordinate Extractor for Pallas][concreteextractorpallas].
-///
-/// [concreteextractorpallas]: https://zips.z.cash/protocol/nu5.pdf#concreteextractorpallas
 pub(crate) fn extract_p(point: &pallas::Point) -> pallas::Base {
     point
         .to_affine()
@@ -97,53 +109,48 @@ pub(crate) fn mod_r_p(x: pallas::Base) -> pallas::Scalar {
     pallas::Scalar::from_repr(x.to_repr()).unwrap()
 }
 
-/// $PRF^\mathsf{nfOrchard}(nk, \rho) := Poseidon(nk, \rho)$
-///
-/// Defined in [Zcash Protocol Spec § 5.4.2: Pseudo Random Functions][concreteprfs].
-///
-/// [concreteprfs]: https://zips.z.cash/protocol/nu5.pdf#concreteprfs
+/// # Pseudo-Random-Function DST: Nullifier
 pub(crate) fn prf_nf(nk: pallas::Base, rho: pallas::Base) -> pallas::Base {
     poseidon::Hash::<_, poseidon::P128Pow5T3, poseidon::ConstantLength<2>, 3, 2>::init()
         .hash([nk, rho])
 }
 
-/// modular big-endian byte-to-field-element conversion
-pub fn mbe_btfe(elig_sk: [u8; 32]) -> pallas::Base {
-    let mut acc = pallas::Base::ZERO;
-    for &byte in &elig_sk {
-        acc = acc * pallas::Base::from(256u64) + pallas::Base::from(byte as u64);
-    }
-    acc
-}
-/// Derives jubjub key from the Pallas base field representation for `elig_sk`\
+// /// convert e_sk into 3 88 bit pallas curve values
+// /// // TODO: implement the derivation of 3 limbs on pallas curve bytes of secp256k1 curve
+// pub(crate) fn elig_sk_to_limbs(e_sk: [u8; 32]) -> [pallas::Base; 3] {
+//     let mut acc = [pallas::Base::ZERO; 3];
+//     FixedOverflowInteger::from_native(BigUint, 3, 88);
+//     for &byte in &e_sk {
+//         acc = acc * pallas::Base::from(256u64).add(&pallas::Base::from(byte as u64));
+//         acc[i]
+//     }
+// }
+// s
+/// # hdkf_pallas
+/// Derives nk from the Pallas base field representation for `e_sk`\
 /// *(via modular big-endian byte-to-field-element conversion)*\
 /// using the posiedon hashing algorithm with a domain-separation-tag in the order (`DST`,`esk_fp`,`rho`).
-pub fn hkdr_jubjub(elig_sk: [u8; 32], rho: pallas::Base) -> jubjub::Scalar {
-    let esk_fp = mbe_btfe(elig_sk);
+pub fn hdkf_pallas(elig_sk_pallas_fp: pallas::Base, rho: pallas::Base) -> pallas::Base {
     let mut dst_bytes = [0u8; 32];
-    let copy_len = KEY_DERIVATION_DST_JUBJUB.len().min(32);
-    dst_bytes[..copy_len].copy_from_slice(&KEY_DERIVATION_DST_JUBJUB[..copy_len]);
+    let copy_len = DST_HKDF.len().min(32);
+    dst_bytes[..copy_len].copy_from_slice(&DST_HKDF[..copy_len]);
     let dst_fe = pallas::Base::from_repr(dst_bytes).expect("invalid DST bytes");
-
-    let hash_fe =
-        poseidon::Hash::<_, poseidon::P128Pow5T3, poseidon::ConstantLength<3>, 3, 2>::init()
-            .hash([dst_fe, esk_fp, rho]);
-    // Drop the most significant five bits, so it can be interpreted as a scalar.
-    let mut repr = [0u8; 32];
-    repr.copy_from_slice(&hash_fe.to_repr());
-    repr[31] &= 0b0000_0111;
-    jubjub::Fr::from_repr(repr).expect("Poseidon output not a valid Fr element")
+    poseidon::Hash::<_, poseidon::P128Pow5T3, poseidon::ConstantLength<3>, 3, 2>::init().hash([
+        dst_fe,
+        elig_sk_pallas_fp,
+        rho,
+    ])
 }
 
-// Derives the hash of the ex
-pub(crate) fn prf_jubjub_m(
+// Derives the hash of the expected_dst used for the hash deriving step. is multiplied by rho an provided to the function.
+pub(crate) fn prf_pallas_m(
     fdi: pallas::Base,
     v: pallas::Base,
     nd: pallas::Base,
-    elig_sk: pallas::Base,
+    e_sk: pallas::Base,
 ) -> pallas::Base {
     poseidon::Hash::<_, poseidon::P128Pow5T3, poseidon::ConstantLength<4>, 3, 2>::init()
-        .hash([fdi, v, nd, elig_sk])
+        .hash([fdi, v, nd, e_sk])
 }
 
 /// Convert a `NoteDenom` into a field element by hashing its byte payload.
@@ -165,13 +172,12 @@ pub(crate) fn denom_to_base(nd: &NoteDenom) -> pallas::Base {
     .hash(inputs)
 }
 
-/// Convert a1 secret key (`EligibleSk`) into a `pallas::Base` scalar
+/// Convert e_sk (`EligibleSk`) into a `pallas::Base` scalar
 /// using the Poseidon hash.
-///
-/// Used in deriving a notes nullifier.
+/// Used to prepare an input into a circuit hashing function
 pub(crate) fn elig_sk_to_base(esk: &EligibleSk) -> pallas::Base {
     let mut tag_inputs = [pallas::Base::zero(); MAX_DENOM_LEN];
-    for (i, &b) in NOTE_NULLIFIER_PERSONALIZATION.as_bytes().iter().enumerate() {
+    for (i, &b) in DST_HKDF.iter().enumerate() {
         tag_inputs[i] = pallas::Base::from(b as u64);
     }
 
@@ -181,14 +187,11 @@ pub(crate) fn elig_sk_to_base(esk: &EligibleSk) -> pallas::Base {
         key_inputs[i] = pallas::Base::from(b as u64);
     }
 
-    // TODO: ensure the lens is within the expected bounds & if its being trunicated will introduce cla
     let mut poseidon_inputs = [pallas::Base::zero(); MAX_DENOM_LEN];
-    let tag_len = NOTE_NULLIFIER_PERSONALIZATION.len();
+    let tag_len = DST_HKDF.len();
     poseidon_inputs[..tag_len].copy_from_slice(&tag_inputs[..tag_len]);
     poseidon_inputs[tag_len..tag_len + 32].copy_from_slice(&key_inputs[..32]);
-    // --------------------------------------------------------------------
-    // 4️⃣  Run Poseidon.
-    // --------------------------------------------------------------------
+
     poseidon::Hash::<
         _, // circuit placeholder (unused here)
         poseidon::P128Pow5T3,
@@ -302,13 +305,13 @@ pub(crate) fn to_scalar(x: [u8; 64]) -> pallas::Scalar {
 /// Defined in [Zcash Protocol Spec § 5.4.1.6: DiversifyHash^Sapling and DiversifyHash^Orchard Hash Functions][concretediversifyhash].
 ///
 /// [concretediversifyhash]: https://zips.z.cash/protocol/nu5.pdf#concretediversifyhash
-pub(crate) fn diversify_hash(d: &[u8; 32]) -> NonIdentityPallasPoint {
-    let hasher = pallas::Point::hash_to_curve(KEY_DIVERSIFICATION_PERSONALIZATION);
-    let g_d = hasher(d);
-    // If the identity occurs, we replace it with a different fixed point.
-    // TODO: Replace the unwrap_or_else with a cached fixed point.
-    NonIdentityPallasPoint(CtOption::new(g_d, !g_d.is_identity()).unwrap_or_else(|| hasher(&[])))
-}
+// pub(crate) fn diversify_hash(d: &[u8; 32]) -> NonIdentityPallasPoint {
+//     let hasher = pallas::Point::hash_to_curve(KEY_DIVERSIFICATION_PERSONALIZATION);
+//     let g_d = hasher(d);
+//     // If the identity occurs, we replace it with a different fixed point.
+//     // TODO: Replace the unwrap_or_else with a cached fixed point.
+//     NonIdentityPallasPoint(CtOption::new(g_d, !g_d.is_identity()).unwrap_or_else(|| hasher(&[])))
+// }
 
 /// Defined in [Zcash Protocol Spec § 5.4.5.5: Orchard Key Agreement][concreteorchardkeyagreement].
 ///
@@ -331,4 +334,13 @@ pub(crate) fn ka_orchard_prepared(
     b: &PreparedNonIdentityBase,
 ) -> NonIdentityPallasPoint {
     NonIdentityPallasPoint(&b.0 * &sk.0)
+}
+
+/// modular big-endian byte-to-field-element conversion
+pub fn mbe_btfe(e_sk: [u8; 32]) -> pallas::Base {
+    let mut acc = pallas::Base::ZERO;
+    for &byte in &e_sk {
+        acc = acc * pallas::Base::from(256u64) + pallas::Base::from(byte as u64);
+    }
+    acc
 }

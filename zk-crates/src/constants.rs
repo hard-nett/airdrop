@@ -10,16 +10,10 @@ pub const DST_HKDF_JUBJUB: &[u8] = b"HEADSTASH-HKDF-REDJUBJUB";
 pub const HEADSTASH_PERSONALIZATION: &str = "z.cash:Orchard";
 
 /// SWU hash-to-curve personalization for the note commitment generator
-pub const NOTE_COMMITMENT_PERSONALIZATION: &str = "terp.network:Headstash-NoteCommit";
-
-/// SWU hash-to-curve personalization for the value commitment generator
-pub const VALUE_COMMITMENT_PERSONALIZATION: &str = "terp.network:Headstash-cv";
-/// SWU hash-to-curve personalization for the group hash for key diversification
-pub const KEY_DIVERSIFICATION_PERSONALIZATION: &str = "terp.network:Headstash-gd";
-
-pub const NOTE_NULLIFIER_PERSONALIZATION: &str = "NoteNullifier-terp.network";
-
-pub const KEY_DERIVATION_DST_JUBJUB: &[u8;31] = b"terpnetwork:Headstashhkdfjubjub";
+pub const DST_CM: &str = "terp.network:Headstash-cm";
+/// SWU hash-to-curve personalization for the value
+pub const DST_V: &str = "terp.network:Headstash-v";
+pub const DST_HKDF: &[u8] = b"Hkdf-terp.network";
 
 /// The Pallas scalar field modulus is $q = 2^{254} + \mathsf{t_q}$.
 /// <https://github.com/zcash/pasta>

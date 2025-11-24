@@ -407,7 +407,6 @@ fn test_rick_circuit() {
     assert!(prover2.verify().is_err());
 
     // Ensure we are not dropping any of the values
-
     let mut bytes3 = s3.as_bytes().to_vec();
     bytes3.resize(20, 0);
 
@@ -432,9 +431,10 @@ fn test_rick_circuit() {
         .unwrap();
 
     halo2_proofs::dev::CircuitLayout::default()
+        .show_equality_constraints(true)
         // You can optionally render only a section of the circuit.
-        .view_width(0..2)
-        .view_height(0..16)
+        // .view_width()
+        // .view_height(0..16)
         // You can hide labels, which can be useful with smaller areas.
         .show_labels(true)
         // Render the circuit onto your area!

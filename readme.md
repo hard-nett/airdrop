@@ -1,5 +1,15 @@
 # Airdrop - Terp Network
 
+> One Note: This is experiemental repo, not yet audited, and not yet a stable release.
+
+This library contains the following crates for tooling related to generating, implementing, and deploying headstash instances.
+
+| Package |Description   |   |
+|---------------------------|------| -|
+| docs | documentation and specification of the circuit layout and tooling
+| zk-crates | libraries for proof circuit generation and implementation | |
+| scripts | tools for distribution generation based on existing token-holder distributions | |
+
 ## Airdrop Cycle 1: Genesis Distribution
 
 | Project | % Total Supply   | # of addrs |
@@ -36,6 +46,7 @@ Further details regarding how these values were determined can be found [here](.
 ## Todo
 
 - testing library
+- zk-circuit framework: public-private logic represenation of custom circuit requirements for descriptive functional programming framework. 
 
 - use genesis file to determine difference
   - still use export to provide bonus to active network users

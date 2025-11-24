@@ -1,15 +1,18 @@
+
+ 
+
 use ff::PrimeField;
+use group::cofactor::CofactorCurveAffine;
 use group::Group;
 use group::GroupEncoding;
-use group::cofactor::CofactorCurveAffine;
 use halo2_gadgets::ecc::chip::find_zs_and_us;
 use jubjub::Fq;
 use jubjub::Fr;
 use jubjub::SubgroupPoint;
 use jubjub::{AffinePoint, ExtendedPoint};
-use pasta_curves::Fp;
 use pasta_curves::arithmetic::CurveAffine;
 use pasta_curves::pallas;
+use pasta_curves::Fp;
 use subtle::Choice;
 
 use crate::constants::fixed_bases::NUM_WINDOWS;
@@ -36,25 +39,35 @@ pub const BINDINGSIG_BASEPOINT_BYTES: [u8; 32] = [
 ];
 
 #[test]
-fn test_conversion() {
+pub fn test_conversion() {
     use jubjub::{AffinePoint, ExtendedPoint, Fr, SubgroupPoint};
     use rand::thread_rng;
     use redjubjub::*;
     // Get the **redjubjub** generator point in the prime‑order subgroup
     // (the base point used for signing keys)
-    let base_point = ExtendedPoint::from_bytes(&BINDINGSIG_BASEPOINT_BYTES).unwrap();
-    let base_affine = AffinePoint::from(base_point);
+    let jj_base_point = ExtendedPoint::from_bytes(&BINDINGSIG_BASEPOINT_BYTES).unwrap();
+    let gen_affine = AffinePoint::from(jj_base_point);
 
     println!(
         "BINDINGSIG_BASEPOINT_BYTES: {:?}",
         BINDINGSIG_BASEPOINT_BYTES
     );
 
+    // The coordinates `u` and `v` are already `pasta_curves::Fp` values.
+    let u: Fq = gen_affine.get_u();
+    let v = gen_affine.get_v();
+
+    // Verify that they are canonical field elements by round‑tripping
+    // through `to_repr` / `from_repr`.
+    assert_eq!(Fp::from_repr(u.to_repr()).is_some().unwrap_u8(), 1);
+    assert_eq!(Fp::from_repr(v.to_repr()).is_some().unwrap_u8(), 1);
+
     // Print generator coordinates for reference (optional)
-    println!("Base point u: {:?}", base_affine.get_u());
-    println!("Base point u bytes: {:?}", base_affine.get_u().to_bytes());
-    println!("Base point v: {:?}", base_affine.get_v());
-    println!("Base point v bytes: {:?}", base_affine.get_v().to_bytes());
+    println!("Base point u: {:?}", u);
+    println!("Base point v: {:?}", v);
+
+    println!("jub_u_affine: {:?}", u);
+    println!("jub_v_affine: {:?}", v);
 
     // Generate a secret key and sign a message
     let sk = SigningKey::<Binding>::new(thread_rng());
@@ -66,19 +79,22 @@ fn test_conversion() {
     let vk_bytes: [u8; 32] = vk.into(); // Compressed public key bytes
 
     // ---- Fixed part: obtain the scalar that `sk` wraps ----
-    // `SigningKey` implements `Into<redjubjub::Scalar>` (the underlying field element)
     let sk_scalar: Fr = Fr::from_repr(sk.into()).unwrap(); // extracts the secret scalar
     let sk_fp: Fp = Fp::from_repr(sk.into()).unwrap(); // extracts the secret scalar
 
-    // highlight it is impossible to derive the jubjub base point to a field-point for the pallas curve
+    // impossible to derive the jubjub generator point to a field-point for the pallas curve
+    // (jubjub_G -> pallas::Fp(jubjub_G))
+    // needed for
     // ---------------------------------------------------------
     assert_eq!(
-        Fp::from_repr(base_point.to_bytes()).is_some().unwrap_u8(),
+        Fp::from_repr(jj_base_point.to_bytes())
+            .is_some()
+            .unwrap_u8(),
         0
     );
 
     // Manually compute the public key: pubkey = [sk_scalar] * base_point
-    let manual_pubkey_point = base_point * sk_scalar; // Scalar multiplication
+    let manual_pubkey_point = jj_base_point * sk_scalar; // Scalar multiplication
     let manual_pubkey_affine = AffinePoint::from(manual_pubkey_point);
     let manual_vk_bytes = manual_pubkey_affine.to_bytes(); // Compressed bytes
 

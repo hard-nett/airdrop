@@ -175,92 +175,8 @@ fn gen_token_leaves(
 }
 
 fn main() -> Result<(), BoxError> {
-    let input_path = get_input_path()?;
-    let output_dir = std::path::Path::new("./data");
-
-    // Read and parse input JSON
-    let mut input_data: Value = serde_json::from_str(&fs::read_to_string(&input_path)?)?;
-    let mut leaves = Vec::new();
-    let balances = input_data
-        .as_object_mut()
-        .ok_or("Input JSON must be an object")?;
-
-    // Sort addresses lexicographically
-    let mut addresses: Vec<_> = balances.keys().cloned().collect();
-    addresses.sort();
-
-    for addr in addresses {
-        let alloc_array = match balances.get_mut(addr.as_str()) {
-            Some(v) => v,
-            None => continue,
-        };
-
-        let alloc_array = match alloc_array.as_array_mut() {
-            Some(arr) => arr,
-            None => continue,
-        };
-
-        // Sort token allocations by `name` field
-        alloc_array.sort_by_key(|t| t["name"].to_string());
-
-        for token in alloc_array.iter_mut() {
-            let total_amount: u64 = token["amount"]
-                .as_str()
-                .and_then(|s| s.parse::<u64>().ok())
-                .unwrap();
-
-            // ---- parallel leaf generation ---------------------------------
-            // Parallel leaf generation (now also gives us an index)
-            let (leaf_idx_hexes, raw_leaves) =
-                gen_token_leaves(addr.as_str(), &token["name"].to_string(), total_amount)?;
-            // ---- attach leaves back to the JSON object (single‑thread) ----
-            {
-                let obj = token
-                    .as_object_mut()
-                    .expect("token should be a JSON object");
-                obj.entry("leaves").or_insert_with(|| json!([]));
-            }
-            let leaves_arr = token.get_mut("leaves").unwrap().as_array_mut().unwrap();
-
-            // Push each leaf together with its index:
-            //   { "index": <usize>, "leaf": "<hex>" }
-            for (fixed_amount, idx, leaf_hex) in leaf_idx_hexes {
-                leaves_arr.push(json!({ "amnt":fixed_amount,"index": idx, "leaf": leaf_hex }));
-            }
-
-            // ---- push raw leaves into the global vector -------------------
-            leaves.extend(raw_leaves);
-        }
-    }
-    // Write augmented input (with embedded leaves)
-    let augmented_path = input_path;
-    fs::write(&augmented_path, serde_json::to_string_pretty(&input_data)?)?;
-    eprintln!("✅ Input with leaves written to {}", augmented_path);
-
-    // If no leaves, exit early
-    if leaves.is_empty() {
-        println!("No leaves generated.");
-        return Ok(());
-    }
-
-    // Build Merkle root
-    let merkle_root = build_merkle_tree(leaves.clone())[0];
-    let root_hex = format!("0x{}", hex::encode(merkle_root.to_repr()));
-    let leaves_hex: Vec<String> = leaves
-        .into_iter()
-        .map(|leaf| format!("0x{}", hex::encode(leaf.to_repr())))
-        .collect();
-
-    // Output Merkle result
-    let merkle_output = json!({
-        "root": root_hex,
-        "leaves": leaves_hex,
-        "count": leaves_hex.len()
-    });
-
-    let merkle_path = output_dir.join("merkle_output.json");
-    fs::write(&merkle_path, serde_json::to_string_pretty(&merkle_output)?)?;
-    eprintln!("✅ Merkle output written to {}", merkle_path.display());
+    let output_path = std::path::Path::new("./data").join("merkle_output.json");
+    let root_hex = TerpHeadstash::new().gen_headstash_tree(output_path)?;
     println!("🌳 Merkle Root: {}", root_hex);
 
     Ok(())
@@ -269,6 +185,8 @@ fn main() -> Result<(), BoxError> {
 #[cfg(test)]
 mod test {
     use super::*;
+    use serde_json::Value;
+    use std::fs;
 
     fn load_data() -> Result<Value, BoxError> {
         let file = fs::File::open("./data/genesis_sinsemilla.json")?;
