@@ -1,16 +1,16 @@
-use ff::PrimeField;
-use group::Group;
-use memuse::DynamicUsage;
-use pasta_curves::arithmetic::CurveExt;
-use pasta_curves::pallas;
-use rand::RngCore;
-use subtle::CtOption;
-
-use crate::keys::{EligiblePk, EligibleSk, NullifierDerivingKey};
-use crate::spec::{esk_to_base, extract_p, mod_r_p};
-use crate::value::{NoteDenom, NoteValue};
-
-use super::NoteCommitment;
+use {
+    super::NoteCommitment,
+    crate::{
+        keys::NullifierDerivingKey,
+        spec::{extract_p, mod_r_p},
+    },
+    ff::PrimeField,
+    group::Group,
+    memuse::DynamicUsage,
+    pasta_curves::{arithmetic::CurveExt, pallas},
+    rand::RngCore,
+    subtle::CtOption,
+};
 
 /// A unique nullifier for a note.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
@@ -40,8 +40,7 @@ impl Nullifier {
         cm: NoteCommitment,
     ) -> Self {
         let k = pallas::Point::hash_to_curve("terp.network:headstash")(b"K");
-        // TODO: derive nullifier by deriving nullifier key from correct inputs & hash dst, then use the
-        Nullifier(extract_p(&(k * mod_r_p(nk.prf_nf(rho)))))
+        Nullifier(extract_p(&(k * mod_r_p(nk.prf_nf(rho) + psi) + cm.0)))
     }
     /// Generates a dummy nullifier for use as $\rho$ in dummy spent notes.
     ///

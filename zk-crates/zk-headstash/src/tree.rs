@@ -68,6 +68,6 @@ impl Anchor {
 
 // impl Hashable for MerkleHashHeadstash {
 //     fn empty_leaf() -> Self {
-//         MerkleHashOrchard(*U)
+//         MerkleHashHeadstash(*U)
 //     }
 // }

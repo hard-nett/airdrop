@@ -164,7 +164,6 @@ pub(crate) fn recp_to_fp(ra: &RecpAddr) -> pallas::Base {
     for (i, &ni) in ra.to_bytes()[..MAX_DENOM_LEN as usize].iter().enumerate() {
         ini[i] = pallas::Base::from(ni as u64);
     }
-
     poseidon::Hash::<_, poseidon::P128Pow5T3, poseidon::ConstantLength<MAX_DENOM_LEN>, 3, 2>::init()
         .hash(ini)
 }
@@ -193,36 +192,31 @@ pub fn fe_to_biguint_for_field<F: PrimeField>(fe: &F) -> BigUint {
     BigUint::from_bytes_le(bytes.as_ref())
 }
 
-/// Convert esk (`EligibleSk`) into a `pallas::Base` scalar by decomposing into 3 88 bit limbs
-// calculate product of limbs
-// hash to curve result with posiedon + randomness -> nk == pallas::Base
-
+/// Convert esk (`EligibleSk`) into a `pallas::Base` scalar by decomposing into 3 88 bit limbs\
+/// Hash array of 3 limbs using Poseidon to get single pallas::Base value\
+/// This compresses the CRT representation into a single field element
 pub(crate) fn esk_to_base(esk: &EligibleSk) -> pallas::Base {
-    // let mut tag_inputs = [pallas::Base::zero(); MAX_DENOM_LEN];
-    // for (i, &b) in DST_HKDF.iter().enumerate() {
-    //     tag_inputs[i] = pallas::Base::from(b as u64);
-    // }
-
-    // // One `Base` per byte – this mirrors the handling in `denom_to_base`.
-    // let mut key_inputs = [pallas::Base::zero(); MAX_DENOM_LEN];
-    // for (i, &b) in esk.0.secret_bytes().iter().enumerate() {
-    //     key_inputs[i] = pallas::Base::from(b as u64);
-    // }
-
-    // let mut poseidon_inputs = [pallas::Base::zero(); MAX_DENOM_LEN];
-    // let tag_len = DST_HKDF.len();
-    // poseidon_inputs[..tag_len].copy_from_slice(&tag_inputs[..tag_len]);
-    // poseidon_inputs[tag_len..tag_len + 32].copy_from_slice(&key_inputs[..32]);
-
-    // poseidon::Hash::<
-    //     _, // circuit placeholder (unused here)
-    //     poseidon::P128Pow5T3,
-    //     poseidon::ConstantLength<MAX_DENOM_LEN>,
-    //     3, // width = 3 (t = 3)
-    //     2, // full rounds per spec
-    // >::init()
-    // .hash(poseidon_inputs)
-    pallas::Base::default()
+    poseidon::Hash::<
+        _,
+        poseidon::P128Pow5T3,
+        poseidon::ConstantLength<MAX_DENOM_LEN>,
+        3, // width = 3 (t = 3)
+        2, // full rounds per spec
+    >::init()
+    .hash(
+        crate::spec::decompose_biguint_simple(
+            &halo2_base::utils::fe_to_biguint(
+                &halo2_base::halo2_proofs::halo2curves::secq256k1::Fp::from_repr(
+                    esk.0.secret_bytes(),
+                )
+                .expect("valid Fq"),
+            ),
+            3,
+            88,
+        )
+        .try_into()
+        .unwrap(),
+    )
 }
 
 /// An integer in [1..q_P].

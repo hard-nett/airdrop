@@ -6,9 +6,11 @@ use std::{env, fs};
 use pasta_curves::pallas::Base;
 
 use rayon::prelude::*;
+use secp256k1::SecretKey;
 
 use crate::constants::fixed_bases::FIXED_AMOUNTS;
 use crate::constants::sinsemilla::{LEAF_PERSONALIZATION, MERKLE_CRH_PERSONALIZATION};
+use crate::keys::{EligibleSk, NullifierDerivingKey};
 use crate::note::{Note, Rho};
 use crate::value::NoteDenom;
 
@@ -154,11 +156,11 @@ pub trait HeadstashBitwiseInstance {
     fn derive_fdi(&self, fdi: u64) -> [u8; 8] {
         fdi.to_le_bytes()
     }
-    fn derive_nk(&self, raw_pubkey: &[u8; 32], rho: pallas::Base) -> pallas::Base {
-        // TODO:
-        // - convert raw_pk to 3x88 bit limbs
-        // - derive message from note inputs
-        crate::spec::hdkf_pallas(pallas::Base::one(), rho)
+    fn derive_nk(&self, esk: &[u8; 32], rho: Rho) -> NullifierDerivingKey {
+        NullifierDerivingKey::derive_from(
+            EligibleSk::from(SecretKey::from_byte_array(*esk).unwrap()),
+            rho,
+        )
     }
     fn extend_with_base_field_bits(bits: &mut Vec<bool>, a: pallas::Base) {
         let bit_slice = a.to_le_bits();

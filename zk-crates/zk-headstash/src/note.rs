@@ -250,7 +250,7 @@ impl Note {
         &self.rseed
     }
 
-    /// Derives the ephemeral secret key for this note.
+    // / Derives the ephemeral secret key for this note.
     // pub(crate) fn esk(&self) -> EphemeralSecretKey {
     //     EphemeralSecretKey(self.rseed.esk(&self.rho))
     // }
@@ -278,7 +278,7 @@ impl Note {
         NoteCommitment::derive(
             self.recp.to_bytes(),
             self.v,
-            self.nd,
+            Fp::from_repr(self.nd.as_bytes().try_into().unwrap()).expect("nd noteCommitment Fp"),
             Fp::from_u128(self.fdi.into()),
             self.esk,
             self.rho.0,

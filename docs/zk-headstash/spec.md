@@ -96,8 +96,12 @@ We have 3 main types of keys involved in this process.
 
 Two core business logic requirement in the headstash circuit are to have a feasable way to verify that the owner of the `epk` is authorizing the spend of a specific note in a headstash instance, and prevent double-spending of headstash allocations. Normal ECDSA verification for field curves are computationally heavy in circuit, & generate extremely large proof sizes not compatible with on-chain gas limits & a nice UX.
 
-When a note is is being spent, the owner generates a nullifier & note commitment, using carefully structured derivation process that results in HKDF generated key `(hkdf_pk, hkdf_sk)` seeded from private input, powering the key separation, verifiablility, & cryptographic binding of the nullifier and note commitment.
-**Users end up proving they know the key pair `esk,epk` by providing the nullifier as a public input into the circuit when generating a proof.**This lets the circuit use the known curve equation & generator points to constrain that the two keys are either mathematically paired together or not, without ever needing to reveal these values, since constraint the generation point of secp256k1 to the two keys for an expected known value.
+When a note is is being spent, the owner generates a nullifier & note commitment, using carefully structured derivation process that results in values that be shared publically and revela no association about the actions the note represents.
+
+Headstashes use a HKDF generated nullifier key `nk` seeded from private input, powering the key separation, verifiablility, & cryptographic binding of the nullifier and note commitment.
+**Users end up proving they know the key pair `esk,epk` by providing the nullifier as a public input into the circuit when generating a proof.**
+
+This lets the circuit use the known curve equation & generator points to constrain that the two keys are either mathematically paired together or not, without ever needing to reveal these values, since constraint the generation point of secp256k1 to the two keys for an expected known value.
 
 > ### **To prevent double-spending of headstash allocations, a nullifier must be:**
 >
@@ -108,30 +112,72 @@ When a note is is being spent, the owner generates a nullifier & note commitment
 
 ### Derivation
 
-**Headstashes derive a keypair `(hkdf_sk,hkdf_pk)` that is on the pallas curve from the `esk`,*along with other private inputs*.** Specifically, we inlcude `esk`,`leaf`,`recp`,and a user PRF-derived valus `psi` in the HKDF input, cryptographically bind the nullifier to a specific fund destination, where only the owner has discrection in deciding who can derive the note from it since it depends on their private note_secret and the associated key of the `epk`.
+> TLDR:
+>
+> 1. **select note**: this determines `v`,`nd`,`fdi`,`epk` (and inherrently `esk`)
+> 2. **prepare inputs**: circuit inputs MUST have a specification for compatibility with Pallas curve to be prepared prior to use for proof generation. For Headstashes:
+>
+>     - `v`: fully padded `u64` value
+>     - `fdi`: fully padded `u64` value
+>     - `nd`: Blake3 Hash of token denomination, with top-most byte cleared to fit as Pallas field element.
+>     - `esk`: the Posiedon Hash of `esk`, where `esk` is a 3x88 bit pallas base field elemements representing the esk. *note this is derived in circuit and never exposed in our library*
+>
+> 3. **derive note-commitment**: deriving `cm` requires `recp`, `fdi`, `nd`,`v`,`rho`, `esk`,`psi`,and blinded to r with`rcm`.\
+> Specifically, we use the sinsemilla CommitDomain hashing function to commit these values for creating a note commitment in that specified order.
+> 3. **derive nullifier**: deriving the nullifier requires `nk`, `rho`,`psi`, and `cm`. Specifically:
+>
+> - a. hash the `(nk,hkdf_sk)` with `rho` via Posiedon
+> - b. add hash output to `psi`
+> - c. multiply scalar by NullifierK
+> - d. add product to note-commitment
 
-*This defends against a subtle but serious class of attacks man-in-the-middle modifications where an adversary intercepts a transaction and attempts to redirect funds to a different address, while reusing the same proof structure. Because the nullifier depends on the exact allocation being spent, any such alteration would result in a different derived `hkdf_pk`, causing the proof to fail verification.*
+**Headstashes derive a keypair `(hkdf_sk,nk)` that is on the pallas curve from the `esk`,*along with other private inputs*.** Specifically, we inlcude `esk`,`leaf`,`recp`,and a user PRF-derived valus `psi` in the HKDF input, cryptographically bind the nullifier to a specific fund destination, where only the owner has discrection in deciding who can derive the note from it since it depends on their private note_secret and the associated key of the `epk`.
 
-- a. hash the `(hkdf_pk,hkdf_sk)` with `rho` via Posiedon
-- b. add hash output to psi
-- c. Multiply scalar by NullifierK
+*This defends against a subtle but serious class of attacks man-in-the-middle modifications where an adversary intercepts a transaction and attempts to redirect funds to a different address, while reusing the same proof structure. Because the nullifier depends on the exact allocation being spent, any such alteration would result in a different derived `nk`, causing the proof to fail verification.*
 
+#### NoteCommitment Derivation
 
 ```math
 \begin{array}{lcl}
 
 \textbf{Private witnesses} &
 \begin{cases}
-\mathsf{esk}\in\mathbb{F}_{\ell}      &\text{(secret key being proved is paired to $\text{epk}$)}\\[2pt]
-\mathsf{epk}= (X_{\mathsf{pk}},Y_{\mathsf{pk}})\in\mathbb{F}_{p}^{\,2}&\text{(eligible public key for headstash)}\\
-\mathsf{leaf}= (X_{\mathsf{pk}},Y_{\mathsf{pk}})\in\mathbb{F}_{p}^{\,2}&\text{(specific leaf hash of note owner knows)}\\
-\mathsf{fdi}      \in \mathbb{F}_p      &\text{(fully padded u64 of fixed denomination index }fdi\text{)}\\[2pt]
-\mathsf{{\psi }}        \in \{0,1\}^{256}       &:= \text{PRF}_{\text{PSI}}\!\bigl(\mathsf{rseed},\,\rho\bigr) \in \mathbb{F}_p,\\[4pt]
+\mathsf{esk}\in\mathbb{F}_{\ell}&\text{( Posiedon hash of 3x88bit limb representation of `esk`)}\\[2pt]
+\mathsf{fdi}\in \mathbb{F}_p &\text{fully padded u64 of fixed denomination index }fdi\text{}\\[2pt]
+\mathsf{{\psi }}\in \{0,1\}^{256}&:= \text{PRF}_{\text{PSI}}\!\bigl(\mathsf{rseed},\,\rho\bigr) \in \mathbb{F}_p,\\[4pt]
+\mathsf{rho}\\[6pt]
 \mathsf{rcm} &:= \text{PRF}_{\text{RCM}}\!\bigl(\mathsf{rseed},\,\rho\bigr) \in \mathbb{F}_p,\\[6pt]
 \end{cases}
 \end{array}
 ```
 
+```math
+\begin{array}{lcl}
+\\[10pt]
+\textbf{Public inputs} &
+\begin{cases}
+\mathsf{recp}\in \mathbb{F}_p      &\text{(recipient adddr)}\\[2pt]
+\mathsf{v}\in \mathbb{F}_p      &\text{(fully padded u64 of value being spent in note)}\\[2pt]
+\mathsf{H(nd)}\in \mathbb{F}_p      &\text{Blake3 hash $nd$, top 3 bits to fit on pallas curve  }\text{}\\[2pt]
+% \mathsf{recp}^{\ast}\in \mathbb{F}_p      &\text{(Posiedon Hash of recipient of notes token }nd\text{)}\\[2pt]
+\end{cases}
+\end{array}
+```
+
+#### Nullifier Derivation
+
+```math
+\begin{array}{lcl}
+
+\textbf{Private witnesses} &
+\begin{cases}
+\mathsf{nk}\in\mathbb{F}_{\ell}&\text{( key derived from $ek$ for generating nullifier)}\\[2pt]
+\mathsf{{\psi }}\in \{0,1\}^{256}&:= \text{PRF}_{\text{PSI}}\!\bigl(\mathsf{rseed},\,\rho\bigr) \in \mathbb{F}_p,\\[4pt]
+\mathsf{rho}\\[6pt]
+\mathsf{rcm} &:= \text{PRF}_{\text{RCM}}\!\bigl(\mathsf{rseed},\,\rho\bigr) \in \mathbb{F}_p,\\[6pt]
+\end{cases}
+\end{array}
+```
 
 ### Hashing Functions
 
@@ -287,37 +333,10 @@ G_{secp256k1}   = (G_{x},G_{y})                     &\text{(generator point secp
 \begin{array}{lcl}
 \textbf{Derived} &
 \begin{cases}
- \mathsf{cm}\;:=\;\text{Poseidon}_{\mathbb{F}_p}\!\bigl(\mathsf{recp},\,v,\,\rho,\,\psi,\,\mathsf{rcm}\bigr)\\[2pt]
- \mathsf{recp}\;:=\; \\[2pt]
+ \mathsf{leaves}\;:=\;\\[2pt]
+ \mathsf{root}\;:=\; \\[2pt]
 \end{cases}
 \end{array}
-```
-
-```rust
-pub struct PrivateWitnesses {
-    esk: secp256k1::Fq,
-    epk: secp256k1::Affine,
-    fdi: u64,
-    merkle_path: [pallas::Base; 2],
-    rho: pallas::Base,
-    psi: pallas::Base,
-}
-
-pub struct PublicInputs {
-    nul: pallas::Base,
-    nd: pallas::Base,
-    v: pallas::Base,
-    recp: pallas::Base,
-}
-pub struct Constants {
-     genesis_root: pallas::Base, 
-     sinsemilla_dst: pallas::Base,
-     secp_dst: pallas::Base,
-     hkdf_dst: pallas::Base,      // pallas point for hash of ownerships domain separation tag
-     null_dst: pallas::Base,      // note nullifier domain separation tag
-}
-// Total: 5 public inputs
-// Total: 7 private witnesses
 ```
 
 ___
@@ -328,11 +347,11 @@ ___
 
 ### note-commitments: futureproof system
 
-Note Commitments `cm` are also is disclosed publicly during claiming. They are derived from the private and public inputs of a note, allowing the origin of the claiming address to be private. note commitments are derived from both deterministic and non-deterministic inputs of a note, as we do not use note-commitments for preventing double spends (this is what nullifiers are for). For our use, this note commitment tree can be expand on to rely on more, as for things such as true utxo function of headstash notes and other future iterations.
+Note Commitments `cm` are also is disclosed publicly during claiming. They are derived from the private and public inputs of a note, allowing the origin of the claiming address to be private. note commitments are derived from both deterministic and non-deterministic inputs of a note, as we do not use `cm` for preventing double spends (this is what nullifiers are for). For our use, this note commitment tree can be expand on to rely on more, as for things such as true utxo function of headstash notes and other future iterations.
 >
 > q: how can we actually implement a note-commitment tree given our specification, and taking into account possible discrepencies with
 > note-commitment generation timing between multiple parties?\
-> a: user maintains their own note-commitment tree, and requires the network to work together to allow users to keep track of notes that have been spent to allocate the value to them. This is only used when genesis notes are split into sub-notes, which is not in spec for the inital MVP, but will be a useful iteration for true private out of band notes
+> a: nullifiers are provided with note-commitments, and are batched process via vote-extensions, allow us to update the merkle root each block. 
 
 > **q: do we damage the blinding of the rest of the inputs to the hashing function due to some being public and some being private?**
 >
@@ -448,9 +467,10 @@ let pallas_pk = pallas_sk * G_pallas;
 
 ### In-Circuit Constraint Flow
 
-**Step 1: Secp256k1 Key Pairing (Foreign Field)**
-**Step 2: HKDF Derivation (Native - In-Circuit!)**
-**Step 3: Genesis Distribution Inclusion(Sinsemilla HashDomain)**
+**1. Secp256k1 Key Pairing (Foreign Field)**
+**2. HKDF Derivation (Native - In-Circuit!)**
+**3. Genesis Distribution Inclusion(Sinsemilla HashDomain)**
+**4. Note Commitment Integrity (Sinsemilla CommitDomain)**
 
 ## Circuit: Chip Specs
 

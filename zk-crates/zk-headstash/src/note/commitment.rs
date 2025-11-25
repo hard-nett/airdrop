@@ -9,7 +9,7 @@ use subtle::{ConstantTimeEq, CtOption};
 use crate::constants::{DST_CM, L_ORCHARD_BASE};
 use crate::keys::EligibleSk;
 use crate::spec::extract_p;
-use crate::value::{NoteDenom, NoteValue};
+use crate::value::NoteValue;
 
 #[derive(Clone, Debug)]
 pub struct NoteCommitTrapdoor(pub(super) pallas::Scalar);
@@ -38,21 +38,24 @@ impl NoteCommitment {
     pub fn derive(
         recp: [u8; 32],
         v: NoteValue,
-        nd: NoteDenom,
+        nd: pallas::Base,
         fdi: pallas::Base,
         esk: EligibleSk,
         rho: pallas::Base,
         psi: pallas::Base,
         rcm: NoteCommitTrapdoor,
     ) -> CtOption<Self> {
+        let esk = esk.derive_pallas();
         let domain = sinsemilla::CommitDomain::new(DST_CM);
         domain
             .commit(
                 iter::empty()
                     .chain(BitArray::<_, Lsb0>::new(recp).iter().by_vals())
                     .chain(fdi.to_le_bits().iter().by_vals())
+                    .chain(nd.to_le_bits().iter().by_vals())
                     .chain(v.to_le_bits().iter().by_vals())
                     .chain(rho.to_le_bits().iter().by_vals().take(L_ORCHARD_BASE))
+                    .chain(esk.to_le_bits().iter().by_vals().take(L_ORCHARD_BASE))
                     .chain(psi.to_le_bits().iter().by_vals().take(L_ORCHARD_BASE)),
                 &rcm.0,
             )
