@@ -1,13 +1,14 @@
+use cosmwasm_std::CanonicalAddr;
 use ff::PrimeField;
 
-use pasta_curves::pallas;
+use pasta_curves::{pallas, Fp};
 use rand::RngCore;
 use subtle::CtOption;
 pub(crate) mod commitment;
 pub mod scripts;
 pub use self::commitment::{ExtractedNoteCommitment, NoteCommitment};
 use crate::address::RecpAddr;
-use crate::keys::{EligibleSk, NullifierDerivingKey};
+use crate::keys::{EligibleSk, NullifierDerivingKey, SpendingKey};
 use crate::prf_expand::PrfExpand;
 use crate::spec::{prf_nf, to_base, to_scalar, NonZeroPallasScalar};
 use crate::value::{NoteDenom, NoteValue};
@@ -136,15 +137,15 @@ pub struct Note {
     fdi: u64,
 }
 
-// impl PartialEq for Note {
-//     fn eq(&self, other: &Self) -> bool {
-//         // Notes are canonically defined by their commitments.
-//         ExtractedNoteCommitment::from(self.commitment())
-//             .eq(&ExtractedNoteCommitment::from(other.commitment()))
-//     }
-// }
+impl PartialEq for Note {
+    fn eq(&self, other: &Self) -> bool {
+        // Notes are canonically defined by their commitments.
+        ExtractedNoteCommitment::from(self.commitment())
+            .eq(&ExtractedNoteCommitment::from(other.commitment()))
+    }
+}
 
-// impl Eq for Note {}
+impl Eq for Note {}
 
 impl Note {
     /// Creates a `Note` from its component parts.
@@ -218,23 +219,21 @@ impl Note {
     /// Defined in [Zcash Protocol Spec § 4.8.3: Dummy Notes (Orchard)][orcharddummynotes].
     ///
     /// [orcharddummynotes]: https://zips.z.cash/protocol/nu5.pdf#orcharddummynotes
-    // pub(crate) fn dummy(
-    //     rng: &mut impl RngCore,
-    //     rho: Option<Rho>,
-    // ) -> (SpendingKey, FullViewingKey, Self) {
-    //     let sk = SpendingKey::random(rng);
-    //     let fvk: FullViewingKey = (&sk).into();
-    //     let recp = fvk.address_at(0u32, Scope::External);
+    pub(crate) fn dummy(rng: &mut impl RngCore, rho: Option<Rho>) -> (EligibleSk, Self) {
+        let sk = EligibleSk::random(rng);
+        // let fvk: FullViewingKey = (&sk).into();
 
-    //     let note = Note::new(
-    //         recp,
-    //         NoteValue::zero(),
-    //         rho.unwrap_or_else(|| Rho::from_nf_old(Nullifier::dummy(rng))),
-    //         rng,
-    //     );
+        let note = Note::new(
+            RecpAddr::try_from(CanonicalAddr::from([43;32])).expect("dang"),
+            NoteValue::zero(),
+            rho.unwrap_or_else(|| Rho::from_nf_old(Nullifier::dummy(rng))),
+            NoteDenom::new_for_proof("I hope you got the necessary doguments and fucking permutations to suck on my shaved balls"),
+            0,
+            sk,  rng,
+        );
 
-    //     (sk, fvk, note)
-    // }
+        (sk, note)
+    }
 
     /// Returns the recp of this note.
     pub fn recp(&self) -> RecpAddr {
@@ -273,9 +272,15 @@ impl Note {
 
     /// Derives the commitment to this note.
     fn commitment_inner(&self) -> CtOption<NoteCommitment> {
+        // derive note commitment via: self.fdi,
+
+        // self.esk.epk(),
         NoteCommitment::derive(
-            self.recp.to_bytes(), // NonIdentityPallasPoint
+            self.recp.to_bytes(),
             self.v,
+            self.nd,
+            Fp::from_u128(self.fdi.into()),
+            self.esk,
             self.rho.0,
             self.rseed.psi(&self.rho),
             self.rseed.rcm(&self.rho),
@@ -288,12 +293,12 @@ impl Note {
     }
     /// Derives the nullifier for this note.
     pub fn nullifier(&self) -> Nullifier {
+        // fvk: &FullViewingKey
         Nullifier::derive(
             self.nk(self.rho()),
-            self.fdi,
-            self.v,
-            self.nd,
-            self.esk.epk(),
+            self.rho.0,
+            self.rseed.psi(&self.rho),
+            self.commitment(),
         )
     }
 

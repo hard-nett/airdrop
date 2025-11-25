@@ -5,12 +5,9 @@ use halo2_base::halo2_proofs::halo2curves::secp256k1::{Fp as Secp256k1Fp, Fq as 
 use halo2_gadgets::{
     ecc::{
         chip::{EccChip, EccConfig},
-        FixedPoint, NonIdentityPoint, Point, ScalarFixed, ScalarFixedShort, ScalarVar,
+        Point,
     },
-    poseidon::{
-        primitives as poseidon, Hash as PoseidonHash, Pow5Chip as PoseidonChip,
-        Pow5Config as PoseidonConfig,
-    },
+    poseidon::{primitives as poseidon, Pow5Chip as PoseidonChip, Pow5Config as PoseidonConfig},
     sinsemilla::{
         chip::{SinsemillaChip, SinsemillaConfig},
         merkle::{
@@ -349,13 +346,6 @@ impl plonk::Circuit<pallas::Base> for HeadstashCircuit {
         // Constrain the hash as the ONLY public input
         layouter.constrain_instance(public_input_hash.cell(), config.primary, PUBLIC_INPUT_HASH)?;
 
-        // ✅ Checklist:
-        // [x] Constrained `leaf` (cm) is derived from provided values
-        // [x] Constrained `leaf` is on tree with known instance `root`
-        // [x] Constrained `nk` is hash-derived from the provided values (esk, rho)
-        // [x] Constrained the pairing of `(esk,epk)` via secp256k1 scalar multiplication
-        // [x] Hashed all public inputs (root, nf, cmx) into single value for efficient verification
-
         Ok(())
     }
 }
@@ -367,9 +357,6 @@ pub struct Instance {
     pub(crate) anchor: Anchor,
     pub(crate) nf_old: Nullifier,
     pub(crate) cmx: ExtractedNoteCommitment,
-    // pub(crate) rk: VerificationKey<SpendAuth>,
-    // pub(crate) enable_spend: bool,
-    // pub(crate) enable_output: bool,
 }
 
 impl Instance {
@@ -422,7 +409,7 @@ mod tests {
     };
 
     /// Degree for testing (2^18 = 262,144 rows for foreign field ops)
-    const K: u32 = 18;
+    const K: u32 = 17;
 
     /// Helper to generate a valid circuit instance using Note template
     fn generate_valid_circuit() -> HeadstashCircuit {

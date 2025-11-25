@@ -1,2 +1,2 @@
-pub mod no_rick;
+mod no_rick;
 pub mod sinsemilla_hashdomain;

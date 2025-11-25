@@ -43,12 +43,11 @@ impl TryFrom<&[u8]> for RecpAddr {
 #[cfg(test)]
 pub mod test {
     use cosmwasm_std::testing::mock_dependencies;
-    use cosmwasm_std::{Addr, Api, CanonicalAddr};
+    use cosmwasm_std::{Api, CanonicalAddr};
 
     #[test]
     fn test_canon() {
         let deps = mock_dependencies();
-        let addr = deps.api.addr_make("ayo");
         let addr = deps.api.addr_make("ayo");
         let canon: CanonicalAddr = deps.api.addr_canonicalize(&addr.to_string()).unwrap();
         println!("{:#?}", addr.to_string());

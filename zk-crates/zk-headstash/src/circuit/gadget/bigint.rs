@@ -282,7 +282,7 @@ mod tests {
     }
 
     // Simple test circuit to verify assignment works
-    #[derive(Default)]
+    #[derive(Debug, Default)]
     struct TestCircuit {
         value: BigUint,
     }
@@ -331,12 +331,19 @@ mod tests {
         }
     }
 
+    const K: u32 = 3;
+
     #[test]
     fn test_circuit_assignment() {
         let value = BigUint::from(12345u32);
         let circuit = TestCircuit { value };
-
         let prover = MockProver::run(17, &circuit, vec![]).unwrap();
         assert_eq!(prover.verify(), Ok(()));
+        let cost =
+            halo2_proofs::dev::CircuitCost::<pasta_curves::vesta::Point, _>::measure(K, &circuit);
+        let proof_size = usize::from(cost.proof_size(1));
+        assert!(proof_size > 0, "Proof size should be non-zero");
+        println!(" proof_size: {}", proof_size);
+        println!(" cost: {:#?}", cost);
     }
 }

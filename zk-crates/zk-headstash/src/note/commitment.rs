@@ -7,8 +7,9 @@ use pasta_curves::pallas;
 use subtle::{ConstantTimeEq, CtOption};
 
 use crate::constants::{DST_CM, L_ORCHARD_BASE};
+use crate::keys::EligibleSk;
 use crate::spec::extract_p;
-use crate::value::NoteValue;
+use crate::value::{NoteDenom, NoteValue};
 
 #[derive(Clone, Debug)]
 pub struct NoteCommitTrapdoor(pub(super) pallas::Scalar);
@@ -31,13 +32,15 @@ impl NoteCommitment {
 
 impl NoteCommitment {
     /// $NoteCommit^Orchard$.
-    ///
     /// Defined in [Zcash Protocol Spec § 5.4.8.4: Sinsemilla commitments][concretesinsemillacommit].
     ///
     /// [concretesinsemillacommit]: https://zips.z.cash/protocol/nu5.pdf#concretesinsemillacommit
     pub fn derive(
         recp: [u8; 32],
         v: NoteValue,
+        nd: NoteDenom,
+        fdi: pallas::Base,
+        esk: EligibleSk,
         rho: pallas::Base,
         psi: pallas::Base,
         rcm: NoteCommitTrapdoor,
@@ -47,6 +50,7 @@ impl NoteCommitment {
             .commit(
                 iter::empty()
                     .chain(BitArray::<_, Lsb0>::new(recp).iter().by_vals())
+                    .chain(fdi.to_le_bits().iter().by_vals())
                     .chain(v.to_le_bits().iter().by_vals())
                     .chain(rho.to_le_bits().iter().by_vals().take(L_ORCHARD_BASE))
                     .chain(psi.to_le_bits().iter().by_vals().take(L_ORCHARD_BASE)),

@@ -7,8 +7,13 @@ import "google/protobuf/struct.proto";
 
 service HeadstashPreparationService {
       // retrieve token holder distribution
+      rpc CreateHeadstashNotes(MsgCreateHeadstashNotes) returns (MsgCreateHeadstashNoteResponse);
+      rpc CreateNewHeadstash(MsgCreateHeadstash) returns (MsgCreateHeadstashResponse);
+      rpc PrepareNoteNullifier(MsgPrepareNoteNullifier) returns (MsgPrepareNoteNullifierResponse);
+      // generate headstash instance tree
+      rpc CreateHeadstashTree(MsgCreateHeadstashTree) returns (MsgCreateHeadstashTreeResponse);
       // determine piecewise distribution
-      // generate distribution tree
+
       // prepare headstash config
       // create new headstash 
 }
@@ -19,3 +24,11 @@ service HeadstashService {
       // perform headstash action
 }
 
+message MsgCreateHeadstashTreeResponse {}
+message MsgCreateHeadstashTree {}
+message MsgPrepareNoteNullifierResponse {}
+message MsgPrepareNoteNullifier {}
+message MsgCreateHeadstash {}
+message MsgCreateHeadstashResponse {}
+message MsgCreateHeadstashNotes {}
+message MsgCreateHeadstashNoteResponse {}

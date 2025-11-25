@@ -1,10 +1,8 @@
-use ff::{Field, PrimeField};
-use pasta_curves::Fq;
-use pasta_curves::arithmetic::CurveAffine;
+use ff::PrimeField;
 use pasta_curves::arithmetic::CurveExt;
 use pasta_curves::group::Curve;
-use pasta_curves::group::Group;
 use pasta_curves::pallas::{Point, Scalar};
+use pasta_curves::Fq;
 use std::u64;
 
 fn string_to_fq(str_bytes: &str) -> Fq {
@@ -22,7 +20,7 @@ fn create_p_and_q(p: &str, q: &str) -> Vec<u8> {
 }
 //
 // In the Pedersen commitment we take two large prime numbers (p & q) to create generator value g which is of the order of q
- // and a subgroup of Z_p*. Then `s` becomes a secret from 0 to Z_q, and we calculate:
+// and a subgroup of Z_p*. Then `s` becomes a secret from 0 to Z_q, and we calculate:
 // h = g^s (mod p)
 // The sender now creates a commitment for a message (m) with a random number (r)
 // c = g^m * h^r (mod p)

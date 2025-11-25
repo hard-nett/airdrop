@@ -1,119 +1,57 @@
 use std::error::Error;
-use std::path::PathBuf;
-use std::str::FromStr;
+use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use std::{env, fs};
 
-// use group::GroupEncoding;
-// use halo2_gadgets::poseidon::primitives as poseidon;
-// use crate::constants::DST_HKDF;
-// use crate::keys::EligibleSk;
-// use secp256k1::SecretKey;
+use pasta_curves::pallas::Base;
+
 use rayon::prelude::*;
 
 use crate::constants::fixed_bases::FIXED_AMOUNTS;
-use crate::constants::sinsemilla::{DST_ND, LEAF_PERSONALIZATION, MERKLE_CRH_PERSONALIZATION};
-
-use crate::note::Note;
+use crate::constants::sinsemilla::{LEAF_PERSONALIZATION, MERKLE_CRH_PERSONALIZATION};
+use crate::note::{Note, Rho};
 use crate::value::NoteDenom;
 
 use base64::{engine::general_purpose, Engine as _};
+use ff::{Field, FromUniformBytes, PrimeField, PrimeFieldBits};
 use hex::decode;
-use serde_json::{json, Value};
-
-use ff::{Field, PrimeField, PrimeFieldBits};
 use pasta_curves::{arithmetic::CurveAffine, group::Curve, pallas, Fp};
+use serde_json::{json, Value};
 use sinsemilla::HashDomain;
 
 pub type BoxError = Box<dyn Error + Send + Sync>;
 
-pub trait HeadstashInstance {
-    type HsErr;
-    type PreInputConfig;
-    fn new() -> Self;
-
-    fn find_new_headstashes() -> Result<(), Self::HsErr>;
-    fn create_new_headstash() -> Result<(), Self::HsErr>;
-    fn list_headstash_info() -> Result<(), Self::HsErr>;
-    fn list_unspent_notes() -> Vec<Note>;
-    fn list_spent_notes() -> Vec<Note>;
-    fn prepare_and_harvest_note() -> Result<(), Self::HsErr>;
-    fn headstash_action() -> Result<(), Self::HsErr>;
-}
-
-pub trait HeadstashBitwiseInstance {
-    /// Convert a byte slice into an iterator of little‑endian bits (LSB first per byte).
-    fn bytes_to_bits_le(bytes: &[u8]) -> impl Iterator<Item = bool> + '_;
-    /// Returns the sum of the 3 88-bit pallas curve point representation of a secp256k1 value
-    fn derive_secp256k1_limbs_sum_const_time(&self, limbs: &[Fp; 3]) -> Fp;
-    /// Note‑Denom (nd): blake3 hash of the token denomination string, represented as the sum of the 3 88-bit pallas curve point representation of private key.
-    fn derive_nd(&self, raw_nd: &str) -> [u8; 32];
-    fn derive_prf_m(&self, i: &Vec<pallas::Base>) -> pallas::Base;
-    fn derive_m(
-        &self,
-        esk: &[u8; 32],
-        fdi: u64,
-        v: u64,
-        nd: &str,
-    ) -> Result<pallas::Base, BoxError>;
-
-    /// Note‑Value (v): u64 encoded as little‑endian 8 bytes (fully padded).
-    fn derive_v(&self, value: u64) -> [u8; 8];
-    /// Fixed‑Denom‑Index (fdi): u64 encoded as little‑endian 8 bytes (fully padded).
-    fn derive_fdi(&self, index: u64) -> [u8; 8];
-    /// nullifier-key derived from private inputs
-    fn derive_nk(&self, raw_pubkey: &[u8; 32], rho: pallas::Base) -> pallas::Base;
-    /// Eligible Pubkey (epk): raw 32‑byte public key as 3x8 limbs.
-    /// Get the bit representation (Lsb0 = little-endian bit order)
-    // Take first 250 bits and convert each to `bool`
-    fn extend_with_base_field_bits(&self, bits: &mut Vec<bool>, a: pallas::Base);
-    /// generates a specific leaf for a given epk,nd,v
-    fn derive_leaf(
-        &self,
-        epk: &str,
-        nd: &str,
-        v: u64,
-    ) -> Result<(Vec<(u64, usize, String)>, Vec<Fp>), BoxError>;
-    // fn derive_note(&self) -> Note;
-}
-
-/// All actions any user would take for a headstash instance
-pub trait TerpHeadstashActions {
-    fn leaf_hash(
-        &self,
-        epk: &[u8],
-        nd: &[u8],
-        v: &[u8],
-        fdi: &[u8],
-    ) -> Result<pallas::Base, BoxError>;
-    // Calculate MerkleCRH: H(layer || left || right)
-    fn merkle_crh(&self, layer: u32, left: pallas::Base, right: pallas::Base) -> pallas::Base;
-    fn tree_root_from_leaves(&self, leaves: Vec<pallas::Base>) -> Vec<pallas::Base>;
-    fn get_input_path(&self) -> Result<String, BoxError>;
-    fn gen_headstash_tree(&self, input: PathBuf) -> Result<String, BoxError>;
-    fn gen_headstash_my_notes(&self, input: PathBuf, output: PathBuf) -> Result<(), BoxError>;
-    fn print_tree(
-        &self,
-        input: &mut Value,
-        output: Value,
-        path: &std::path::Path,
-    ) -> Result<(), BoxError>;
+pub fn get_cli_args() -> Result<(String, String), Box<dyn std::error::Error>> {
+    let args: Vec<String> = env::args().collect();
+    if args.len() != 3 {
+        eprintln!(
+            "provide the following flags: {} <input-file> <address>",
+            args[0]
+        );
+        std::process::exit(1);
+    }
+    Ok((args[1].clone(), args[2].clone()))
 }
 
 pub struct TerpHeadstash {}
-pub struct TerpHeadstashConfig {}
+impl HeadstashBitwiseInstance for TerpHeadstash {}
+impl TerpHeadstashActions for TerpHeadstash {}
 
-impl HeadstashInstance for TerpHeadstash {
-    type HsErr = BoxError;
-    type PreInputConfig = TerpHeadstashConfig;
-    fn new() -> Self {
+impl TerpHeadstash {
+    pub fn new() -> Self {
         Self {}
     }
+}
+pub struct TerpHeadstashConfig {}
+pub trait HeadstashInstance {
+    type HsErr;
 
     fn find_new_headstashes() -> Result<(), Self::HsErr> {
         // TODO: wire into network client for headstash market contract state queries
         todo!()
     }
+
+    fn create_headstash_notes() -> Result<(), Self::HsErr>;
 
     fn create_new_headstash() -> Result<(), Self::HsErr> {
         // TODO:
@@ -152,33 +90,91 @@ impl HeadstashInstance for TerpHeadstash {
     }
 }
 
-impl HeadstashBitwiseInstance for TerpHeadstash {
+pub trait HeadstashBitwiseInstance {
+    /// Convert a byte slice into an iterator of little‑endian bits (LSB first per byte).
     fn bytes_to_bits_le(bytes: &[u8]) -> impl Iterator<Item = bool> + '_ {
         bytes
             .iter()
             .flat_map(|b| (0..8).map(move |i| (b >> i) & 1 == 1))
     }
 
-    /// Derives `nd` by domain-separation blake3 hash with domain-separation `DST_ND` of a note denomination.
-    ///  We drop 3 bits to allow hash to become point on pallas curve.
+    /// Returns the sum of the 3 88-bit pallas curve point representation of a secp256k1 value
+    fn derive_secp256k1_limbs_sum_const_time(&self, bytes: &[Fp; 3]) -> Fp {
+        let limb3 = &bytes[0];
+        let limb2 = &bytes[1];
+        let limb1 = &bytes[2];
+        limb1.add(&limb2.add(&limb3))
+    }
+    /// Note‑Denom (nd): blake3 hash of the token denomination string, represented as the sum of the 3 88-bit pallas curve point representation of private key.
     fn derive_nd(&self, raw_nd: &str) -> [u8; 32] {
-        crate::spec::nd_to_fp(&NoteDenom::new_for_proof(raw_nd)).to_repr()
+        NoteDenom::new_for_proof(raw_nd)
+            .as_bytes()
+            .try_into()
+            .expect("NoteDenom is always 32 bytes")
     }
 
-    /// Derive fully padded `v`.
+    fn derive_m(
+        &self,
+        esk: &[u8; 32],
+        fdi: u64,
+        v: u64,
+        nd: &str,
+    ) -> Result<pallas::Base, BoxError> {
+        let esk = self.derive_secp256k1_limbs_sum_const_time(&self.derive_esk(*esk));
+
+        let (fdi, v, nd) = (
+            Fp::from_u128(u64::from_le_bytes(self.derive_fdi(fdi)) as u128),
+            Fp::from_repr(NoteDenom::new_for_proof(nd).as_bytes().try_into().unwrap()).expect("nd"),
+            Fp::from_u128(u64::from_le_bytes(self.derive_v(v)) as u128),
+        );
+
+        Ok(crate::spec::prf_pallas_m(fdi, v, nd, esk))
+    }
+    fn derive_esk(&self, sk: [u8; 32]) -> [Fp; 3] {
+        let skfq =
+            halo2_base::halo2_proofs::halo2curves::secq256k1::Fp::from_repr(sk).expect("valid Fq");
+        let sk_big = halo2_base::utils::fe_to_biguint(&skfq);
+        crate::spec::decompose_biguint_simple(&sk_big, 3, 88)
+            .try_into()
+            .unwrap()
+    }
+
+    fn derive_epk(&self, pk: [u8; 32]) -> [Fp; 3] {
+        let pkfq =
+            halo2_base::halo2_proofs::halo2curves::secq256k1::Fp::from_repr(pk).expect("valid Fq");
+        let sk_big = halo2_base::utils::fe_to_biguint(&pkfq);
+        crate::spec::decompose_biguint_simple(&sk_big, 3, 88)
+            .try_into()
+            .unwrap()
+    }
     fn derive_v(&self, v: u64) -> [u8; 8] {
         v.to_le_bytes()
     }
 
-    /// Derive fully padded `fdi`.
     fn derive_fdi(&self, fdi: u64) -> [u8; 8] {
         fdi.to_le_bytes()
     }
-
-    fn extend_with_base_field_bits(&self, bits: &mut Vec<bool>, a: pallas::Base) {
+    fn derive_nk(&self, raw_pubkey: &[u8; 32], rho: pallas::Base) -> pallas::Base {
+        // TODO:
+        // - convert raw_pk to 3x88 bit limbs
+        // - derive message from note inputs
+        crate::spec::hdkf_pallas(pallas::Base::one(), rho)
+    }
+    fn extend_with_base_field_bits(bits: &mut Vec<bool>, a: pallas::Base) {
         let bit_slice = a.to_le_bits();
-
         bits.extend(bit_slice.iter().take(250).map(|b| *b));
+    }
+}
+
+/// All actions any user would take for a headstash instance
+pub trait TerpHeadstashActions: HeadstashBitwiseInstance {
+    fn get_input_path(&self) -> Result<String, BoxError> {
+        let args: Vec<String> = env::args().collect();
+        if args.len() != 2 {
+            eprintln!("Usage: {} <input-file>", args[0]);
+            std::process::exit(1);
+        }
+        Ok(args[1].clone())
     }
 
     // -----------------------------------------------------------------------------
@@ -188,7 +184,10 @@ impl HeadstashBitwiseInstance for TerpHeadstash {
         addr: &str,
         token_name: &str,
         total_amount: u64,
-    ) -> Result<(Vec<(u64, usize, String)>, Vec<Fp>), BoxError> {
+    ) -> Result<(Vec<(u64, usize, String)>, Vec<Fp>), BoxError>
+    where
+        Self: Sync,
+    {
         // ---------- build work list ------------------------------------------------
         let mut work_items: Vec<u64> = Vec::new();
         let mut remainder = total_amount;
@@ -218,27 +217,25 @@ impl HeadstashBitwiseInstance for TerpHeadstash {
         };
 
         // `enumerate` gives us the leaf‑index (0‑based) for this address/token
-        // work_items.par_iter().enumerate().try_for_each(
-        //     |(idx, &fixed_amount)| -> Result<(), BoxError> {
-        //         let leaf = self.leaf_hash(
-        //             &self
-        //                 .derive_secp256k1_limbs_sum_const_time(
-        //                     &self.derive_hkdf_pallas(&addr_bytes),
-        //                 )
-        //                 .to_repr(),
-        //             &self.derive_nd(token_name),
-        //             &self.derive_v(fixed_amount),
-        //             &self.derive_fdi(idx as u64),
-        //         )?;
-        //         let leaf_hex = format!("0x{}", hex::encode(leaf.to_repr()));
-        //         leaf_hexes
-        //             .lock()
-        //             .unwrap()
-        //             .push((fixed_amount, idx, leaf_hex));
-        //         raw_leaves.lock().unwrap().push(leaf);
-        //         Ok(())
-        //     },
-        // )?;
+        work_items.par_iter().enumerate().try_for_each(
+            |(idx, &fixed_amount)| -> Result<(), BoxError> {
+                let leaf = self.leaf_hash(
+                    &self
+                        .derive_secp256k1_limbs_sum_const_time(&self.derive_esk(*addr_bytes))
+                        .to_repr(),
+                    &self.derive_nd(token_name),
+                    &self.derive_v(fixed_amount),
+                    &self.derive_fdi(idx as u64),
+                )?;
+                let leaf_hex = format!("0x{}", hex::encode(leaf.to_repr()));
+                leaf_hexes
+                    .lock()
+                    .unwrap()
+                    .push((fixed_amount, idx, leaf_hex));
+                raw_leaves.lock().unwrap().push(leaf);
+                Ok(())
+            },
+        )?;
 
         Ok((
             leaf_hexes.into_inner().unwrap(),
@@ -246,89 +243,10 @@ impl HeadstashBitwiseInstance for TerpHeadstash {
         ))
     }
 
-    fn derive_secp256k1_limbs_sum_const_time(&self, bytes: &[Fp; 3]) -> Fp {
-        let limb3 = &bytes[0];
-        let limb2 = &bytes[1];
-        let limb1 = &bytes[2];
-        limb1.add(&limb2.add(&limb3))
-    }
-
-    fn derive_m(
-        &self,
-        esk: &[u8; 32],
-        fdi: u64,
-        v: u64,
-        nd: &str,
-    ) -> Result<pallas::Base, BoxError> {
-        // generate the sum of 3x88bit limbs of esk
-        // let sk = EligibleSk::from(SecretKey::from_byte_array(*esk)?);
-        // let secp256k1_ls = self.derive_secp256k1_limbs_sum_const_time(limbs)
-
-        // ensure fdi & v are fully padded
-        let fdi = self.derive_fdi(fdi);
-        let v = self.derive_v(v);
-
-        // posiedon hash nd
-        let nd = &NoteDenom::from_str(nd)?;
-
-        // derive m as hash of ()
-        Ok(pallas::Base::one())
-    }
-
-    fn derive_prf_m(&self, i: &Vec<pallas::Base>) -> pallas::Base {
-        let (fdi, v, nd, esk) = (i[0], i[1], i[2], i[3]);
-        crate::spec::prf_pallas_m(fdi, v, nd, esk)
-    }
-
-    fn derive_nk(&self, raw_pubkey: &[u8; 32], rho: pallas::Base) -> pallas::Base {
-        // TODO: convert raw_pubkey to pallas point used in hdkf specification of deriving the nullifier.
-        crate::spec::hdkf_pallas(pallas::Base::one(), rho)
-    }
-}
-
-impl TerpHeadstashActions for TerpHeadstash {
-    /// Compute the leaf hash for an address-token-amount tuple
-    /// Concatenate all bytes in canonical order: epk + nd + v + fdi
-    fn leaf_hash(
-        &self,
-        epk: &[u8],
-        nd: &[u8],
-        v: &[u8],
-        fdi: &[u8],
-    ) -> Result<pallas::Base, BoxError> {
-        let mut message_bytes = Vec::new();
-        message_bytes.extend_from_slice(epk);
-        message_bytes.extend_from_slice(nd);
-        message_bytes.extend_from_slice(v);
-        message_bytes.extend_from_slice(fdi);
-        Ok(HashDomain::new(LEAF_PERSONALIZATION)
-            .hash_to_point(TerpHeadstash::bytes_to_bits_le(&message_bytes).into_iter())
-            .expect("dang")
-            .to_affine()
-            .coordinates()
-            .unwrap()
-            .x()
-            .clone())
-    }
-
-    fn merkle_crh(&self, layer: u32, left: pallas::Base, right: pallas::Base) -> pallas::Base {
-        let domain = HashDomain::new(MERKLE_CRH_PERSONALIZATION);
-        // bit string: 10 + 250 + 250 = 510 bits
-        let mut message = Vec::with_capacity(510);
-
-        for i in 0..10 {
-            message.push((layer >> i) & 1 == 1);
-        }
-
-        self.extend_with_base_field_bits(&mut message, left);
-        self.extend_with_base_field_bits(&mut message, right);
-
-        // Hash and return x-coordinate
-        let point = domain.hash_to_point(message.into_iter()).unwrap();
-        point.to_affine().coordinates().unwrap().x().clone()
-    }
-
-    fn gen_headstash_tree(&self, output_path: PathBuf) -> Result<String, BoxError> {
+    fn gen_headstash_tree(&self, output_path: PathBuf) -> Result<String, BoxError>
+    where
+        Self: Sync,
+    {
         let mut data: Value = serde_json::from_str(&fs::read_to_string(&self.get_input_path()?)?)?;
         let mut leaves = Vec::new();
         let balances = data.as_object_mut().ok_or("Input JSON must be an object")?;
@@ -413,48 +331,168 @@ impl TerpHeadstashActions for TerpHeadstash {
 
     // Build Merkle tree from list of leaves
     fn tree_root_from_leaves(&self, leaves: Vec<pallas::Base>) -> Vec<pallas::Base> {
-        let mut current = leaves;
-        let mut next = Vec::new();
-        let mut layer = 0;
-        while current.len() > 1 {
-            // Pad to even length with zero if needed
-            if current.len() % 2 != 0 {
-                current.push(pallas::Base::ZERO);
+        let mut c = leaves;
+        let mut n = Vec::new();
+        let mut l = 0;
+        while c.len() > 1 {
+            if c.len() % 2 != 0 {
+                c.push(pallas::Base::ZERO);
             }
-
-            // Parallelize the pair‑wise hashing
-            // ---------------------------------------------------------
-            let layer_par = layer; // capture layer for closure
-            let parents: Vec<pallas::Base> = current
-                .par_chunks(2) // split into 2‑element chunks in parallel
-                .map(|chunk| {
-                    let left = chunk[0];
-                    let right = chunk[1];
-                    self.merkle_crh(layer_par, left, right)
-                })
-                .collect();
-
-            next.extend(parents);
-            // ---------------------------------------------------------
-
-            current = next;
-            next = Vec::new();
-            layer += 1;
+            let lp = l;
+            let p = c
+                .par_chunks(2)
+                .map(|c| Self::merkle_crh(lp, c[0], c[1]))
+                .collect::<Vec<pallas::Base>>();
+            n.extend(p);
+            c = n;
+            n = Vec::new();
+            l += 1;
         }
-        if current.is_empty() {
+        if c.is_empty() {
             vec![pallas::Base::ZERO]
         } else {
-            current
+            c
         }
     }
 
-    fn get_input_path(&self) -> Result<String, BoxError> {
-        let args: Vec<String> = env::args().collect();
-        if args.len() != 2 {
-            eprintln!("Usage: {} <input-file>", args[0]);
+    // Calculate MerkleCRH: H(layer || left || right)
+    fn merkle_crh(layer: u32, left: pallas::Base, right: pallas::Base) -> pallas::Base {
+        let domain = HashDomain::new(MERKLE_CRH_PERSONALIZATION);
+        // bit string: 10 + 250 + 250 = 510 bits
+        let mut message = Vec::with_capacity(510);
+
+        for i in 0..10 {
+            message.push((layer >> i) & 1 == 1);
+        }
+
+        <TerpHeadstash as HeadstashBitwiseInstance>::extend_with_base_field_bits(
+            &mut message,
+            left,
+        );
+        <TerpHeadstash as HeadstashBitwiseInstance>::extend_with_base_field_bits(
+            &mut message,
+            right,
+        );
+
+        // Hash and return x-coordinate
+        let point = domain.hash_to_point(message.into_iter()).unwrap();
+        point.to_affine().coordinates().unwrap().x().clone()
+    }
+
+    /// Compute the leaf hash for an address-token-amount tuple
+    fn leaf_hash(
+        &self,
+        epk: &[u8],
+        nd: &[u8],
+        v: &[u8],
+        fdi: &[u8],
+    ) -> Result<pallas::Base, BoxError> {
+        let mut message_bytes = Vec::new();
+        message_bytes.extend_from_slice(epk);
+        message_bytes.extend_from_slice(nd);
+        message_bytes.extend_from_slice(v);
+        message_bytes.extend_from_slice(fdi);
+        Ok(HashDomain::new(LEAF_PERSONALIZATION)
+            .hash_to_point(TerpHeadstash::bytes_to_bits_le(&message_bytes).into_iter())
+            .expect("dang")
+            .to_affine()
+            .coordinates()
+            .unwrap()
+            .x()
+            .clone())
+    }
+    fn gen_headstash_notes(&self) -> Result<(), BoxError> {
+        let (input_path, addr_target) = get_cli_args().unwrap();
+        let input_data: Value = serde_json::from_str(&fs::read_to_string(&input_path)?)?;
+        // TerpHeadstash::gen_headstash_tree(&self, input);
+        let mut address_notes = serde_json::Map::new();
+
+        if let Value::Object(map) = &input_data {
+            if let Some(holdings) = map.get(&addr_target) {
+                if let Value::Array(holding_array) = holdings {
+                    for holding in holding_array.iter() {
+                        // token identifier: raw value ("uterp", "ibc/...", "tokenfactory/...")
+                        let token_name = holding["name"].as_str().unwrap().to_string();
+                        let _total_amount = holding["amount"].as_str().unwrap();
+
+                        let leaves = match holding.get("leaves") {
+                            Some(Value::Array(arr)) => arr,
+                            _ => {
+                                eprintln!("⚠️  No \"leaves\" array for token {}", token_name);
+                                std::process::exit(1);
+                            }
+                        };
+
+                        let mut generated_notes = Vec::new();
+
+                        for leaf in leaves.iter() {
+                            // concrete amount for this note
+                            let amnt = leaf["amnt"].as_u64().unwrap_or_else(|| {
+                                eprintln!("⚠️  Missing \"amnt\" in leaf for token {}", token_name);
+                                std::process::exit(1);
+                            });
+
+                            // the fdi value (the leaf itself)
+                            let fdi = leaf["index"].as_u64().unwrap_or_else(|| {
+                                eprintln!("⚠️  Missing \"index\" in leaf for token {}", token_name);
+                                std::process::exit(1);
+                            });
+
+                            generated_notes.push(json!({
+                                "m":          "",
+                                "esk":    &addr_target,
+                                "nul_sk":     "",
+                                "sig_jub":    "",
+                                "fdi":        fdi,
+                                "amount":     amnt.to_string(),
+                                "denom":      token_name.clone(),
+                                "recp":       "",
+                                "nul":   "",
+                                "epk":     "",
+                                "ψ":          "",
+                                "note_cm":    ""
+                            }));
+                        }
+
+                        // ------------------------------------------------------------------
+                        // 3️⃣  Insert the array of notes for this token into the final map
+                        // ------------------------------------------------------------------
+                        address_notes.insert(token_name, Value::Array(generated_notes));
+                    }
+                } else {
+                    eprintln!(
+                        "Error: Address '{}' does not have holdings array.",
+                        addr_target
+                    );
+                    std::process::exit(1);
+                }
+            } else {
+                eprintln!("Error: Address '{}' not found in input data.", addr_target);
+                std::process::exit(1);
+            }
+        } else {
+            eprintln!("Error: Input data is not a JSON object.");
             std::process::exit(1);
         }
-        Ok(args[1].clone())
+
+        // Create output file: ./data/<address>_notes.json
+        let output_dir = Path::new("./data/notes");
+        let safe_addr: String = addr_target
+            .chars()
+            .filter(|c| c.is_ascii_alphanumeric())
+            .collect();
+        let output_path = output_dir.join(format!("{}.json", safe_addr));
+
+        fs::create_dir_all(output_dir)?;
+        fs::write(&output_path, serde_json::to_string_pretty(&address_notes)?)?;
+
+        eprintln!("✅ Default Genesis Notes generated for {}", addr_target);
+        eprintln!("📁 Written to: {}", output_path.display());
+
+        Ok(())
+    }
+    fn gen_headstash_my_notes(&self, input: PathBuf, output: PathBuf) -> Result<(), BoxError> {
+        todo!()
     }
 
     fn print_tree(
@@ -463,7 +501,6 @@ impl TerpHeadstashActions for TerpHeadstash {
         output: Value,
         path: &std::path::Path,
     ) -> Result<(), BoxError> {
-        // Write augmented input (with embedded leaves)
         fs::write(
             &self.get_input_path()?,
             serde_json::to_string_pretty(&input)?,
@@ -472,11 +509,233 @@ impl TerpHeadstashActions for TerpHeadstash {
         let merkle_path = path.join("merkle_output.json");
         fs::write(&merkle_path, serde_json::to_string_pretty(&output)?)?;
         eprintln!("✅ Merkle output written to {}", merkle_path.display());
+        Ok(())
+    }
+
+    // ------------------------------------------------
+    // Find the first note matching token & amount, return its fdi
+    fn find_fdi(input_path: &str, token: &str, amount: &str) -> Result<u64, BoxError> {
+        let json: Value =
+            serde_json::from_str(&fs::read_to_string(std::path::Path::new(input_path))?)?;
+
+        let notes = json
+            .get(token)
+            .and_then(|v| v.as_array())
+            .ok_or("Missing or invalid `uterp` array")?;
+
+        // 4️⃣ iterate until we find a matching entry
+        for note in notes {
+            let denom_match = note.get("denom").and_then(|v| v.as_str()) == Some(token);
+            let amount_match = note.get("amount").and_then(|v| v.as_str()) == Some(amount);
+
+            if denom_match && amount_match {
+                // fdi is a number (u32); pull it out
+                let fdi = note
+                    .get("fdi")
+                    .and_then(|v| v.as_u64())
+                    .ok_or("Missing or invalid `fdi` field")?;
+                return Ok(fdi);
+            }
+        }
+
+        Err(format!(
+            "No note found for token '{}' with amount '{}'",
+            token, amount
+        )
+        .into())
+    }
+
+    fn get_note_path() -> Result<(String, String, String), BoxError> {
+        let args: Vec<String> = env::args().collect();
+        if args.len() != 4 {
+            eprintln!(
+                "Usage: {} ./data/notes/<elig_addr> <token-denom> <amount> ",
+                args[0]
+            );
+            std::process::exit(1);
+        }
+        Ok((args[1].clone(), args[2].clone(), args[3].clone()))
+    }
+
+    // /// Derive a 32‑byte seed from a BIP‑39 mnemonic (no passphrase here for brevity).
+    // fn derive_secp256k1_seed_from_mnemonic(mnemonic: &str) -> [u8; 64] {
+    //     let mn = Mnemonic::parse_in_normalized(Language::English, mnemonic).unwrap();
+    //     mn.to_seed_normalized("HEADSTASH")
+    // }
+    // /// Derive an Ethereum secp256k1 secret key.
+    // fn eth_secret_from_seed(seed: &[u8]) -> SecpSecretKey {
+    //     SecpSecretKey::from_byte_array(hkdf_expand(LABEL, seed)).expect("invalid eth secret")
+    // }
+
+    /// # Headstash: Create Nullifier
+    /// ```sh
+    /// # ex:  cargo run --bin create_nullifiers -- 0x0000000000000000000000000000000000000000 uterp 100
+    /// cargo run --bin create_nullifier -- <elig_addr> <token-denom> <amount>
+    /// ```
+    ///  Derives a nullifier, which is a pallas curve point derived from the hkdf used with an `esk`,
+    fn gen_note_nullifier(&self) -> Result<(), BoxError> {
+        Ok(())
+    }
+
+    fn rho_from_secure_random() -> Rho {
+        let mut randomness_64 = [0; 64];
+        blake3::Hasher::new()
+            .update(&headstash_randomness::ultra_secure_random())
+            .finalize_xof()
+            .fill(&mut randomness_64);
+
+        Rho::from_bytes(&Base::from_uniform_bytes(&randomness_64).to_repr()).unwrap()
+    }
+}
+
+// TODO:
+// - notecommitment derivation accuracy
+// - nullifier derivation accuracy
+// - document DST & hashing algo constant in spec
+
+// TEST:
+// nullifier should not be impacted by randomness inputs
+// nullifier should change with different esk/epk
+//
+
+#[cfg(test)]
+mod test {
+
+    use super::*;
+    use std::collections::HashMap;
+
+    #[test]
+    pub fn test_note_accuracy() -> Result<(), Box<dyn std::error::Error>> {
+        // Load original allocations
+        let input_data: Value =
+            serde_json::from_str(&fs::read_to_string("./data/genesis_sinsemilla.json")?)?;
+
+        // Load generated notes for the zero address
+        let notes_path = "./data/notes/0x0000000000000000000000000000000000000000.json";
+        let calculated_notes: Value = serde_json::from_str(&fs::read_to_string(notes_path)?)?;
+
+        // Extract original holdings
+        let mut original_balances: HashMap<String, u64> = HashMap::new();
+
+        if let Value::Object(map) = &input_data {
+            if let Some(holdings) = map.get("0x0000000000000000000000000000000000000000") {
+                if let Value::Array(holding_array) = holdings {
+                    for holding in holding_array {
+                        if let Some(name) = holding["name"].as_str() {
+                            let amount_str = holding["amount"].as_str().unwrap_or("0");
+                            let amount: u64 = amount_str.parse().unwrap_or(0);
+                            *original_balances.entry(name.to_string()).or_insert(0) += amount;
+                        }
+                    }
+                }
+            }
+        }
+
+        // Extract and sum note values from generated notes
+        let mut notes_sum: HashMap<String, u64> = HashMap::new();
+
+        if let Value::Object(note_map) = &calculated_notes {
+            for (token_name, notes) in note_map {
+                if let Value::Array(note_array) = notes {
+                    for note in note_array {
+                        if let Some(v_str) = note["v"].as_str() {
+                            let v: u64 = v_str.parse().unwrap_or(0);
+                            *notes_sum.entry(token_name.clone()).or_insert(0) += v;
+                        }
+                    }
+                }
+            }
+        }
+
+        // Compare: original vs summed note values
+        for (token, original_amount) in &original_balances {
+            let note_total = notes_sum.get(token).copied().unwrap_or(0);
+            assert_eq!(
+                original_amount, &note_total,
+                "Token {}: allocation ({}) does not match total notes ({})",
+                token, original_amount, note_total
+            );
+        }
+
+        // Also check for extra tokens in notes not in original
+        for (token, _) in &notes_sum {
+            assert!(
+                original_balances.contains_key(token),
+                "Token {} appears in notes but not in original allocation",
+                token
+            );
+        }
 
         Ok(())
     }
 
-    fn gen_headstash_my_notes(&self, input: PathBuf, output: PathBuf) -> Result<(), BoxError> {
-        todo!()
+    use super::*;
+    use serde_json::Value;
+    use std::fs;
+
+    fn load_data() -> Result<Value, BoxError> {
+        let file = fs::File::open("./data/genesis_sinsemilla.json")?;
+        let reader = std::io::BufReader::new(file);
+        Ok(serde_json::from_reader(reader)?)
     }
+
+    // Ensures input data is in compatible format
+    #[test]
+    pub fn test_input_data_accuracy() -> Result<(), BoxError> {
+        let data = load_data()?;
+        if !data.is_object() {
+            panic!("Expected JSON object (map) at root");
+        }
+
+        for (addr, tokens) in data.as_object().unwrap().iter() {
+            assert!(tokens.is_array(), "Value for {} must be an array", addr);
+            for token in tokens.as_array().unwrap() {
+                let obj = token.as_object().unwrap();
+                assert!(obj.contains_key("amount"), "missing required key 'amount'");
+                assert!(obj.contains_key("token"), " missing required key 'token'");
+                assert!(obj["amount"].is_string(), "'amount' must be a string");
+                assert!(obj["token"].is_string(), "'token' must be a string");
+            }
+        }
+
+        Ok(())
+    }
+
+    // #[test]
+    // pub fn test_leaves_accuracy() -> Result<(), BoxError> {
+    //     let data = load_data()?;
+    //     // Expect top-level object: { "addr": [ { token, amount, leaf }, ... ] }
+    //     let balances = data.as_object().ok_or("JSON must be an object")?;
+    //     for (address, allocs) in balances {
+    //         let alloc_array = allocs.as_array().unwrap();
+
+    //         for token_obj in alloc_array {
+    //             let token_name = token_obj["token"].as_str().unwrap_or_default();
+    //             let amount = token_obj["amount"].as_str().unwrap_or_default();
+    //             let expected_leaf_hex = token_obj["leaf"].as_str().unwrap_or_default();
+
+    //             // Remove 0x prefix if present
+    //             let expected_bytes = if expected_leaf_hex.starts_with("0x") {
+    //                 hex::decode(&expected_leaf_hex[2..])?
+    //             } else {
+    //                 hex::decode(expected_leaf_hex)?
+    //             };
+
+    //             // Re-compute expected scalar from address + token + amount
+    //             let computed_leaf = leaf_hash(address, token_name, amount,)?;
+    //             let computed_bytes = computed_leaf.to_repr();
+
+    //             // Compare raw field element bytes
+    //             assert_eq!(
+    //                 computed_bytes.as_ref(),
+    //                 expected_bytes.as_slice(),
+    //                 "Leaf mismatch for address={}, token={}",
+    //                 address,
+    //                 token_name
+    //             );
+    //         }
+    //     }
+
+    //     Ok(())
+    // }
 }

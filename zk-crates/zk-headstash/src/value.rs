@@ -44,8 +44,8 @@ impl NoteDenom {
     pub fn new_for_proof(denom: &str) -> Self {
         let hash = Self::hash(denom);
         let mut bytes = *hash.as_bytes();
-
-        bytes[0] &= 0x1F;
+    
+        bytes[31] &= 0x1F;
         // Convert to NoteDenom type (assuming NoteDenom wraps [u8; 32])
         NoteDenom { bytes }
     }

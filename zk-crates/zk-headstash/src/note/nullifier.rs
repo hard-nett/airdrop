@@ -1,7 +1,9 @@
 use ff::PrimeField;
+use group::Group;
 use memuse::DynamicUsage;
 use pasta_curves::arithmetic::CurveExt;
 use pasta_curves::pallas;
+use rand::RngCore;
 use subtle::CtOption;
 
 use crate::keys::{EligiblePk, EligibleSk, NullifierDerivingKey};
@@ -26,20 +28,34 @@ impl Nullifier {
     pub fn to_bytes(self) -> [u8; 32] {
         self.0.to_repr()
     }
-    /// $DeriveNullifier$.
+    /// ```math
+    /// DeriveNullifier
+    /// ```
     ///
-    /// Defined in [Zcash Protocol Spec § 4.16: Note Commitments and Nullifiers][commitmentsandnullifiers].
-    ///
-    /// [commitmentsandnullifiers]: https://zips.z.cash/protocol/nu5.pdf#commitmentsandnullifiers
+    /// Defined in Headstash Protocol Spec: TODO-map to defintion in spec
     pub fn derive(
         nk: NullifierDerivingKey,
-        fdi: u64,
-        v: NoteValue,
-        nd: NoteDenom,
-        esk: EligiblePk,
+        rho: pallas::Base,
+        psi: pallas::Base,
+        cm: NoteCommitment,
     ) -> Self {
         let k = pallas::Point::hash_to_curve("terp.network:headstash")(b"K");
         // TODO: derive nullifier by deriving nullifier key from correct inputs & hash dst, then use the
-        Nullifier(extract_p(&(k * mod_r_p(pallas::Base::one()))))
+        Nullifier(extract_p(&(k * mod_r_p(nk.prf_nf(rho)))))
+    }
+    /// Generates a dummy nullifier for use as $\rho$ in dummy spent notes.
+    ///
+    /// Nullifiers are required by consensus to be unique. For dummy output notes, we get
+    /// this restriction as intended: the note's $\rho$ value is set to the nullifier of
+    /// the accompanying spent note within the action, which is constrained by consensus
+    /// to be unique. In the case of dummy spent notes, we get this restriction by
+    /// following the chain backwards: the nullifier of the dummy spent note will be
+    /// constrained by consensus to be unique, and the nullifier's uniqueness is derived
+    /// from the uniqueness of $\rho$.
+    ///
+    /// Instead of explicitly sampling for a unique nullifier, we rely here on the size of
+    /// the base field to make the chance of sampling a colliding nullifier negligible.
+    pub(crate) fn dummy(rng: &mut impl RngCore) -> Self {
+        Nullifier(extract_p(&pallas::Point::random(rng)))
     }
 }

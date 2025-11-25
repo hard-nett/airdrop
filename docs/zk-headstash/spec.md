@@ -116,6 +116,23 @@ When a note is is being spent, the owner generates a nullifier & note commitment
 - b. add hash output to psi
 - c. Multiply scalar by NullifierK
 
+
+```math
+\begin{array}{lcl}
+
+\textbf{Private witnesses} &
+\begin{cases}
+\mathsf{esk}\in\mathbb{F}_{\ell}      &\text{(secret key being proved is paired to $\text{epk}$)}\\[2pt]
+\mathsf{epk}= (X_{\mathsf{pk}},Y_{\mathsf{pk}})\in\mathbb{F}_{p}^{\,2}&\text{(eligible public key for headstash)}\\
+\mathsf{leaf}= (X_{\mathsf{pk}},Y_{\mathsf{pk}})\in\mathbb{F}_{p}^{\,2}&\text{(specific leaf hash of note owner knows)}\\
+\mathsf{fdi}      \in \mathbb{F}_p      &\text{(fully padded u64 of fixed denomination index }fdi\text{)}\\[2pt]
+\mathsf{{\psi }}        \in \{0,1\}^{256}       &:= \text{PRF}_{\text{PSI}}\!\bigl(\mathsf{rseed},\,\rho\bigr) \in \mathbb{F}_p,\\[4pt]
+\mathsf{rcm} &:= \text{PRF}_{\text{RCM}}\!\bigl(\mathsf{rseed},\,\rho\bigr) \in \mathbb{F}_p,\\[6pt]
+\end{cases}
+\end{array}
+```
+
+
 ### Hashing Functions
 
 #### Posiedon
@@ -162,7 +179,7 @@ Sinsemilla is a ZK-friendly hash function designed specifically for Pallas/Vesta
 ```math
 \begin{array}{lcl}
  \mathsf{m}=\text{Leaf}_{i,j}&= H_{\text{DST\_HKDF}}{\text{leaf}}\!\Bigl(
-        \underbrace{\text{elig\_pk}_{i}}_{\text{public address}}\;\parallel\;
+        \underbrace{\text{epk}_{i}}_{\text{public address}}\;\parallel\;
         \underbrace{\text{nd}_{j}}_{\text{token identifier}}\;\parallel\;
         \underbrace{\text{v}_{i,j}}_{\text{amount for addr}_{i}}\;\parallel\;
         \underbrace{\text{fdi}_{j}}_{\text{fixed\_denom\_index}}\Bigr)  
@@ -187,7 +204,7 @@ Sinsemilla is a ZK-friendly hash function designed specifically for Pallas/Vesta
 |--------|---------|
 | $$\text{Elig}$$ | Set of all public addresses receiving tokens |
 | $$\mathcal{T}$$ | Set of token names being distributed |
-| $$\text{elig\_pk}_{i}$$ | The *i*‑th address in `Elig`, expected as an array of 3 88 bit limbs |
+| $$\text{epk}_{i}$$ | The *i*‑th address in `Elig`, expected as an array of 3 88 bit limbs |
 | $$\text{nd}_{j}$$ | The *j*‑th token $\mathcal{T}$ hashed using a note denomination separation tag curve |
 | $$\text{v}_{i,j}$$ | Amount of token *j* sent to address *i* |
 | $$\text{fdi}_{j}$$ | Fixed denomination index for token *j*, always kept private and never revealed |
@@ -234,13 +251,7 @@ A leaf is computed using the sinsemilla hashing function with the following inpu
 
 \textbf{Private witnesses} &
 \begin{cases}
-\mathsf{elig\_sk}\in\mathbb{F}_{\ell}      &\text{(secret scalar, 3x88bit limbs for pallas field compatibility)}\\[2pt]
-\mathsf{elig\_pk}= (X_{\mathsf{pk}},Y_{\mathsf{pk}})\in\mathbb{F}_{p}^{\,2}&\text{(corresponding public point)}\\
-\mathsf{leaf}= (X_{\mathsf{pk}},Y_{\mathsf{pk}})\in\mathbb{F}_{p}^{\,2}&\text{(specific leaf hash of note owner knows)}\\
-\mathsf{fdi}      \in \mathbb{F}_p      &\text{(fully padded u64 of fixed denomination index }fdi\text{)}\\[2pt]
-\mathsf{hkdf\_sk}  \in \{0,1\}^{256}   &\text{(32‑byte secret-key of Pallas curve key derived from eligible secret key)}\\[2pt]
-\mathsf{{\psi }}        \in \{0,1\}^{256}       &:= \text{PRF}_{\text{PSI}}\!\bigl(\mathsf{rseed},\,\rho\bigr) \in \mathbb{F}_p,\\[4pt]
-\mathsf{rcm} &:= \text{PRF}_{\text{RCM}}\!\bigl(\mathsf{rseed},\,\rho\bigr) \in \mathbb{F}_p,\\[6pt]
+ \text{no private inputs in sinsemilla hash (non-internative)}
 \end{cases}
 \end{array}
 ```

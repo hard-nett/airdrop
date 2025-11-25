@@ -26,6 +26,18 @@ impl EligibleSk {
     pub fn from(sk: secp256k1::SecretKey) -> Self {
         Self(sk)
     }
+    /// Generates a random spending key.
+    ///
+    /// This is only used when generating dummy notes. Real spending keys should be
+    /// derived according to [ZIP 32].
+    ///
+    /// [ZIP 32]: https://zips.z.cash/zip-0032
+    pub(crate) fn random(rng: &mut impl RngCore) -> Self {
+        let mut bytes = [0; 32];
+        rng.fill_bytes(&mut bytes);
+        EligibleSk::from(secp256k1::SecretKey::from_byte_array(bytes).expect("dang"))
+    }
+
     /// Build an `EligibleSk` from a hex string that represents a 32‑byte SECP‑256k1 secret key.
     ///
     /// # Example

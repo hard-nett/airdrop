@@ -1,20 +1,17 @@
 use std::ops::Deref;
 
-use ff::{Field, FromUniformBytes, PrimeField};
-use group::{Curve, Group, GroupEncoding, WnafBase, WnafScalar};
-use halo2_base::utils::ScalarField;
-use halo2_ecc::bigint::FixedOverflowInteger;
-use halo2_gadgets::{poseidon::primitives as poseidon, sinsemilla::primitives as sinsemilla};
-use num_bigint::BigUint;
-use pasta_curves::arithmetic::CurveExt;
-use pasta_curves::{arithmetic::CurveAffine, pallas};
-use subtle::{ConditionallySelectable, CtOption};
-
 use crate::address::RecpAddr;
 use crate::constants::DST_HKDF;
 use crate::keys::EligibleSk;
-use crate::note::Rho;
+use crate::note::commitment::NoteCommitTrapdoor;
 use crate::value::{NoteDenom, MAX_DENOM_LEN};
+
+use ff::{Field, FromUniformBytes, PrimeField};
+use group::{Curve, Group, GroupEncoding, WnafBase, WnafScalar};
+use halo2_gadgets::poseidon::primitives as poseidon;
+use num_bigint::BigUint;
+use pasta_curves::{arithmetic::CurveAffine, pallas};
+use subtle::{ConditionallySelectable, CtOption};
 
 const PREPARED_WINDOW_SIZE: usize = 4;
 
@@ -117,17 +114,6 @@ pub(crate) fn prf_nf(nk: pallas::Base, rho: pallas::Base) -> pallas::Base {
         .hash([nk, rho])
 }
 
-// /// convert esk into 3 88 bit pallas curve values
-// /// // TODO: implement the derivation of 3 limbs on pallas curve bytes of secp256k1 curve
-// pub(crate) fn esk_to_limbs(esk: [u8; 32]) -> [pallas::Base; 3] {
-//     let mut acc = [pallas::Base::ZERO; 3];
-//     FixedOverflowInteger::from_native(BigUint, 3, 88);
-//     for &byte in &esk {
-//         acc = acc * pallas::Base::from(256u64).add(&pallas::Base::from(byte as u64));
-//         acc[i]
-//     }
-// }
-// s
 /// # hdkf_pallas
 /// Derives nk from the Pallas base field representation for `esk`\
 /// *(via modular big-endian byte-to-field-element conversion)*\
@@ -147,9 +133,9 @@ pub fn hdkf_pallas(esk_pallas_fp: pallas::Base, rho: pallas::Base) -> pallas::Ba
 // Derives the hash of the expected_dst used for the hash deriving step. is multiplied by rho an provided to the function.
 pub(crate) fn prf_pallas_m(
     fdi: pallas::Base,
+    esk: pallas::Base,
     v: pallas::Base,
     nd: pallas::Base,
-    esk: pallas::Base,
 ) -> pallas::Base {
     poseidon::Hash::<_, poseidon::P128Pow5T3, poseidon::ConstantLength<4>, 3, 2>::init()
         .hash([fdi, v, nd, esk])
