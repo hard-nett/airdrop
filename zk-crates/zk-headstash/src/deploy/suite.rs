@@ -28,16 +28,17 @@ use sinsemilla::HashDomain;
 pub type BoxError = Box<dyn Error + Send + Sync>;
 
 pub trait HeadstashInstance {
-    type HeadstashError;
+    type HsErr;
     type PreInputConfig;
     fn new() -> Self;
-    fn find_new_headstashes() -> Result<(), Self::HeadstashError>;
-    fn create_new_headstash() -> Result<(), Self::HeadstashError>;
-    fn list_headstash_info() -> Result<(), Self::HeadstashError>;
+
+    fn find_new_headstashes() -> Result<(), Self::HsErr>;
+    fn create_new_headstash() -> Result<(), Self::HsErr>;
+    fn list_headstash_info() -> Result<(), Self::HsErr>;
     fn list_unspent_notes() -> Vec<Note>;
     fn list_spent_notes() -> Vec<Note>;
-    fn prepare_and_harvest_note() -> Result<(), Self::HeadstashError>;
-    fn headstash_action() -> Result<(), Self::HeadstashError>;
+    fn prepare_and_harvest_note() -> Result<(), Self::HsErr>;
+    fn headstash_action() -> Result<(), Self::HsErr>;
 }
 
 pub trait HeadstashBitwiseInstance {
@@ -103,18 +104,18 @@ pub struct TerpHeadstash {}
 pub struct TerpHeadstashConfig {}
 
 impl HeadstashInstance for TerpHeadstash {
-    type HeadstashError = BoxError;
+    type HsErr = BoxError;
     type PreInputConfig = TerpHeadstashConfig;
     fn new() -> Self {
         Self {}
     }
 
-    fn find_new_headstashes() -> Result<(), Self::HeadstashError> {
+    fn find_new_headstashes() -> Result<(), Self::HsErr> {
         // TODO: wire into network client for headstash market contract state queries
         todo!()
     }
 
-    fn create_new_headstash() -> Result<(), Self::HeadstashError> {
+    fn create_new_headstash() -> Result<(), Self::HsErr> {
         // TODO:
         // prompt to determine communities to include in headstash airdrop
         // deploy/retrieve holder distributions via full ephemeral full nodes api queries
@@ -126,7 +127,7 @@ impl HeadstashInstance for TerpHeadstash {
         todo!()
     }
 
-    fn list_headstash_info() -> Result<(), Self::HeadstashError> {
+    fn list_headstash_info() -> Result<(), Self::HsErr> {
         // TODO: query ipfs file to retrieve headstash config
         todo!()
     }
@@ -141,12 +142,12 @@ impl HeadstashInstance for TerpHeadstash {
         todo!()
     }
 
-    fn prepare_and_harvest_note() -> Result<(), Self::HeadstashError> {
+    fn prepare_and_harvest_note() -> Result<(), Self::HsErr> {
         // TODO: select unspent notes used to claim and move note file over into spent
         todo!()
     }
 
-    fn headstash_action() -> Result<(), Self::HeadstashError> {
+    fn headstash_action() -> Result<(), Self::HsErr> {
         todo!()
     }
 }

@@ -97,20 +97,18 @@ We have 3 main types of keys involved in this process.
 Two core business logic requirement in the headstash circuit are to have a feasable way to verify that the owner of the `epk` is authorizing the spend of a specific note in a headstash instance, and prevent double-spending of headstash allocations. Normal ECDSA verification for field curves are computationally heavy in circuit, & generate extremely large proof sizes not compatible with on-chain gas limits & a nice UX.
 
 When a note is is being spent, the owner generates a nullifier & note commitment, using carefully structured derivation process that results in HKDF generated key `(hkdf_pk, hkdf_sk)` seeded from private input, powering the key separation, verifiablility, & cryptographic binding of the nullifier and note commitment.
-**Users end up proving they know the key pair `esk,epk` as private inputs when generating their proofs.**
+**Users end up proving they know the key pair `esk,epk` by providing the nullifier as a public input into the circuit when generating a proof.**This lets the circuit use the known curve equation & generator points to constrain that the two keys are either mathematically paired together or not, without ever needing to reveal these values, since constraint the generation point of secp256k1 to the two keys for an expected known value.
 
-This lets the circuit then make use of the known curve equation & generator points to constrain that the two keys are either mathematically paired together or not, without ever needing to reveal these values, since constraint the generation point of secp256k1 to the two keys for an expected known value. To prevent double-spending of headstash allocations:
-
-> **A nullifier must be:**
+> ### **To prevent double-spending of headstash allocations, a nullifier must be:**
 >
 > - **unique per note**
 > - **unlinkable to the owner’s address**
 > - **computable only by the note owner**
 > - **resistant to tampering, especially against attacks where an adversary might attempt to redirect funds during transmission.**
 
-**Headstashes derive a keypair `(hkdf_sk,hkdf_pk)` that is on the pallas curve from the `esk`,*along with other private inputs*.**
+### Derivation
 
-Specifically we inlcude `esk`,`leaf`,`recp`,and a user PRF-derived valus `psi` in the HKDF input, cryptographically bind the nullifier to a specific fund destination, where only the owner has discrection in deciding who can derive the note from it since it depends on their private note_secret and the associated key of the `epk`.
+**Headstashes derive a keypair `(hkdf_sk,hkdf_pk)` that is on the pallas curve from the `esk`,*along with other private inputs*.** Specifically, we inlcude `esk`,`leaf`,`recp`,and a user PRF-derived valus `psi` in the HKDF input, cryptographically bind the nullifier to a specific fund destination, where only the owner has discrection in deciding who can derive the note from it since it depends on their private note_secret and the associated key of the `epk`.
 
 *This defends against a subtle but serious class of attacks man-in-the-middle modifications where an adversary intercepts a transaction and attempts to redirect funds to a different address, while reusing the same proof structure. Because the nullifier depends on the exact allocation being spent, any such alteration would result in a different derived `hkdf_pk`, causing the proof to fail verification.*
 
@@ -124,9 +122,13 @@ Specifically we inlcude `esk`,`leaf`,`recp`,and a user PRF-derived valus `psi` i
 
 For effecieny in-circuit hashing, we are using Posiedon as the hkdf hashing algorithm. Poseidon is a ZK-friendly hash function used for nullifier derivation, note commitments.
 
+q: when exactly are we using the posiedon function
+
 #### Blake3
 
 For effecieny out of circuit, used as abci-like interface between token-denominations and inputs for `nd` into the circuit. Extremely , and we specifically drop 3 bits from the hash when describing an input, since the hashed values is a public known value we do not worry about the impact of collison resisance that occurs, and just specificy protocols to keep a map dedicated to the original values and their trimmed-hash representations.
+
+q: when exactly are we using the blake3 function
 
 ### Derivation Inputs
 
@@ -282,30 +284,24 @@ G_{secp256k1}   = (G_{x},G_{y})                     &\text{(generator point secp
 
 ```rust
 pub struct PrivateWitnesses {
-    // Secp256k1 key pair (ownership proof)
-    esk: secp256k1::Fq,          // Eligible secret key
-    epk: secp256k1::Affine,      // Eligible public key
-
-    // Note identification
-    fdi: u64,                        // Fixed denomination index (fully padded)
-    merkle_path: [pallas::Base; 2], // Path to genesis root [(root),(leaf)]
-
-    // Note commitment components
-    rho: pallas::Base,               // Unique note identifier
-    psi: pallas::Base,               // PRF output
+    esk: secp256k1::Fq,
+    epk: secp256k1::Affine,
+    fdi: u64,
+    merkle_path: [pallas::Base; 2],
+    rho: pallas::Base,
+    psi: pallas::Base,
 }
 
 pub struct PublicInputs {
-    nul: pallas::Base,               // Nullifier (prevents double-spend, prooves the private inputs are known)
-    cm: pallas::Base,                // Note commitment (output)
-    nd: pallas::Base,                // Note denomination hash (public)
-    v: pallas::Base,                 // Note value (public)
-    recp: pallas::Base,              // Recipient address (destination integrity)
+    nul: pallas::Base,
+    nd: pallas::Base,
+    v: pallas::Base,
+    recp: pallas::Base,
 }
 pub struct Constants {
-     genesis_root: pallas::Base,      // Genesis merkle root (constant)
-     sinsemilla_dst: pallas::Base,      // genesis sinsemilla headstash hashing domain separation
-     secp_dst: pallas::Base,      // Genesis merkle root (constant)
+     genesis_root: pallas::Base, 
+     sinsemilla_dst: pallas::Base,
+     secp_dst: pallas::Base,
      hkdf_dst: pallas::Base,      // pallas point for hash of ownerships domain separation tag
      null_dst: pallas::Base,      // note nullifier domain separation tag
 }
@@ -503,7 +499,7 @@ pub type FpChip<'range, F> = fp::FpChip<'range, F, Secp256k1::Fp>;
 **Construction:**
 
 ```rust
-let fp_chip = FpChip::<Pallas::Base, Secp256k1::Fp>::new(
+let fp = FpChip::<Pallas::Base, Secp256k1::Fp>::new(
     range,      // RangeChip for lookup tables
     88,         // limb_bits
     3,          // num_limbs

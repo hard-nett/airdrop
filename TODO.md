@@ -37,6 +37,6 @@ the native halo2 formats. this means we dont make use of ctx, or any of the apis
 
 ## Secp256k1FqChip
 
-- src/circuit/gadget/fq_chip.rs - Refactor FqChip from halo2-lib (type defined in halo2-ecc/src/secp256k1/mod.rs,implementation exists in  halo2-ecc/src::fields::fp;)
+- src/circuit/gadget/fq.rs - Refactor FqChip from halo2-lib (type defined in halo2-ecc/src/secp256k1/mod.rs,implementation exists in  halo2-ecc/src::fields::fp;)
 
 ## 2. Key Pairing: Simplest foreign curve operation to test setup

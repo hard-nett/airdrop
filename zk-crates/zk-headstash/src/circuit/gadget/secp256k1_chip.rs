@@ -14,7 +14,7 @@ use ff::{Field, PrimeField};
 use halo2_base::halo2_proofs::halo2curves::secp256k1::{Fp, Fq};
 use halo2_base::halo2_proofs::halo2curves::serde::SerdeObject;
 use halo2_gadgets::utilities::lookup_range_check::LookupRangeCheckConfig;
-use halo2_proofs::circuit::{Cell, Region};
+use halo2_proofs::circuit::Region;
 use halo2_proofs::plonk::{Expression, Selector};
 use halo2_proofs::poly::Rotation;
 use halo2_proofs::{
@@ -24,17 +24,13 @@ use halo2_proofs::{
 use pasta_curves::pallas;
 use secp256k1::constants::{GENERATOR_X, GENERATOR_Y};
 
-pub type Secp256k1Fp = Fp;
-pub type Secp256k1Fq = Fq;
-/// Type alias for secp256k1 base field (Fp) chip
-/// This chip represents Fp elements as CRT integers with 88-bit limbs
-pub type Secp256k1FpChip = FpChip<Secp256k1Fp>;
-
-/// Type alias for secp256k1 scalar field (Fq) chip
-/// This chip represents Fq elements as CRT integers with 88-bit limbs
-pub type Secp256k1FqChip = FpChip<Secp256k1Fq>;
-
 type SecpPoint<Base> = (ProperCrtUint<Base>, ProperCrtUint<Base>);
+/// Type alias for secp256k1 base field (Fp) chip. This chip represents Fp elements as CRT integers with 88-bit limbs
+pub type Secp256k1Fp = Fp;
+pub type Secp256k1FpChip = FpChip<Secp256k1Fp>;
+/// Type alias for secp256k1 scalar field (Fq) chip.This chip represents Fq elements as CRT integers with 88-bit limbs
+pub type Secp256k1Fq = Fq;
+pub type Secp256k1FqChip = FpChip<Secp256k1Fq>;
 
 /// Configuration for secp256k1 elliptic curve operations.
 ///
@@ -45,7 +41,7 @@ pub struct Secp256k1Config {
     pub fp_config: FpConfig,
     /// Configuration for scalar field (Fq) operations
     pub fq_config: FpConfig,
-    decomp_selector: Selector,
+    q: Selector,
 }
 
 impl Secp256k1Config {
@@ -65,10 +61,10 @@ impl Secp256k1Config {
         let fp_config = FpConfig::configure(meta, fp_advices, range_check.clone());
         let fq_config = FpConfig::configure(meta, fq_advices, range_check);
 
-        let decomp_selector = meta.selector();
+        let q = meta.selector();
 
         meta.create_gate("scalar decomposition step", |meta| {
-            let q = meta.query_selector(decomp_selector);
+            let q = meta.query_selector(q);
             let current = meta.query_advice(fq_advices[0], Rotation::cur());
             let bit = meta.query_advice(fq_advices[1], Rotation::cur());
             let current_prime = meta.query_advice(fq_advices[0], Rotation::next());
@@ -85,7 +81,7 @@ impl Secp256k1Config {
         Self {
             fp_config,
             fq_config,
-            decomp_selector,
+            q,
         }
     }
 }
@@ -97,10 +93,10 @@ impl Secp256k1Config {
 #[derive(Clone, Debug)]
 pub struct Secp256k1Chip {
     /// Chip for base field (Fp) operations - for curve point coordinates
-    pub fp_chip: Secp256k1FpChip,
+    pub fp: Secp256k1FpChip,
     /// Chip for scalar field (Fq) operations - for secret keys
-    pub fq_chip: Secp256k1FqChip,
-    decomp_selector: Selector,
+    pub fq: Secp256k1FqChip,
+    q: Selector,
 }
 
 impl Secp256k1Chip {
@@ -112,9 +108,9 @@ impl Secp256k1Chip {
         const NUM_LIMBS: usize = 3;
 
         Self {
-            fp_chip: Secp256k1FpChip::construct(config.fp_config, LIMB_BITS, NUM_LIMBS),
-            fq_chip: Secp256k1FqChip::construct(config.fq_config, LIMB_BITS, NUM_LIMBS),
-            decomp_selector: config.decomp_selector,
+            fp: Secp256k1FpChip::construct(config.fp_config, LIMB_BITS, NUM_LIMBS),
+            fq: Secp256k1FqChip::construct(config.fq_config, LIMB_BITS, NUM_LIMBS),
+            q: config.q,
         }
     }
     fn decompose_limb_to_bits(
@@ -133,7 +129,7 @@ impl Secp256k1Chip {
                 limb.copy_advice(
                     || "copy limb",
                     &mut region,
-                    self.fq_chip.config.advices[0],
+                    self.fq.config.advices[0],
                     current_offset,
                 )?;
 
@@ -141,7 +137,7 @@ impl Secp256k1Chip {
                 let mut last_assigned: Option<AssignedCell<pallas::Base, pallas::Base>> = None;
 
                 for _ in 0..88 {
-                    self.decomp_selector.enable(&mut region, current_offset)?;
+                    self.q.enable(&mut region, current_offset)?;
 
                     let bit_val = current_value.map(|v| {
                         let repr = v.to_repr();
@@ -149,7 +145,7 @@ impl Secp256k1Chip {
                     });
                     let bit_cell = region.assign_advice(
                         || "bit",
-                        self.fq_chip.config.advices[1],
+                        self.fq.config.advices[1],
                         current_offset,
                         || bit_val,
                     )?;
@@ -161,7 +157,7 @@ impl Secp256k1Chip {
                         .map(|(current, bit)| (current - bit) * inv2);
                     region.assign_advice(
                         || "next current",
-                        self.fq_chip.config.advices[0],
+                        self.fq.config.advices[0],
                         current_offset + 1,
                         || next_val,
                     )?;
@@ -205,7 +201,7 @@ impl Secp256k1Chip {
         p: &SecpPoint<pallas::Base>,
         q: &SecpPoint<pallas::Base>,
     ) -> Result<SecpPoint<pallas::Base>, PlonkError> {
-        let fp = &self.fp_chip;
+        let fp = &self.fp;
 
         let dy = fp.sub(layouter.namespace(|| "dy"), &q.1, &p.1)?;
         let dx = fp.sub(layouter.namespace(|| "dx"), &q.0, &p.0)?;
@@ -224,7 +220,7 @@ impl Secp256k1Chip {
         mut layouter: impl Layouter<pallas::Base>,
         p: &SecpPoint<pallas::Base>,
     ) -> Result<SecpPoint<pallas::Base>, PlonkError> {
-        let fp = &self.fp_chip;
+        let fp = &self.fp;
 
         let three = fp.load_private(
             layouter.namespace(|| "three"),
@@ -255,7 +251,7 @@ impl Secp256k1Chip {
         b: &ProperCrtUint<pallas::Base>,
         cond: &AssignedCell<pallas::Base, pallas::Base>,
     ) -> Result<ProperCrtUint<pallas::Base>, PlonkError> {
-        let fp = &self.fp_chip;
+        let fp = &self.fp;
 
         let diff = fp.sub(layouter.namespace(|| "diff"), a, b)?;
         let cond_crt = fp.load_private(
@@ -269,7 +265,7 @@ impl Secp256k1Chip {
         Ok(result)
     }
 
-    /// Prove key pairing: `public_key = secret_key * G`
+    /// Prove key pairing: `public_key = esk * G`
     ///
     /// This constrains that the given public key is the correct result of
     /// scalar multiplication of the secret key with the secp256k1 generator.
@@ -278,7 +274,7 @@ impl Secp256k1Chip {
     ///
     /// # Arguments
     /// * `layouter` - The layouter for assigning cells
-    /// * `secret_key` - The secret key (scalar in Fq, as native type)
+    /// * `esk` - The secret key (scalar in Fq, as native type)
     /// * `public_key` - The expected public key as (x, y) coordinates (both in Fp, as native types)
     ///
     /// # Returns
@@ -300,9 +296,9 @@ impl Secp256k1Chip {
     pub fn prove_key_pairing(
         &self,
         mut layouter: impl Layouter<pallas::Base>,
-        secret_key: Value<Secp256k1Fq>,
-        public_key_x: Value<Secp256k1Fp>,
-        public_key_y: Value<Secp256k1Fp>,
+        esk: Value<Secp256k1Fq>,
+        epkx: Value<Secp256k1Fp>,
+        epky: Value<Secp256k1Fp>,
     ) -> Result<
         (
             ProperCrtUint<pallas::Base>,
@@ -312,38 +308,38 @@ impl Secp256k1Chip {
     > {
         // Load secret key as Fq element (converted to CRT representation)
         let sk_assigned = self
-            .fq_chip
-            .load_private(layouter.namespace(|| "load secret key"), secret_key)?;
+            .fq
+            .load_private(layouter.namespace(|| "load secret key"), esk)?;
 
         // Range check secret key limbs to ensure they're valid 88-bit values
-        self.fq_chip
+        self.fq
             .range_check_limbs(layouter.namespace(|| "range check sk"), &sk_assigned)?;
 
         // Load public key x-coordinate as Fp element (converted to CRT representation)
         let pk_x_assigned = self
-            .fp_chip
-            .load_private(layouter.namespace(|| "load pk.x"), public_key_x)?;
+            .fp
+            .load_private(layouter.namespace(|| "load pk.x"), epkx)?;
 
         // Load public key y-coordinate as Fp element (converted to CRT representation)
         let pk_y_assigned = self
-            .fp_chip
-            .load_private(layouter.namespace(|| "load pk.y"), public_key_y)?;
+            .fp
+            .load_private(layouter.namespace(|| "load pk.y"), epky)?;
 
         // Range check public key coordinate limbs
-        self.fp_chip
+        self.fp
             .range_check_limbs(layouter.namespace(|| "range check pk.x"), &pk_x_assigned)?;
-        self.fp_chip
+        self.fp
             .range_check_limbs(layouter.namespace(|| "range check pk.y"), &pk_y_assigned)?;
 
         // TODO: Implement actual scalar multiplication check: pk = sk * G
         // This requires:
         // 1. Load generator point G (as CRT coordinates)
         // Load generator G
-        let g_x = self.fp_chip.load_private(
+        let g_x = self.fp.load_private(
             layouter.namespace(|| "load G x"),
             Value::known(Secp256k1Fp::from_raw_bytes_unchecked(&GENERATOR_X)),
         )?;
-        let g_y = self.fp_chip.load_private(
+        let g_y = self.fp.load_private(
             layouter.namespace(|| "load G y"),
             Value::known(Secp256k1Fp::from_raw_bytes_unchecked(&GENERATOR_Y)),
         )?;
@@ -357,12 +353,12 @@ impl Secp256k1Chip {
         )?;
 
         // Enforce computed_pk == public_key
-        self.fp_chip.enforce_equal(
+        self.fp.enforce_equal(
             layouter.namespace(|| "enforce x equal"),
             &computed_pk.0,
             &pk_x_assigned,
         )?;
-        self.fp_chip.enforce_equal(
+        self.fp.enforce_equal(
             layouter.namespace(|| "enforce y equal"),
             &computed_pk.1,
             &pk_y_assigned,
@@ -435,6 +431,6 @@ impl Secp256k1Chip {
         layouter: impl Layouter<pallas::Base>,
         fq: &ProperCrtUint<pallas::Base>,
     ) -> Result<AssignedCell<pallas::Base, pallas::Base>, PlonkError> {
-        self.fq_chip.to_native(layouter, fq)
+        self.fq.to_native(layouter, fq)
     }
 }

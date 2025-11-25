@@ -86,7 +86,7 @@ pub fn decompose_biguint_simple(
         let mut limb_bytes_32 = [0u8; 32];
         limb_bytes_32[..limb_bytes.len().min(32)]
             .copy_from_slice(&limb_bytes[..limb_bytes.len().min(32)]);
-        let limb_fe = pallas::Base::from_repr(limb_bytes_32).unwrap_or(pallas::Base::ZERO);
+        let limb_fe = pallas::Base::from_repr(limb_bytes_32).expect("limb must be in pallas range");
         limbs.push(limb_fe);
         remaining >>= limb_bits;
     }

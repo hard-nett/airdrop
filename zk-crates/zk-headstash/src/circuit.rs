@@ -67,33 +67,22 @@ pub struct HeadstashConfig {
     nc_cfg: NoteCommitConfig,
 }
 
-/// The Headstash Action circuit.
+/// The Headstash Circuit Array
 #[derive(Clone, Debug, Default)]
 pub struct HeadstashCircuit {
-    // Merkle path witnesses
     pub(crate) path: Value<[MerkleHashHeadstash; MERKLE_DEPTH_HEADSTASH]>,
     pub(crate) pos: Value<u32>,
-
-    // Note randomness
     pub(crate) psi: Value<pallas::Base>,
     pub(crate) rho: Value<Rho>,
     pub(crate) cm: Value<NoteCommitment>,
-
-    // Secp256k1 key pair (foreign field) - represented as 3x88-bit limbs in circuit
-    pub(crate) esk: Value<Secp256k1Fq>, // Eligible secret key (scalar field)
-    pub(crate) e_pk_x: Value<Secp256k1Fp>, // Eligible public key x-coordinate (base field)
-    pub(crate) e_pk_y: Value<Secp256k1Fp>, // Eligible public key y-coordinate (base field)
-
-    // Nullifier deriving key (derived from esk via HKDF outside circuit)
+    pub(crate) esk: Value<Secp256k1Fq>,
+    pub(crate) epkx: Value<Secp256k1Fp>,
+    pub(crate) epky: Value<Secp256k1Fp>,
     pub(crate) nk: Value<NullifierDerivingKey>,
-
-    // Fixed denomination index (private)
     pub(crate) fdi: Value<pallas::Base>,
-
-    // Public inputs
-    pub(crate) v: Value<pallas::Base>,    // Note value
-    pub(crate) nd: Value<pallas::Base>,   // Note denomination (blake3 hash)
-    pub(crate) recp: Value<pallas::Base>, // recp address
+    pub(crate) v: Value<pallas::Base>,
+    pub(crate) nd: Value<pallas::Base>,
+    pub(crate) recp: Value<pallas::Base>,
 }
 
 impl plonk::Circuit<pallas::Base> for HeadstashCircuit {
@@ -235,29 +224,24 @@ impl plonk::Circuit<pallas::Base> for HeadstashCircuit {
         }
     }
 
-    // TODO: complete implement headstash circuit synthesisation
+    // Prove epk = esk * G_secp256k1 using CRT representation (3x88-bit limbs)
     fn synthesize(
         &self,
         config: Self::Config,
         mut layouter: impl Layouter<pallas::Base>,
     ) -> Result<(), plonk::Error> {
-        // Load the Sinsemilla generator lookup table used by the whole circuit.
         SinsemillaChip::load(config.sinsemilla_cfg.clone(), &mut layouter)?;
-
-        // // Construct the ECC chip.
         let ecc_chip = config.ecc_chip();
-
         // 1. CONSTRAINT: Foreign-field (secp256k1) key pairing
-        // Prove epk = esk * G_secp256k1 using CRT representation (3x88-bit limbs)
         let secp256k1_chip = Secp256k1Chip::construct(config.secp256k1.clone());
         let (e_sk_crt, (_e_pk_x_crt, _e_pk_y_crt)) = secp256k1_chip.prove_key_pairing(
             layouter.namespace(|| "secp256k1 key pairing: epk = esk * G"),
             self.esk,
-            self.e_pk_x,
-            self.e_pk_y,
+            self.epkx,
+            self.epky,
         )?;
 
-        // // Witness private inputs that are used across multiple checks.
+        // Witness private inputs that are used across multiple checks.
         let (psi, rho, nk, cm, fdi, v, nd, recp) = {
             // Witness psi
             let psi = assign_free_advice(
@@ -449,8 +433,8 @@ mod tests {
         let e_pk_y_bytes: [u8; 32] = e_pk_bytes[33..65].try_into().unwrap();
 
         let e_sk_fq = Secp256k1Fq::from_repr(e_sk_bytes).expect("valid Fq");
-        let e_pk_x = Secp256k1Fp::from_repr(e_pk_x_bytes).expect("valid Fp");
-        let e_pk_y = Secp256k1Fp::from_repr(e_pk_y_bytes).expect("valid Fp");
+        let epkx = Secp256k1Fp::from_repr(e_pk_x_bytes).expect("valid Fp");
+        let epky = Secp256k1Fp::from_repr(e_pk_y_bytes).expect("valid Fp");
 
         // 7. Derive nk using HKDF
         let nk = NullifierDerivingKey::derive_from(esk, rho);
@@ -467,7 +451,7 @@ mod tests {
         // 8. Create dummy Merkle path (for testing)
         let path = [MerkleHashHeadstash::from_cmx(
             &ExtractedNoteCommitment::from_bytes(&sin_root.to_repr())
-                .expect("sinsemialla headstash tree root derivation error"),
+                .expect("sinsemilla headstash tree root derivation error"),
         ); MERKLE_DEPTH_HEADSTASH];
         let pos = 0u32;
 
@@ -478,8 +462,8 @@ mod tests {
             rho: Value::known(rho),
             cm: Value::known(note.commitment()),
             esk: Value::known(e_sk_fq),
-            e_pk_x: Value::known(e_pk_x),
-            e_pk_y: Value::known(e_pk_y),
+            epkx: Value::known(epkx),
+            epky: Value::known(epky),
             nk: Value::known(nk),
             fdi: Value::known(pallas::Base::from(fdi)),
             v: Value::known(v.to_fp_pallas()),
@@ -491,7 +475,7 @@ mod tests {
     #[test]
     fn test_valid_headstash_circuit() {
         let circuit = generate_valid_circuit();
-
+        println!("✓ Generated HeadstashCircuit, running MockProver...");
         // Run MockProver
         let prover = MockProver::run(K, &circuit, vec![vec![]]).expect("prover should run");
 
@@ -501,7 +485,7 @@ mod tests {
             Err(e) => {
                 eprintln!("✗ Circuit verification failed:");
                 for err in e.iter() {
-                    eprintln!("  - {:?}", err);
+                    eprintln!("  - {:1?}", err);
                 }
                 panic!("Valid circuit should verify");
             }
@@ -515,15 +499,15 @@ mod tests {
 
         // Tamper with public key
         let secp = Secp256k1::new();
-        let wrong_sk = SecretKey::from_byte_array([0u8; 32]).expect("valid secret key");
+        let wrong_sk = SecretKey::from_byte_array([42u8; 32]).unwrap();
         let wrong_pk = PublicKey::from_secret_key(&secp, &wrong_sk);
 
         let wrong_pk_bytes = wrong_pk.serialize_uncompressed();
         let wrong_pk_x_bytes: [u8; 32] = wrong_pk_bytes[1..33].try_into().unwrap();
         let wrong_pk_y_bytes: [u8; 32] = wrong_pk_bytes[33..65].try_into().unwrap();
 
-        circuit.e_pk_x = Value::known(Secp256k1Fp::from_repr(wrong_pk_x_bytes).unwrap());
-        circuit.e_pk_y = Value::known(Secp256k1Fp::from_repr(wrong_pk_y_bytes).unwrap());
+        circuit.epkx = Value::known(Secp256k1Fp::from_repr(wrong_pk_x_bytes).unwrap());
+        circuit.epky = Value::known(Secp256k1Fp::from_repr(wrong_pk_y_bytes).unwrap());
 
         let prover = MockProver::run(K, &circuit, vec![vec![]]).expect("prover should run");
         prover.verify().expect("should verify");
@@ -566,5 +550,6 @@ mod tests {
 
         let proof_size = usize::from(cost.proof_size(1));
         assert!(proof_size > 0, "Proof size should be non-zero");
+        println!(" proof_size: {}", proof_size);
     }
 }
