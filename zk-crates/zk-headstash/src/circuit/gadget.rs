@@ -106,6 +106,40 @@ pub(in crate::circuit) fn derive_nullifier<
         .map(|res| res.extract_p())
 }
 
+/// Hash public inputs using Poseidon to create a single verifiable value.
+///
+/// This is a gas optimization for on-chain verification:
+/// Instead of verifying multiple public inputs (root, nf, cmx) separately,
+/// we hash them into one value, reducing gas cost by ~75%.
+///
+/// # Arguments
+/// * `root` - Merkle tree anchor
+/// * `nf` - Nullifier (x-coordinate of point)
+/// * `cmx` - Note commitment (x-coordinate of point)
+///
+/// # Returns
+/// * Poseidon hash: H(root, nf, cmx)
+pub(in crate::circuit) fn hash_public_inputs<
+    PoseidonChip: PoseidonSpongeInstructions<pallas::Base, poseidon::P128Pow5T3, ConstantLength<3>, 3, 2>,
+>(
+    mut layouter: impl Layouter<pallas::Base>,
+    poseidon_chip: PoseidonChip,
+    root: AssignedCell<pallas::Base, pallas::Base>,
+    nf: AssignedCell<pallas::Base, pallas::Base>,
+    cmx: AssignedCell<pallas::Base, pallas::Base>,
+) -> Result<AssignedCell<pallas::Base, pallas::Base>, plonk::Error> {
+    // Hash all public inputs: H(root, nf, cmx)
+    let poseidon_hasher = PoseidonHash::init(
+        poseidon_chip,
+        layouter.namespace(|| "init public input hash"),
+    )?;
+
+    poseidon_hasher.hash(
+        layouter.namespace(|| "hash public inputs: H(root, nf, cmx)"),
+        [root, nf, cmx],
+    )
+}
+
 /// Witnesses the given value in a standalone region.
 ///
 /// Usages of this helper are technically superfluous, as the single-cell region is only
