@@ -1,19 +1,29 @@
 [workspace]
 resolver = "2"
 members = [
+    "proto",
+    "pub-crates/randomness",
+    "zk-crates/cw-headstash",
     "zk-crates/snap-n-pull",
     "zk-crates/zk-headstash",
-    "zk-crates/cw-headstash",
-    "pub-crates/randomness",
-    "proto"
-    ]
+]
 
 [workspace.package]
 edition = "2021"
 version = "0.0.1"
 
-
 [workspace.dependencies]
-snap-n-pull = {path = "./snap-n-pull"}
-cw-headstash = {path = "./cw-headstash"}
-zk-headstash = {path = "./zk-headstash"}
+
+token-bindings = { git = "https://github.com/permissionlessweb/token-bindings", branch = "feat/cw@v3", library = "bindings" } 
+btsg-account = { git = "https://github.com/permissionlessweb/bs-accounts", branch = "feat/cw@v3", library = "btsg-account" } 
+btsg-auth = { git = "https://github.com/permissionlessweb/bs-accounts", branch = "feat/cw@v3", library = "btsg-auth" } 
+cosmwasm-schema = "3.0.2"
+cosmwasm-std = { version = "3.0.2", features = ["cosmwasm_1_4", "stargate"] }
+cw-headstash = { path = "./cw-headstash" }
+cw-storage-plus = "3.0.1"
+halo2_proofs = { version = "0.3.1", default-features = false, features = [ ] } 
+hex = "0.4.3"
+serde = { version = "1.0.228", default-features = false, features = ["derive"] }
+sha2 = "0.10.9"
+snap-n-pull = { path = "./snap-n-pull" }
+zk-headstash = { path = "./zk-headstash" }
