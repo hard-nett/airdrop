@@ -1,14 +1,9 @@
-#[cfg(feature = "keys")]
-mod keys;
-#[cfg(feature = "req")]
-mod req;
 #[cfg(feature = "wallet")]
-mod wallet;
-
-#[cfg(feature = "keys")]
-pub use keys::*;
-#[cfg(feature = "req")]
-pub use req::*;
+pub mod client;
+#[cfg(feature = "wallet")]
+pub mod crypto;
+#[cfg(feature = "wallet")]
+pub mod wallet;
 #[cfg(feature = "wallet")]
 pub use wallet::*;
 
@@ -17,13 +12,12 @@ pub use wallet::*;
 
 use serde::{Deserialize, Serialize};
 use std::str::FromStr;
-use wasm_bindgen::JsError;
 // use zcash_protocol::consensus::{self, Parameters};
 
 /// Enum representing the network type
 /// This is used instead of the `consensus::Network` enum so we can derive
 /// custom serialization and deserialization and from string impls
-#[derive(Copy, Clone, Debug, Default, Serialize, Deserialize)]
+#[derive(Copy, Clone, Debug, Default, Serialize, PartialEq, Deserialize)]
 pub enum Network {
     #[default]
     MainNetwork,
@@ -78,8 +72,6 @@ pub enum Error {
     InvalidNetwork(String),
     #[cfg(feature = "keys")]
     #[cfg(feature = "req")]
-    #[error("SnapReqError crate gives error: {0}")]
-    SnapReqError(#[from] SnapReqErr),
     #[cfg(feature = "wallet")]
     #[error("Javascript error")]
     Js(wasm_bindgen::JsValue),
@@ -93,6 +85,15 @@ pub enum Error {
     PcztSign(String),
     #[error("Error attempting to get seed fingerprint.")]
     SeedFingerprint,
+    #[error("serde wasm-bindgen error")]
+    SerdeWasmBindgen(#[from] serde_wasm_bindgen::Error),
+}
+
+// Implement Into<JsValue> for wasm-bindgen compatibility
+impl From<Error> for wasm_bindgen::JsValue {
+    fn from(err: Error) -> Self {
+        wasm_bindgen::JsValue::from_str(&err.to_string())
+    }
 }
 
 // impl From<indexed_db_futures::web_sys::DomException> for Error {

@@ -8,16 +8,13 @@ import path, { dirname } from 'path'
 import { applyNormalizationToAllProjects } from './calculations.js';
 import { readCsvFile, readYamlFile } from './utils.js';
 import { HEADSTASH_FINAL_TALLY, SINSEMILLA_JSON_FILE } from './constants.js'
-
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
-
 // step 1: determine point distribution for each communinty
 // step 2: determine tokens to allocate for address based on tpp  
 // step 3: check for reoccurring addresses between all communnities. if addr exists, sum together points allocated.
 // step 4: if address is not eth address, we need to base64 encode the address (as it is a solana public address)
 // step 5: create new 1 new csv with final tally 
-
 function determinePointDistribution(pointsConfig, walletAmount) {
     // Ensure walletAmount is a number
     const amount = parseFloat(walletAmount) || 0;

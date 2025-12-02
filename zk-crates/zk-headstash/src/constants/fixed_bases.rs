@@ -1,9 +1,8 @@
 use super::{L_ORCHARD_SCALAR, L_VALUE};
+use halo2_gadgets::ecc::chip::{BaseFieldElem, FixedPoint, FullScalar, ShortScalar, H};
 use halo2_gadgets::ecc::FixedPoints;
-use halo2_gadgets::ecc::chip::{BaseFieldElem, FixedPoint, FullScalar, H, ShortScalar};
 use pasta_curves::pallas;
 
-pub mod jubjub_g;
 pub mod note_commit_r;
 pub mod nullifier_k;
 pub mod value_commit_r;
@@ -27,7 +26,6 @@ pub enum HeadstashFixedBases {
     Full(HeadstashFixedBasesFull),
     NullifierK,
     ValueCommitV,
-    JubJubKey,
 }
 
 impl From<HeadstashFixedBasesFull> for HeadstashFixedBases {

@@ -5,14 +5,139 @@ use rand::RngCore;
 use secp256k1::Secp256k1;
 use subtle::{Choice, CtOption};
 
+use crate::address::RecpAddr;
 use crate::note::Rho;
 use crate::prf_expand::PrfExpand;
 use crate::spec::{esk_to_base, prf_nf, prf_pallas_m, to_base};
 use crate::value::{NoteDenom, NoteValue};
 
+/// A complete Headstash address containing both the eligible public key and recipient address.
+/// This struct provides workspace-wide access to both keys related to an eligible account.
+///
+/// # Members
+/// - `elig_pk`: The secp256k1 public key derived from the eligible secret key
+/// - `elig_addr`: The canonical recipient address (32-byte bech32 address)
+///
+/// # Example
+/// ```rust,ignore
+/// let sk = EligibleSk::random(&mut rng);
+/// let headstash_addr = HeadstashAddress::from(sk);
+/// // Access both keys
+/// let pk = headstash_addr.elig_pk();
+/// let addr = headstash_addr.elig_addr();
+/// ```
+#[derive(Debug, Clone)]
+pub struct HeadstashAddress {
+    elig_pk: EligiblePk,
+    elig_addr: String,
+}
+
+impl HeadstashAddress {
+    /// Create a new HeadstashAddress from an eligible public key and recipient address.
+    pub fn new(elig_pk: EligiblePk, elig_addr: String) -> Self {
+        Self { elig_pk, elig_addr }
+    }
+
+    /// Create a HeadstashAddress from an eligible secret key.
+    /// Derives both the public key and recipient address from the secret key.
+    pub fn from_sk(sk: EligibleSk) -> Self {
+        let elig_pk = EligiblePk::from(sk);
+        let elig_addr = Self::derive_addr_from_pk(&elig_pk);
+        Self { elig_pk, elig_addr }
+    }
+
+    /// Derive recipient address from eligible public key.
+    /// Uses Ethereum-style address derivation (keccak256 hash of uncompressed public key, last 20 bytes).
+    /// Then pads to 32 bytes for compatibility with RecpAddr.
+    fn derive_addr_from_pk(pk: &EligiblePk) -> String {
+        use sha3::{Digest, Keccak256};
+        let uncompressed = pk.0.serialize_uncompressed();
+        let hash = Keccak256::digest(&uncompressed[1..]);
+        let eth_addr_20 = &hash[12..32];
+
+        format!("0x{}", hex::encode(eth_addr_20))
+    }
+
+    /// Returns a reference to the eligible public key.
+    pub fn elig_pk(&self) -> &EligiblePk {
+        &self.elig_pk
+    }
+
+    /// Returns a reference to the recipient address.
+    pub fn elig_addr(&self) -> &str {
+        &self.elig_addr
+    }
+
+    /// Returns the eligible public key as bytes (serialized secp256k1 public key).
+    pub fn pk_bytes(&self) -> [u8; 33] {
+        self.elig_pk.0.serialize()
+    }
+
+    /// Returns the recipient address as bytes.
+    pub fn addr_bytes(&self) -> [u8; 20] {
+        let hex_str = self.elig_addr.strip_prefix("0x").unwrap_or(&self.elig_addr);
+        let bytes = hex::decode(hex_str).expect("valid hex address");
+        bytes.try_into().expect("20-byte address")
+    }
+
+    /// Support both hex (0x-prefixed) and base64 encoding for address serialization.
+    /// Returns hex-encoded string with 0x prefix.
+    pub fn to_hex(&self) -> String {
+        self.elig_addr.clone()
+    }
+
+    /// Parse from hex string (with or without 0x prefix).
+    /// This only parses the address portion; public key must be derived or provided separately.
+    pub fn from_hex(hex_str: &str) -> Result<String, hex::FromHexError> {
+        let hex_str = hex_str.strip_prefix("0x").unwrap_or(hex_str);
+        let bytes = hex::decode(hex_str)?;
+
+        if bytes.len() != 20 {
+            return Err(hex::FromHexError::InvalidStringLength);
+        }
+
+        Ok(format!("0x{}", hex::encode(bytes)))
+    }
+
+    /// Returns base64-encoded address.
+    pub fn to_base64(&self) -> String {
+        use base64::{engine::general_purpose, Engine as _};
+        general_purpose::STANDARD.encode(self.addr_bytes())
+    }
+
+    /// Parse from base64 string.
+    /// This only parses the address portion; public key must be derived or provided separately.
+    pub fn from_base64(b64_str: &str) -> String {
+        use base64::{engine::general_purpose, Engine as _};
+        let bytes = general_purpose::STANDARD.decode(b64_str).unwrap();
+        format!("0x{}", hex::encode(bytes))
+    }
+}
+
+impl From<EligibleSk> for HeadstashAddress {
+    fn from(sk: EligibleSk) -> Self {
+        Self::from_sk(sk)
+    }
+}
+
+impl From<EligiblePk> for HeadstashAddress {
+    fn from(pk: EligiblePk) -> Self {
+        let elig_addr = HeadstashAddress::derive_addr_from_pk(&pk);
+        Self::new(pk, elig_addr)
+    }
+}
+
 #[derive(Debug, Copy, Clone)]
 pub struct EligiblePk(pub secp256k1::PublicKey);
 
+impl From<&Vec<u8>> for EligiblePk {
+    fn from(data: &Vec<u8>) -> Self {
+        Self(
+            secp256k1::PublicKey::from_byte_array_compressed(data.as_slice().try_into().unwrap())
+                .expect("darn"),
+        )
+    }
+}
 impl From<EligibleSk> for EligiblePk {
     fn from(sk: EligibleSk) -> Self {
         Self(sk.0.public_key(&Secp256k1::new()))
@@ -26,13 +151,13 @@ impl EligibleSk {
     pub fn from(sk: secp256k1::SecretKey) -> Self {
         Self(sk)
     }
-    /// Generates a random spending key.
-    ///
-    /// This is only used when generating dummy notes. Real spending keys should be
-    /// derived according to [ZIP 32].
-    ///
-    /// [ZIP 32]: https://zips.z.cash/zip-0032
-    pub(crate) fn random(rng: &mut impl RngCore) -> Self {
+    pub fn from_bytes(sk: [u8; 32]) -> Self {
+        let mut bytes = [0; 32];
+
+        Self(secp256k1::SecretKey::from_byte_array(bytes).expect("dang"))
+    }
+    /// Generates a random key that will be eligible for a headstash instance.
+    pub fn random(rng: &mut impl RngCore) -> Self {
         let mut bytes = [0; 32];
         rng.fill_bytes(&mut bytes);
         EligibleSk::from(secp256k1::SecretKey::from_byte_array(bytes).expect("dang"))
@@ -518,3 +643,80 @@ impl FullViewingKey {
 //         ))
 //     }
 // }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_headstash_address_from_sk() {
+        // Generate a random secret key
+        let mut rng = rand::thread_rng();
+        let sk = EligibleSk::random(&mut rng);
+
+        // Create HeadstashAddress from secret key
+        let hs_addr = HeadstashAddress::from_sk(sk);
+
+        // Verify both components are present
+        assert!(hs_addr.elig_pk().0.serialize().len() == 33); // compressed secp256k1 public key
+        assert!(hs_addr.addr_bytes().len() == 32); // 32-byte address
+    }
+
+    #[test]
+    fn test_headstash_address_from_pk() {
+        // Generate a random secret key and derive public key
+        let mut rng = rand::thread_rng();
+        let sk = EligibleSk::random(&mut rng);
+        let pk = EligiblePk::from(sk);
+
+        // Create HeadstashAddress from public key
+        let hs_addr = HeadstashAddress::from(pk);
+
+        // Verify address is correctly derived
+        assert!(hs_addr.addr_bytes().len() == 32);
+    }
+
+    #[test]
+    fn test_headstash_address_derivation_determinism() {
+        // Same secret key should always produce same address
+        let sk_bytes = [1u8; 32];
+        let sk = EligibleSk::from(secp256k1::SecretKey::from_byte_array(sk_bytes).unwrap());
+
+        let addr1 = HeadstashAddress::from_sk(sk);
+        let addr2 = HeadstashAddress::from_sk(sk);
+
+        assert_eq!(addr1.addr_bytes(), addr2.addr_bytes());
+        assert_eq!(addr1.pk_bytes(), addr2.pk_bytes());
+    }
+
+    #[test]
+    fn test_headstash_address_pk_to_addr_consistency() {
+        // Creating HeadstashAddress from SK vs creating from PK should give same address
+        let mut rng = rand::thread_rng();
+        let sk = EligibleSk::random(&mut rng);
+        let pk = EligiblePk::from(sk);
+
+        let addr_from_sk = HeadstashAddress::from_sk(sk);
+        let addr_from_pk = HeadstashAddress::from(pk);
+
+        assert_eq!(addr_from_sk.addr_bytes(), addr_from_pk.addr_bytes());
+        assert_eq!(addr_from_sk.pk_bytes(), addr_from_pk.pk_bytes());
+    }
+
+    #[test]
+    fn test_headstash_address_ethereum_compatibility() {
+        // Test that address derivation follows Ethereum EIP-55 style
+        // (keccak256 hash of uncompressed pubkey, last 20 bytes, padded to 32)
+        let sk_bytes = [42u8; 32];
+        let sk = EligibleSk::from(secp256k1::SecretKey::from_byte_array(sk_bytes).unwrap());
+        let addr = HeadstashAddress::from_sk(sk);
+
+        let addr_bytes = addr.addr_bytes();
+
+        // First 12 bytes should be zero (padding)
+        assert!(addr_bytes[0..12].iter().all(|&b| b == 0));
+
+        // Last 20 bytes should be non-zero (actual address)
+        assert!(addr_bytes[12..32].iter().any(|&b| b != 0));
+    }
+}

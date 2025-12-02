@@ -12,11 +12,14 @@ pub mod note;
 pub mod prf_expand;
 // Specification of headstash circuit miplement in rust
 mod spec;
+
 // Merkle tree struct definition (both for headstash and note commitment)
 pub mod tree;
-// 
+//
 pub mod value;
 
 // pub mod plume;
 pub mod deploy;
 pub mod example_circuits;
+
+pub mod gen;

@@ -1,6 +1,6 @@
-use zk_crates::deploy::suite::*;
+use zk_headstash::deploy::suite::*;
 
 fn main() -> Result<(), BoxError> {
-    TerpHeadstash::new().gen_note_nullifier()?;
+    HeadstashSuite::new().gen_note()?;
     Ok(())
 }

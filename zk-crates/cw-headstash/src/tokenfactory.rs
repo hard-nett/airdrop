@@ -1,162 +1,278 @@
-use cosmwasm_std::Uint128;
+// src/tokenfactory.rs
+use cosmwasm_std::{Addr, Coin, Deps, Response, StdResult, Uint128};
 use token_bindings::{DenomUnit, Metadata, TokenFactoryMsg};
 
-// #[cosmwasm_schema::cw_serde]
-// pub struct TokenParams {
-//     pub strategy: TokenStrategy,
-// }
+#[cosmwasm_schema::cw_serde]
+pub enum TokenStrategy {
+    /// Create new token via TokenFactory
+    NewFungible(NewTokenConfig),
+    /// Use existing denom (must pre-fund contract)
+    ExistingFungible(String), // denom only
+}
 
-// #[cosmwasm_schema::cw_serde]
-// pub enum TokenStrategy {
-//     /// create token using tokenfactory middleware (instantiates middleware that creates token)
-//     NewFungible(FactoryStrategy),
-//     // /// using existing token.
-//     ExistingFungible(ExistingFungible),
-//     // NewNonFungible {},
-//     // ExistingNonFungible {},
-// }
+#[cosmwasm_schema::cw_serde]
+pub struct NewTokenConfig {
+    pub subdenom: String,
+    pub metadata: Metadata,
+    pub initial_mint: Option<Vec<InitialMint>>, // optional pre-mint
+    pub manager: Option<String>,                // admin of denom
+    pub minters: Vec<String>,                   // who can mint later
+}
 
-// #[cosmwasm_schema::cw_serde]
-// pub enum FactoryStrategy {
-//     New(MsgNewHeadstashToken),
-// }
+#[cosmwasm_schema::cw_serde]
+pub struct InitialMint {
+    pub to_address: String,
+    pub amount: Uint128,
+}
 
-// #[cosmwasm_schema::cw_serde]
-// pub struct MsgNewHeadstashToken {
-//     // the manager of the contract is the one who can transfer the admin to another address
-//     // Typically this should be a multisig or a DAO (https://daodao.zone/)
-//     // Default is the contract initializer
-//     pub manager: Option<String>,
-//     pub allowed_mint_addresses: Vec<String>,
-//     // We can manage multiple denoms
-//     // pub existing_denoms: Option<Vec<String>>, // ex: factory/terp1xxxx/test
-//     pub new_denoms: Vec<NewDenom>,
-// }
+impl TokenStrategy {
+    pub fn denom(&self, contract_addr: &Addr) -> String {
+        match self {
+            TokenStrategy::NewFungible(cfg) => {
+                format!("factory/{}/{}", contract_addr, cfg.subdenom)
+            }
+            TokenStrategy::ExistingFungible(denom) => denom.clone(),
+        }
+    }
 
-// #[cosmwasm_schema::cw_serde]
-// pub struct ExistingFungible {
-//     pub denom: String,
-//     pub decimals: u32,
-//     /// optional existing tokenfactory middleware contract managed by caller.
-//     ///  Specified when user wants to have new token managed by token factory middleware contract
-//     pub factory: Option<String>,
-// }
+    pub fn create_denom_msg(&self, contract_addr: &Addr) -> Option<TokenFactoryMsg> {
+        match self {
+            TokenStrategy::NewFungible(cfg) => Some(TokenFactoryMsg::CreateDenom {
+                subdenom: cfg.subdenom.clone(),
+                metadata: Some(cfg.metadata.clone()),
+            }),
+            TokenStrategy::ExistingFungible(_) => None,
+        }
+    }
 
-// #[cosmwasm_schema::cw_serde]
-// pub struct NewDenom {
-//     pub name: String,
-//     pub description: Option<String>,
-//     pub symbol: String,
-//     pub decimals: u32,
-//     pub initial_balances: Option<Vec<InitialBalance>>,
-// }
+    pub fn initial_mint_msgs(&self, contract_addr: &Addr) -> StdResult<Vec<TokenFactoryMsg>> {
+        match self {
+            TokenStrategy::NewFungible(cfg) => {
+                let full_denom = self.denom(contract_addr);
+                Ok(cfg
+                    .initial_mint
+                    .as_ref()
+                    .map(|mints| {
+                        mints
+                            .iter()
+                            .map(|m| TokenFactoryMsg::MintTokens {
+                                denom: full_denom.clone(),
+                                amount: m.amount,
+                                mint_to_address: m.to_address.clone(),
+                            })
+                            .collect()
+                    })
+                    .unwrap_or_default())
+            }
+            TokenStrategy::ExistingFungible(_) => Ok(vec![]),
+        }
+    }
 
-// #[cosmwasm_schema::cw_serde]
-// pub struct InitialBalance {
-//     pub address: String,
-//     pub amount: Uint128,
-// }
+    pub fn requires_prefund(&self) -> bool {
+        matches!(self, TokenStrategy::ExistingFungible(_))
+    }
+}
 
-// // create tokenfactory middleware
-// pub fn create_denom_msg(subdenom: String, full_denom: String, denom: NewDenom) -> TokenFactoryMsg {
-//     TokenFactoryMsg::CreateDenom {
-//         subdenom,
-//         metadata: Some(Metadata {
-//             name: Some(denom.name),
-//             description: denom.description,
-//             denom_units: vec![
-//                 DenomUnit {
-//                     denom: full_denom.clone(),
-//                     exponent: 0,
-//                     aliases: vec![],
-//                 },
-//                 DenomUnit {
-//                     denom: denom.symbol.clone(),
-//                     exponent: denom.decimals,
-//                     aliases: vec![],
-//                 },
-//             ],
-//             base: Some(full_denom),
-//             display: Some(denom.symbol.clone()),
-//             symbol: Some(denom.symbol),
-//         }),
-//     }
-// }
-// pub fn mint_tokens_msg(address: String, denom: String, amount: Uint128) -> TokenFactoryMsg {
-//     TokenFactoryMsg::MintTokens {
-//         denom,
-//         amount,
-//         mint_to_address: address,
-//     }
-// }
 
-// pub fn init_token_strategy(
-//     deps: Deps,
-//     sender: &Addr,
-//     me: &Addr,
-//     cfg: &TokenParams,
-// ) -> Result<Response<TokenFactoryMsg>, StdError> {
-//     Ok(match &cfg.strategy {
-//         tokenfactory::TokenStrategy::NewFungible(fs) => {
-//             let mut denoms = Vec::new();
-//             let mut new_denom_msgs = vec![];
-//             let mut new_mint_msgs = vec![];
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use cosmwasm_std::testing::mock_dependencies;
+    use cosmwasm_std::{Addr, Uint128};
+    use token_bindings::{DenomUnit, Metadata};
 
-//             // Validate existing denoms.
-//             let (admin, minters, new_denoms) = match fs {
-//                 FactoryStrategy::New(new) => {
-//                     (&new.manager, &new.allowed_mint_addresses, &new.new_denoms)
-//                 }
-//             };
+    const CONTRACT_ADDR: &str = "cosmos2contractaddr1234567890abcdef";
 
-//             if !new_denoms.is_empty() {
-//                 for denom in new_denoms {
-//                     let subdenom = denom.symbol.to_lowercase();
-//                     let full_denom = format!("factory/{}/{}", me, subdenom);
+    fn mock_metadata() -> Metadata {
+        Metadata {
+            description: Some("Headstash Token".to_string()),
+            denom_units: vec![
+                DenomUnit {
+                    denom: "uhead".to_string(),
+                    exponent: 0,
+                    aliases: vec![],
+                },
+                DenomUnit {
+                    denom: "HEAD".to_string(),
+                    exponent: 6,
+                    aliases: vec!["head".to_string()],
+                },
+            ],
+            base: Some("uhead".to_string()),
+            display: Some("HEAD".to_string()),
+            name: Some("Headstash Token".to_string()),
+            symbol: Some("HEAD".to_string()),
+        }
+    }
 
-//                     // Add creation message.
-//                     new_denom_msgs.push(create_denom_msg(
-//                         subdenom.clone(),
-//                         full_denom.clone(),
-//                         denom.clone(),
-//                     ));
-//                     // Add initial balance mint messages.
-//                     if let Some(initial_balances) = &denom.initial_balances {
-//                         if !initial_balances.is_empty() {
-//                             // Validate addresses.
-//                             for initial in initial_balances.iter() {
-//                                 deps.api.addr_validate(&initial.address)?;
-//                             }
+    #[test]
+    fn test_denom_new_fungible() {
+        let deps = mock_dependencies();
+        let contract = Addr::unchecked(CONTRACT_ADDR);
 
-//                             for b in initial_balances {
-//                                 new_mint_msgs.push(mint_tokens_msg(
-//                                     b.address.clone(),
-//                                     full_denom.clone(),
-//                                     b.amount,
-//                                 ));
-//                             }
-//                         }
-//                     }
-//                     // Add to existing denoms.
-//                     denoms.push(full_denom);
-//                 }
-//             } else {
-//                 return Err(StdError::msg("cannot set empty new denoms"));
-//             }
+        let strategy = TokenStrategy::NewFungible(NewTokenConfig {
+            subdenom: "head".to_string(),
+            metadata: mock_metadata(),
+            initial_mint: None,
+            manager: None,
+            minters: vec![],
+        });
 
-//             // if denoms.is_empty() {
-//             //     return Err(ContractError::NoDenomsProvided {});
-//             // }
-//             let manager = match admin {
-//                 Some(a) => &deps.api.addr_validate(&a)?,
-//                 None => sender,
-//             };
+        assert_eq!(
+            strategy.denom(&contract),
+            format!("factory/{}/head", CONTRACT_ADDR)
+        );
+    }
 
-//             Response::new()
-//                 .add_messages(new_denom_msgs)
-//                 .add_messages(new_mint_msgs)
-//         }
+    #[test]
+    fn test_denom_existing_fungible() {
+        let contract = Addr::unchecked(CONTRACT_ADDR);
+        let strategy = TokenStrategy::ExistingFungible("cosmos1abc...xyz".to_string());
 
-//         tokenfactory::TokenStrategy::ExistingFungible(existing_fungible) => Response::new(),
-//     })
-// }
+        assert_eq!(strategy.denom(&contract), "cosmos1abc...xyz");
+    }
+
+    #[test]
+    fn test_create_denom_msg_new_fungible() {
+        let deps = mock_dependencies();
+        let contract = Addr::unchecked(CONTRACT_ADDR);
+
+        let strategy = TokenStrategy::NewFungible(NewTokenConfig {
+            subdenom: "head".to_string(),
+            metadata: mock_metadata(),
+            initial_mint: None,
+            manager: None,
+            minters: vec![],
+        });
+
+        let msg = strategy.create_denom_msg(&contract).unwrap();
+        match msg {
+            TokenFactoryMsg::CreateDenom { subdenom, metadata } => {
+                assert_eq!(subdenom, "head");
+                assert_eq!(metadata.unwrap().name.unwrap(), "Headstash Token");
+            }
+            _ => panic!("Expected CreateDenom"),
+        }
+    }
+
+    #[test]
+    fn test_create_denom_msg_existing_returns_none() {
+        let contract = Addr::unchecked(CONTRACT_ADDR);
+        let strategy = TokenStrategy::ExistingFungible("existing_denom".to_string());
+
+        assert!(strategy.create_denom_msg(&contract).is_none());
+    }
+
+    #[test]
+    fn test_initial_mint_msgs_with_mints() {
+        let contract = Addr::unchecked(CONTRACT_ADDR);
+
+        let strategy = TokenStrategy::NewFungible(NewTokenConfig {
+            subdenom: "head".to_string(),
+            metadata: mock_metadata(),
+            initial_mint: Some(vec![
+                InitialMint {
+                    to_address: "alice".to_string(),
+                    amount: Uint128::new(1000),
+                },
+                InitialMint {
+                    to_address: "bob".to_string(),
+                    amount: Uint128::new(500),
+                },
+            ]),
+            manager: None,
+            minters: vec![],
+        });
+
+        let msgs = strategy.initial_mint_msgs(&contract).unwrap();
+        assert_eq!(msgs.len(), 2);
+
+        let expected_denom = format!("factory/{}/head", CONTRACT_ADDR);
+
+        match &msgs[0] {
+            TokenFactoryMsg::MintTokens { denom, amount, mint_to_address } => {
+                assert_eq!(denom, &expected_denom);
+                assert_eq!(*amount, Uint128::new(1000));
+                assert_eq!(mint_to_address, "alice");
+            }
+            _ => panic!("Expected MintTokens"),
+        }
+
+        match &msgs[1] {
+            TokenFactoryMsg::MintTokens { denom, amount, mint_to_address } => {
+                assert_eq!(denom, &expected_denom);
+                assert_eq!(*amount, Uint128::new(500));
+                assert_eq!(mint_to_address, "bob");
+            }
+            _ => panic!("Expected MintTokens"),
+        }
+    }
+
+    #[test]
+    fn test_initial_mint_msgs_no_initial_mint() {
+        let contract = Addr::unchecked(CONTRACT_ADDR);
+
+        let strategy = TokenStrategy::NewFungible(NewTokenConfig {
+            subdenom: "head".to_string(),
+            metadata: mock_metadata(),
+            initial_mint: None,
+            manager: None,
+            minters: vec![],
+        });
+
+        let msgs = strategy.initial_mint_msgs(&contract).unwrap();
+        assert!(msgs.is_empty());
+    }
+
+    #[test]
+    fn test_initial_mint_msgs_existing_fungible_returns_empty() {
+        let contract = Addr::unchecked(CONTRACT_ADDR);
+        let strategy = TokenStrategy::ExistingFungible("existing".to_string());
+
+        let msgs = strategy.initial_mint_msgs(&contract).unwrap();
+        assert!(msgs.is_empty());
+    }
+
+    #[test]
+    fn test_requires_prefund() {
+        let contract = Addr::unchecked(CONTRACT_ADDR);
+
+        let new_strategy = TokenStrategy::NewFungible(NewTokenConfig {
+            subdenom: "head".to_string(),
+            metadata: mock_metadata(),
+            initial_mint: None,
+            manager: None,
+            minters: vec![],
+        });
+
+        let existing_strategy = TokenStrategy::ExistingFungible("existing".to_string());
+
+        assert!(!new_strategy.requires_prefund());
+        assert!(existing_strategy.requires_prefund());
+    }
+
+    #[test]
+    fn test_full_denom_resolution_consistency() {
+        let contract = Addr::unchecked("cosmos1qwerty");
+
+        let cfg = NewTokenConfig {
+            subdenom: "meme".to_string(),
+            metadata: mock_metadata(),
+            initial_mint: None,
+            manager: None,
+            minters: vec![],
+        };
+
+        let strategy = TokenStrategy::NewFungible(cfg);
+
+        let from_denom = strategy.denom(&contract);
+        let from_create = strategy.create_denom_msg(&contract).unwrap();
+
+        if let TokenFactoryMsg::CreateDenom { subdenom, .. } = from_create {
+            let expected = format!("factory/{}/{}", contract, subdenom);
+            assert_eq!(from_denom, expected);
+        } else {
+            panic!("Wrong msg type");
+        }
+    }
+}

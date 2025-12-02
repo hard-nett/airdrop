@@ -26,64 +26,67 @@ pub type BoxError = Box<dyn Error + Send + Sync>;
 pub fn get_cli_args() -> Result<(String, String), Box<dyn std::error::Error>> {
     let args: Vec<String> = env::args().collect();
     if args.len() != 3 {
-        eprintln!(
-            "provide the following flags: {} <input-file> <address>",
-            args[0]
-        );
+        eprintln!("flag format: {} <input-file> <address>", args[0]);
         std::process::exit(1);
     }
     Ok((args[1].clone(), args[2].clone()))
 }
+pub struct TerpHeadstashConfig {}
 
-pub struct TerpHeadstash {}
-impl HeadstashBitwiseInstance for TerpHeadstash {}
-impl TerpHeadstashActions for TerpHeadstash {}
-
-impl TerpHeadstash {
+pub struct HeadstashSuite {}
+impl HeadstashBitwiseInstance for HeadstashSuite {}
+impl HeadstashLaunchpadInstance for HeadstashSuite {}
+impl HeadstashProofInstance for HeadstashSuite {}
+impl HeadstashInstance for HeadstashSuite {
+    type HsErr = BoxError;
+}
+impl HeadstashSuite {
     pub fn new() -> Self {
         Self {}
     }
 }
-pub struct TerpHeadstashConfig {}
+
+/// # Trait: `HeadstashProofInstance`
+///
+/// implement expected functions for client side interactions headstashes.
+pub trait HeadstashProofInstance {
+    fn generate_note_proof() -> Result<(), BoxError> {
+        Ok(())
+    }
+    fn verify_note_proof() -> Result<(), BoxError> {
+        Ok(())
+    }
+}
+
+/// # Trait: `HeadstashInstance`
+///
+/// implement expected functions for client side interactions headstashes.
 pub trait HeadstashInstance {
     type HsErr;
 
+    /// TODO: wire into network client for headstash market contract state queries
     fn find_new_headstashes() -> Result<(), Self::HsErr> {
-        // TODO: wire into network client for headstash market contract state queries
         todo!()
     }
 
-    fn create_headstash_notes() -> Result<(), Self::HsErr>;
-
-    fn create_new_headstash() -> Result<(), Self::HsErr> {
-        // TODO:
-        // prompt to determine communities to include in headstash airdrop
-        // deploy/retrieve holder distributions via full ephemeral full nodes api queries
-        // prompt calculations on percentile distribution and suggested ranges for normalization of airdrop allocation between communities
-        // connfigure how airdrop occurs (existing token, new token)
-        // generate headstash config and post to ipfs
-        // call headstash launchpad
-        // deploy new headstash aggregator
-        todo!()
-    }
-
+    /// TODO: query ipfs file to retrieve headstash config
     fn list_headstash_info() -> Result<(), Self::HsErr> {
-        // TODO: query ipfs file to retrieve headstash config
         todo!()
     }
 
+    /// TODO: read folder and display sum of notes and number of fdi counts
     fn list_unspent_notes() -> Vec<Note> {
-        // TODO: read folder and display sum of notes and number of fdi counts
         todo!()
     }
 
+    /// TODO: read folder and display notes spent
     fn list_spent_notes() -> Vec<Note> {
-        // TODO: read folder and display notes spent
         todo!()
     }
 
+    /// TODO: select unspent notes used to claim and move note file over into spent,
+    /// specify method of preparing and harvesting (creating proof) for a given note (either wasm-bindgen invocation,locally via cargo script, or external method invoked with a bash script)
     fn prepare_and_harvest_note() -> Result<(), Self::HsErr> {
-        // TODO: select unspent notes used to claim and move note file over into spent
         todo!()
     }
 
@@ -93,28 +96,6 @@ pub trait HeadstashInstance {
 }
 
 pub trait HeadstashBitwiseInstance {
-    /// Convert a byte slice into an iterator of little‑endian bits (LSB first per byte).
-    fn bytes_to_bits_le(bytes: &[u8]) -> impl Iterator<Item = bool> + '_ {
-        bytes
-            .iter()
-            .flat_map(|b| (0..8).map(move |i| (b >> i) & 1 == 1))
-    }
-
-    /// Returns the sum of the 3 88-bit pallas curve point representation of a secp256k1 value
-    fn derive_secp256k1_limbs_sum_const_time(&self, bytes: &[Fp; 3]) -> Fp {
-        let limb3 = &bytes[0];
-        let limb2 = &bytes[1];
-        let limb1 = &bytes[2];
-        limb1.add(&limb2.add(&limb3))
-    }
-    /// Note‑Denom (nd): blake3 hash of the token denomination string, represented as the sum of the 3 88-bit pallas curve point representation of private key.
-    fn derive_nd(&self, raw_nd: &str) -> [u8; 32] {
-        NoteDenom::new_for_proof(raw_nd)
-            .as_bytes()
-            .try_into()
-            .expect("NoteDenom is always 32 bytes")
-    }
-
     fn derive_m(
         &self,
         esk: &[u8; 32],
@@ -123,13 +104,11 @@ pub trait HeadstashBitwiseInstance {
         nd: &str,
     ) -> Result<pallas::Base, BoxError> {
         let esk = self.derive_secp256k1_limbs_sum_const_time(&self.derive_esk(*esk));
-
         let (fdi, v, nd) = (
             Fp::from_u128(u64::from_le_bytes(self.derive_fdi(fdi)) as u128),
             Fp::from_repr(NoteDenom::new_for_proof(nd).as_bytes().try_into().unwrap()).expect("nd"),
             Fp::from_u128(u64::from_le_bytes(self.derive_v(v)) as u128),
         );
-
         Ok(crate::spec::prf_pallas_m(fdi, v, nd, esk))
     }
     fn derive_esk(&self, sk: [u8; 32]) -> [Fp; 3] {
@@ -162,14 +141,50 @@ pub trait HeadstashBitwiseInstance {
             rho,
         )
     }
+    /// Convert a byte slice into an iterator of little‑endian bits (LSB first per byte).
+    fn bytes_to_bits_le(bytes: &[u8]) -> impl Iterator<Item = bool> + '_ {
+        bytes
+            .iter()
+            .flat_map(|b| (0..8).map(move |i| (b >> i) & 1 == 1))
+    }
+
+    /// Returns the sum of the 3 88-bit pallas curve point representation of a secp256k1 value
+    fn derive_secp256k1_limbs_sum_const_time(&self, bytes: &[Fp; 3]) -> Fp {
+        let limb3 = &bytes[0];
+        let limb2 = &bytes[1];
+        let limb1 = &bytes[2];
+        limb1.add(&limb2.add(&limb3))
+    }
+    /// Note‑Denom (nd): blake3 hash of the token denomination string, represented as the sum of the 3 88-bit pallas curve point representation of private key.
+    fn derive_nd(&self, raw_nd: &str) -> [u8; 32] {
+        NoteDenom::new_for_proof(raw_nd)
+            .as_bytes()
+            .try_into()
+            .expect("NoteDenom is always 32 bytes")
+    }
+
     fn extend_with_base_field_bits(bits: &mut Vec<bool>, a: pallas::Base) {
         let bit_slice = a.to_le_bits();
         bits.extend(bit_slice.iter().take(250).map(|b| *b));
     }
 }
 
-/// All actions any user would take for a headstash instance
-pub trait TerpHeadstashActions: HeadstashBitwiseInstance {
+/// All actions any user would take for creating a new headstash 100% client side using this launchpad framework.
+///  Requires struct implementing trait to also implement `HeadstashBitwiseInstance` default members.
+/// TODO: feature flag parallelization in tree generation
+/// TODO: add default documentation to each member
+pub trait HeadstashLaunchpadInstance: HeadstashBitwiseInstance {
+    fn create_new_headstash() -> Result<(), BoxError> {
+        // TODO:
+        // prompt to determine communities to include in headstash airdrop
+        // deploy/retrieve holder distributions via full ephemeral full nodes api queries
+        // prompt calculations on percentile distribution and suggested ranges for normalization of airdrop allocation between communities
+        // connfigure how airdrop occurs (existing token, new token)
+        // generate headstash config and post to ipfs
+        // call headstash launchpad
+        // deploy new headstash aggregator
+        todo!()
+    }
     fn get_input_path(&self) -> Result<String, BoxError> {
         let args: Vec<String> = env::args().collect();
         if args.len() != 2 {
@@ -367,11 +382,11 @@ pub trait TerpHeadstashActions: HeadstashBitwiseInstance {
             message.push((layer >> i) & 1 == 1);
         }
 
-        <TerpHeadstash as HeadstashBitwiseInstance>::extend_with_base_field_bits(
+        <HeadstashSuite as HeadstashBitwiseInstance>::extend_with_base_field_bits(
             &mut message,
             left,
         );
-        <TerpHeadstash as HeadstashBitwiseInstance>::extend_with_base_field_bits(
+        <HeadstashSuite as HeadstashBitwiseInstance>::extend_with_base_field_bits(
             &mut message,
             right,
         );
@@ -395,7 +410,7 @@ pub trait TerpHeadstashActions: HeadstashBitwiseInstance {
         message_bytes.extend_from_slice(v);
         message_bytes.extend_from_slice(fdi);
         Ok(HashDomain::new(LEAF_PERSONALIZATION)
-            .hash_to_point(TerpHeadstash::bytes_to_bits_le(&message_bytes).into_iter())
+            .hash_to_point(HeadstashSuite::bytes_to_bits_le(&message_bytes).into_iter())
             .expect("dang")
             .to_affine()
             .coordinates()
@@ -403,10 +418,10 @@ pub trait TerpHeadstashActions: HeadstashBitwiseInstance {
             .x()
             .clone())
     }
-    fn gen_headstash_notes(&self) -> Result<(), BoxError> {
+
+    fn create_headstash_notes(&self) -> Result<(), BoxError> {
         let (input_path, addr_target) = get_cli_args().unwrap();
         let input_data: Value = serde_json::from_str(&fs::read_to_string(&input_path)?)?;
-        // TerpHeadstash::gen_headstash_tree(&self, input);
         let mut address_notes = serde_json::Map::new();
 
         if let Value::Object(map) = &input_data {
@@ -441,17 +456,11 @@ pub trait TerpHeadstashActions: HeadstashBitwiseInstance {
                             });
 
                             generated_notes.push(json!({
-                                "m":          "",
-                                "esk":    &addr_target,
-                                "nul_sk":     "",
-                                "sig_jub":    "",
                                 "fdi":        fdi,
                                 "amount":     amnt.to_string(),
                                 "denom":      token_name.clone(),
                                 "recp":       "",
                                 "nul":   "",
-                                "epk":     "",
-                                "ψ":          "",
                                 "note_cm":    ""
                             }));
                         }
@@ -493,6 +502,9 @@ pub trait TerpHeadstashActions: HeadstashBitwiseInstance {
 
         Ok(())
     }
+
+    /// TODO: create default notes of a specific public key allocation for a given headstash instance.
+    /// retrieves the entire tree from the headstash-API client, and then generate our notes 100% client side
     fn gen_headstash_my_notes(&self, input: PathBuf, output: PathBuf) -> Result<(), BoxError> {
         todo!()
     }
@@ -559,23 +571,24 @@ pub trait TerpHeadstashActions: HeadstashBitwiseInstance {
         Ok((args[1].clone(), args[2].clone(), args[3].clone()))
     }
 
-    // /// Derive a 32‑byte seed from a BIP‑39 mnemonic (no passphrase here for brevity).
-    // fn derive_secp256k1_seed_from_mnemonic(mnemonic: &str) -> [u8; 64] {
-    //     let mn = Mnemonic::parse_in_normalized(Language::English, mnemonic).unwrap();
-    //     mn.to_seed_normalized("HEADSTASH")
-    // }
-    // /// Derive an Ethereum secp256k1 secret key.
-    // fn eth_secret_from_seed(seed: &[u8]) -> SecpSecretKey {
-    //     SecpSecretKey::from_byte_array(hkdf_expand(LABEL, seed)).expect("invalid eth secret")
-    // }
-
     /// # Headstash: Create Nullifier
     /// ```sh
     /// # ex:  cargo run --bin create_nullifiers -- 0x0000000000000000000000000000000000000000 uterp 100
     /// cargo run --bin create_nullifier -- <elig_addr> <token-denom> <amount>
     /// ```
     ///  Derives a nullifier, which is a pallas curve point derived from the hkdf used with an `esk`,
-    fn gen_note_nullifier(&self) -> Result<(), BoxError> {
+    /// I generate a note:
+    // - when building a proof
+    // - through using egui
+    // - through my web-browser
+    // - by metamask snap
+
+    // we should enable our msg for generating a note to take a manifold approach so that we can use a single function in our headstash suite for routing msgs based on the various ways we generate a note.
+    fn gen_note(&self) -> Result<(), BoxError> {
+        // retrieve sk from metamask
+        // for each note, generate randomness values, and define note. save spent nullifier and nk to local db store
+        // define note
+        // let note = Note::new(recp, v, nd, fdi, esk, rho, rseed)
         Ok(())
     }
 
@@ -602,7 +615,6 @@ pub trait TerpHeadstashActions: HeadstashBitwiseInstance {
 
 #[cfg(test)]
 mod test {
-
     use super::*;
     use std::collections::HashMap;
 
@@ -670,10 +682,6 @@ mod test {
 
         Ok(())
     }
-
-    use super::*;
-    use serde_json::Value;
-    use std::fs;
 
     fn load_data() -> Result<Value, BoxError> {
         let file = fs::File::open("./data/genesis_sinsemilla.json")?;

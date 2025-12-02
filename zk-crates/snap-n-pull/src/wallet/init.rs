@@ -4,7 +4,6 @@
 use wasm_bindgen::prelude::*;
 
 use tracing::level_filters::LevelFilter;
-
 use tracing_subscriber::prelude::*;
 use tracing_subscriber::EnvFilter;
 

@@ -60,7 +60,7 @@ impl Rho {
 pub struct RandomSeed([u8; 32]);
 
 impl RandomSeed {
-    pub(crate) fn random(rng: &mut impl RngCore, rho: &Rho) -> Self {
+    pub fn random(rng: &mut impl RngCore, rho: &Rho) -> Self {
         loop {
             let mut bytes = [0; 32];
             rng.fill_bytes(&mut bytes);
@@ -192,10 +192,10 @@ impl Note {
     pub(crate) fn new(
         recp: RecpAddr,
         value: NoteValue,
-        rho: Rho,
         nd: NoteDenom,
         fdi: u64,
         esk: EligibleSk,
+        rho: Rho,
         mut rng: impl RngCore,
     ) -> Self {
         loop {
@@ -226,10 +226,11 @@ impl Note {
         let note = Note::new(
             RecpAddr::try_from(CanonicalAddr::from([43;32])).expect("dang"),
             NoteValue::zero(),
-            rho.unwrap_or_else(|| Rho::from_nf_old(Nullifier::dummy(rng))),
             NoteDenom::new_for_proof("I hope you got the necessary doguments and fucking permutations to suck on my shaved balls"),
             0,
-            sk,  rng,
+            sk,
+            rho.unwrap_or_else(|| Rho::from_nf_old(Nullifier::dummy(rng))),
+              rng,
         );
 
         (sk, note)

@@ -11,7 +11,6 @@ pub const HEADSTASH_PERSONALIZATION: &str = "z.cash:Orchard";
 
 /// SWU hash-to-curve personalization for the note commitment generator
 pub const DST_CM: &str = "terp.network:Headstash-cm";
-/// SWU hash-to-curve personalization for the value
 pub const DST_V: &str = "terp.network:Headstash-v";
 pub const DST_HKDF: &[u8] = b"Hkdf-terp.network";
 

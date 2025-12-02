@@ -1,4 +1,4 @@
-# Zk-Headstash Proof System
+# Cw-Headstash Proof System
 
 Singleton implementing proof system for consuming headstash notes.
 
@@ -39,3 +39,7 @@ Rotation keys accepts a list of tuples containing the old key to rotate out with
 
 - <https://eth2book.info/latest/part2/building_blocks/signatures/>
 - <https://medium.com/harmony-one/exploring-bls-keys-on-the-harmony-protocol-understanding-generation-management-and-use-cases-b8722f7219fc>
+
+## TODO
+
+- cw-json-filter support: filter preinput for tokens for prevention in duplicates

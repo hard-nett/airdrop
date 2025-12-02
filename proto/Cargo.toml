@@ -19,7 +19,7 @@ pprof = { version = "0.15", features = ["flamegraph"] }
 pretty_env_logger = "0.4.0"
 prettyplease = "0.1.16"
 proc-macro2 = "1.0.52"
-prost = { version = "0.14.1", default-features = false, features = ["derive"] }
+prost = { workspace = true, default-features = false, features = ["derive"] }
 prost-types = { version = "0.14.1", default-features = false }
 
 quote = "1.0.26"
@@ -35,5 +35,5 @@ pbjson-build = "0.7.0"
 pbjson-types = "0.7.0"
 
 [lib]
-name = "cw_hoe_proto"
+name = "ergors_proto"
 path = "src/lib.rs"

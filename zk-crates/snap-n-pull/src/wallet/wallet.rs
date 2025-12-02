@@ -1,4 +1,4 @@
-use std::num::{NonZeroU32, NonZeroUsize};
+use std::num::NonZeroU32;
 
 // use bip0039::{English, Mnemonic};
 // use nonempty::NonEmpty;
@@ -9,53 +9,69 @@ use std::num::{NonZeroU32, NonZeroUsize};
 // };
 
 // use crate::BlockRange;
+
 use crate::Error;
 use crate::Network;
 
 // use pczt::roles::combiner::Combiner;
 // use pczt::roles::prover::Prover;
 
+use serde::Deserialize;
 // use pczt::roles::updater::Updater;
 // use pczt::Pczt;
 // use sapling::ProofGenerationKey;
 // use serde::de::DeserializeOwned;
 use serde::Serialize;
-use std::fmt::Debug;
-use std::hash::Hash;
+use std::collections::HashMap;
 use std::sync::Arc;
-// use subtle::ConditionallySelectable;
 use tokio::sync::RwLock;
-// use zcash_address::ZcashAddress;
-// use zcash_client_backend::data_api::wallet::{
-//     create_pczt_from_proposal, create_proposed_transactions,
-//     extract_and_store_transaction_from_pczt, input_selection::GreedyInputSelector,
-//     propose_shielding, propose_transfer,
-// };
-// use zcash_client_backend::data_api::{
-//     Account, AccountBirthday, AccountPurpose, InputSource, WalletRead, WalletSummary, WalletWrite,
-// };
-// use zcash_client_backend::data_api::{WalletCommitmentTrees, Zip32Derivation};
-// use zcash_client_backend::fees::standard::MultiOutputChangeStrategy;
-// use zcash_client_backend::fees::{DustOutputPolicy, SplitPolicy, StandardFeeRule};
-// use zcash_client_backend::proposal::Proposal;
-// use zcash_client_backend::proto::service::{
-//     self, compact_tx_streamer_client::CompactTxStreamerClient,
-// };
-// use zcash_client_backend::wallet::OvkPolicy;
-// use zcash_client_backend::zip321::{Payment, TransactionRequest};
-// use zcash_client_memory::{MemBlockCache, MemoryWalletDb};
-// use zcash_keys::keys::{UnifiedFullViewingKey, UnifiedSpendingKey};
-// use zcash_primitives::transaction::fees::FeeRule;
-// use zcash_primitives::transaction::TxId;
-// use zcash_proofs::prover::LocalTxProver;
-// use zcash_protocol::ShieldedProtocol;
 
-// use zcash_client_backend::sync::run;
+use zk_headstash::keys::{EligiblePk, EligibleSk, NullifierDerivingKey};
+use zk_headstash::note::{NoteCommitment, Nullifier, Rho};
+use zk_headstash::r#gen::snp::v1::*;
+use zk_headstash::value::HeadstashValue;
 
-// use zcash_protocol::consensus::Parameters;
-// use zcash_protocol::value::Zatoshis;
-// use zip32;
-// use zip32::fingerprint::SeedFingerprint;
+use crate::client::HeadstashClient;
+use crate::crypto::{decrypt_nullifier_state, encrypt_nullifier_state, NullifierState};
+
+/// Response from a headstash claim submission
+#[derive(Debug, Clone, Serialize)]
+pub struct ClaimResponse {
+    /// Transaction hash
+    pub tx_hash: String,
+    /// Block height
+    pub height: i64,
+    /// Success/failure code
+    pub code: u32,
+    /// Transaction log
+    pub raw_log: String,
+}
+
+/// Headstash metadata (from API, blockchain, or IPFS)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct HeadstashMetadata {
+    /// Merkle root of the note tree
+    pub merkle_root: Vec<u8>,
+    /// IPFS CID for full tree data
+    pub ipfs_cid: String,
+    /// Circuit verification key
+    pub verification_key: Vec<u8>,
+    /// Total allocation amount
+    pub total_amount: String,
+    /// Denomination
+    pub denom: String,
+}
+
+/// Proof data for smart account claim
+#[derive(Debug, Clone, Serialize)]
+pub struct ProofData {
+    /// The zkSNARK proof bytes
+    pub proof: Vec<u8>,
+    /// Public inputs for verification
+    pub public_inputs: Vec<Vec<u8>>,
+    /// The nullifier being claimed
+    pub nullifier: Vec<u8>,
+}
 
 // const BATCH_SIZE: u32 = 10000;
 
@@ -63,25 +79,586 @@ use tokio::sync::RwLock;
 // /// shielding transaction
 // const SHIELDING_THRESHOLD: Zatoshis = Zatoshis::const_from_u64(100000);
 
-// /// # A Zcash wallet
-// ///
-// /// A wallet is a set of accounts that can be synchronized together with the blockchain.
-// /// Once synchronized these can be used to build transactions that spend notes
-// ///
-// /// ## Adding Accounts
-// ///
-// /// TODO
-// ///
-// /// ## Synchronizing
-// ///
-// /// A wallet can be syncced with the blockchain by feeding it blocks. The accounts currently managed by the wallet will be used to
-// /// scan the blocks and retrieve relevant transactions. The wallet itself keeps track of blocks it has seen and can be queried for
-// /// the suggest range of blocks that should be retrieved for it to process next.
-// ///
-// /// ## Building Transactions
-// ///
-// /// TODO
-// ///
+/// # A Headstash Stash
+///
+/// A wallet is a manifold that is used to synchronized together with the blockchain & headstash-api.
+/// It has the ability to store local records of spent note nullifiers & note-commitments, share & export these files via authenticated requests
+///
+/// ## Creating Note Nullifiers
+///
+/// TODO
+///
+/// ##  Syncing Headstash Notes
+///
+/// TODO
+/// - determine which client to use (generic high performant grpc requests).meaning replace previous existing client struct`CompactTxStreamerClient` from zcash library with standard grpc client method
+///
+///
+/// ## Building Transactions
+///
+/// TODO
+///
+///
+///
+/// HeadstashWallet - Database and API client for headstash operations
+///
+/// This is NOT a traditional wallet that stores secret keys.
+/// It's a database that:
+/// 1. Stores note data indexed by headstash ID
+/// 2. Communicates with headstash API via gRPC
+/// 3. Requests secret key from MetaMask only when needed
+///
+///
+#[derive(Debug, Clone)]
+pub struct NoteData {
+    /// The nullifier key derived from esk and rho
+    pub nk: NullifierDerivingKey,
+    /// The nullifier used to claim the note
+    pub nullifier: Nullifier,
+    /// The note commitment
+    pub commitment: NoteCommitment,
+    /// The value of the note
+    pub hv: HeadstashValue,
+    /// The fixed denomination index (leaf position in tree)
+    pub fdi: u64,
+    /// Whether this note has been spent
+    pub spent: bool,
+}
+
+pub struct HeadstashWallet {
+    /// Internal database for note data (nullifiers, commitments, etc.)
+    // pub(crate) db: Arc<RwLock<W>>,
+    /// Network configuration (mainnet/testnet)
+    pub(crate) network: Network,
+    /// gRPC client for headstash API communication
+    /// (Similar to zcash's CompactTxStreamerClient but for headstash API)
+    pub(crate) client: Option<HeadstashClient>,
+}
+
+impl HeadstashWallet {
+    /// Create a new HeadstashWallet with database and network
+    ///
+    /// # Arguments
+    /// * `db` - Database implementation for storing note data
+    /// * `network` - Network configuration (mainnet/testnet)
+    /// * `api_url` - Optional headstash API endpoint URL
+    ///
+    /// # Example
+    /// ```rust,ignore
+    /// let wallet = HeadstashWallet::new(
+    ///     Network::MainNetwork,
+    ///     Some("https://headstash-api.terp.network")
+    /// ).await?;
+    /// ```
+    pub async fn new(network: Network, api_url: Option<&str>) -> Result<Self, Error> {
+        let client = HeadstashClient::new(None, api_url).await?;
+
+        Ok(Self {
+            // db: Arc::new(RwLock::new(db)),
+            network,
+            client: Some(client),
+        })
+    }
+
+    /// Generate nullifier and commitment for a note (requires ESK from MetaMask)
+    ///
+    /// This is a helper that generates the cryptographic values needed for a note.
+    /// The ESK is passed in (retrieved from MetaMask) and NOT stored.
+    ///
+    /// # Arguments
+    /// * `esk` - Secret key from MetaMask (NOT stored, only used for this operation)
+    /// * `rho` - Randomness value for the note
+    /// * `fdi` - Fixed denomination index (leaf position)
+    /// * `value` - Note value (amount + denomination)
+    ///
+    /// # Returns
+    /// Tuple of (NullifierDerivingKey, Nullifier, NoteCommitment)
+    pub async fn client(&self) -> HeadstashClient {
+        let client = HeadstashClient::new(None, Some("https://headstash-api.terp.network"))
+            .await
+            .unwrap();
+
+        client
+    }
+
+    pub fn generate_rho(&self, dst: Option<&[u8; 32]>, user: &[u8; 32]) -> Result<Rho, Error> {
+        Ok(zk_headstash::note::Rho::from_bytes(user).expect("rho error"))
+    }
+    pub fn generate_note_data(
+        &self,
+        esk: EligibleSk,
+        rho: Rho,
+        fdi: u64,
+        recp: &[u8],
+        hv: HeadstashValue,
+        rseed: [u8; 32],
+    ) -> Result<(NullifierDerivingKey, Nullifier, NoteCommitment), Error> {
+        // Derive nullifier key
+        let nk = NullifierDerivingKey::derive_from(esk, rho);
+
+        // Create a temporary note to derive nullifier and commitment
+        // Note: We use HeadstashSuite methods here similar to suite.rs
+        use zk_headstash::address::RecpAddr;
+        use zk_headstash::note::{Note, RandomSeed};
+
+        let recp = RecpAddr::try_from(recp)
+            .map_err(|e| Error::KeyDecoding(format!("Invalid address: {:?}", e)))?;
+
+        let rseed = RandomSeed::from_bytes(rseed, &rho).expect("rseed input");
+
+        // Create note
+        let (v, nd) = hv.into_parts();
+        let note = Note::from_parts(recp, v, nd, fdi, esk, rho, rseed)
+            .into_option()
+            .ok_or_else(|| Error::KeyDecoding("Failed to create valid note".into()))?;
+
+        // Derive nullifier and commitment
+        let nullifier = note.nullifier();
+        let commitment = note.commitment();
+
+        Ok((nk, nullifier, commitment))
+    }
+
+    // /// Store a new note in the database
+    // ///
+    // /// # Arguments
+    // /// * `headstash_id` - The headstash contract address
+    // /// * `esk` - Secret key from MetaMask (for generating nullifier/commitment)
+    // /// * `rho` - Randomness value
+    // /// * `fdi` - Leaf index
+    // /// * `v` - Note value
+    // pub async fn store_note(
+    //     &self,
+    //     headstash_id: String,
+    //     esk: EligibleSk,
+    //     rho: Rho,
+    //     fdi: u64,
+    //     recp: &[u8],
+    //     hv: HeadstashValue,
+    //     rseed: [u8; 32],
+    // ) -> Result<(), Error> {
+    //     let (nk, nullifier, commitment) =
+    //         self.generate_note_data(esk, rho, fdi, recp, hv, rseed)?;
+
+    //     let note_data = NoteData {
+    //         nk,
+    //         nullifier,
+    //         commitment,
+    //         hv,
+    //         fdi,
+    //         spent: false,
+    //     };
+
+    //     let mut db = self.db.write().await;
+    //     db.store_note(&headstash_id, note_data)?;
+
+    //     Ok(())
+    // }
+
+    // /// List all unspent notes for a headstash
+    // ///
+    // /// # Arguments
+    // /// * `headstash_id` - The headstash contract address
+    // pub async fn list_unspent_notes(&self, headstash_id: &String) -> Result<Vec<NoteData>, Error> {
+    //     let db = self.db.read().await;
+    //     db.list_unspent_notes(headstash_id)
+    // }
+
+    // /// List all spent notes for a headstash
+    // ///
+    // /// # Arguments
+    // /// * `headstash_id` - The headstash contract address
+    // pub async fn list_spent_notes(&self, headstash_id: &String) -> Result<Vec<NoteData>, Error> {
+    //     let db = self.db.read().await;
+    //     db.list_spent_notes(headstash_id)
+    // }
+
+    /// Claim a headstash allocation via manual contract call
+    ///
+    /// This generates the proof and submits directly to chain, expecting a headstash to allow nullifiers to be appended to the state.
+    ///
+    /// # Arguments
+    /// * `headstash_id` - The headstash contract address
+    /// * `esk` - Secret key from MetaMask (for signing)
+    /// * `nullifier` - The nullifier of the note to claim
+    ///
+    /// # Workflow
+    /// 1. Get note data from database
+    /// 2. Generate proof (via HeadstashSuite)
+    /// 3. Form CosmosSDK message
+    /// 4. Broadcast to chain
+    /// 5. Mark note as spent
+    // pub async fn claim_headstash_via_manually(
+    //     &self,
+    //     headstash_id: &str,
+    //     esk: &EligibleSk,
+    //     nullifier: &Nullifier,
+    // ) -> Result<(), Error> {
+    //     // 1. Generate note-data
+    //     // let db = self.db.read().await;
+    //     // let note_data = db
+    //     //     .get_note_by_nullifier(&headstash_id, &nullifier)?
+    //     //     .ok_or_else(|| Error::KeyDecoding("Note not found".into()))?;
+    //     // drop(db);
+
+    //     // 2. Generate proof
+    //     // TODO: Implement proof generation via HeadstashSuite
+    //     // let proof = generate_proof(esk, note_data)?;
+
+    //     // 3. Form message
+    //     // TODO: Create CosmosSDK message with proof and nullifier
+
+    //     // 4. Broadcast
+    //     // TODO: Submit transaction to chain
+
+    //     // 5. Mark as spent
+    //     // let mut db = self.db.write().await;
+    //     // db.mark_note_spent(&headstash_id, &nullifier)?;
+
+    //     Ok(())
+    // }
+
+    /// Claim via feegrant
+    ///
+    /// Requests feegrant from headstash-server before claiming.
+    // pub async fn claim_headstash_via_feegrant(
+    //     &self,
+    //     grantee_addr: &String,
+    //     headstash_id: &String,
+    //     esk: &EligibleSk,
+    //     nullifier: &Nullifier,
+    // ) -> Result<(), Error> {
+    //     // 1. Request feegrant from headstash-server
+    //     // TODO: Implement feegrant request via gRPC client
+    //     let c = self.client().await;
+    //     let res = c
+    //         .request_feegrant(headstash_id, grantee_addr, &nullifier.to_bytes())
+    //         .await?;
+    //     // 2. Wait for feegrant confirmation
+    //     // TODO: Poll for feegrant status
+
+    //     // 3. Proceed with claim (msg wrapped with feegrant)
+    //     Ok(())
+    // }
+
+    /// Claim via smart account
+    ///
+    /// Uses smart account authenticator for gasless transactions.
+    /// This is the primary claim method for headstash allocations.
+    ///
+    /// # Workflow
+    /// 1. Check for cached verification key for this headstash
+    /// 2. If not cached, fetch metadata (API → Blockchain → IPFS)
+    /// 3. Generate proof witness using local circuit
+    /// 4. Submit claim to headstash-api with smart account auth
+    ///
+    /// # Arguments
+    /// * `headstash_id` - Contract address
+    /// * `esk` - Secret key from MetaMask (transient, not stored)
+    /// * `nullifier` - The nullifier to claim
+    pub async fn claim_headstash_via_smart_account(
+        &self,
+        headstash_id: String,
+        esk: EligibleSk,
+        nullifier: Nullifier,
+    ) -> Result<ClaimResponse, Error> {
+        let client = self
+            .client
+            .as_ref()
+            .ok_or_else(|| Error::Js("No client configured".into()))?;
+
+        // 1. Check for cached verification key
+        let vk_cached = self.check_vk_cache(&headstash_id).await?;
+
+        // 2. If not cached, fetch metadata to get circuit info and VK
+        let metadata = if !vk_cached {
+            let metadata = client.get_headstash_metadata(&headstash_id).await?;
+
+            // Cache the verification key for future use
+            self.cache_vk(&headstash_id, &metadata.verification_key)
+                .await?;
+
+            metadata
+        } else {
+            // Still need metadata for merkle proof, but VK is cached
+            client.get_headstash_metadata(&headstash_id).await?
+        };
+
+        // 3. Get note data (would come from local DB in full implementation)
+        // For now, we generate it from the inputs we have
+        // In production, this would be: db.get_note_by_nullifier(&headstash_id, &nullifier)?
+
+        // 4. Generate proof witness
+        // This calls the zk-headstash circuit to generate the proof
+        let proof_data = self
+            .generate_proof_witness(esk, nullifier, &metadata)
+            .await?;
+
+        // 5. Submit to headstash-api with smart account signature
+        let response = client
+            .submit_smart_account_claim(&headstash_id, proof_data)
+            .await?;
+
+        // 6. Mark as spent in local DB (when DB is implemented)
+        // db.mark_note_spent(&headstash_id, &nullifier)?;
+
+        Ok(response)
+    }
+
+    /// Check if verification key is cached for a headstash
+    ///
+    /// This minimizes bandwidth by avoiding re-downloading circuit keys.
+    async fn check_vk_cache(&self, headstash_id: &str) -> Result<bool, Error> {
+        // TODO: Check MetaMask snap storage for cached VK
+        // For now, return false to always fetch
+        Ok(false)
+    }
+
+    /// Cache verification key in local storage
+    async fn cache_vk(&self, headstash_id: &str, vk: &[u8]) -> Result<(), Error> {
+        // TODO: Store VK in MetaMask snap storage
+        // This would use snap_manageState to persist the VK
+        Ok(())
+    }
+
+    /// Generate proof witness for headstash claim
+    ///
+    /// This generates the zkSNARK proof using the headstash circuit.
+    ///
+    /// # Arguments
+    /// * `esk` - Secret key (transient)
+    /// * `nullifier` - The nullifier being claimed
+    /// * `metadata` - Headstash metadata (merkle root, circuit params, etc.)
+    async fn generate_proof_witness(
+        &self,
+        esk: EligibleSk,
+        nullifier: Nullifier,
+        metadata: &HeadstashMetadata,
+    ) -> Result<ProofData, Error> {
+        // TODO: Implement actual proof generation using zk-headstash circuit
+        // This would involve:
+        // 1. Load proving key (from cache or download)
+        // 2. Prepare witness (esk, nullifier, merkle path, etc.)
+        // 3. Generate proof using halo2
+        // 4. Serialize proof and public inputs
+
+        // For now, return placeholder
+        Ok(ProofData {
+            proof: vec![],
+            public_inputs: vec![],
+            nullifier: nullifier.to_bytes().to_vec(),
+        })
+    }
+
+    /// Export encrypted spent note details
+    ///
+    /// Encrypts spent notes nullifier-key `nk`, the ranomness bytes, and the bytes to use across library.
+    /// This is used for syncing nullifier state across devices.
+    ///
+    /// # Arguments
+    /// * `headstash_id` - Contract address to export notes for
+    /// * `recipient_pk` - Public key to encrypt to
+    /// * `sender_sk` - Secret key for signing (proves origin)
+    pub async fn export_spent_note_details_encrypted(
+        &self,
+        headstash_id: &String,
+        recipient_pk: &EligiblePk,
+        sender_sk: &EligibleSk,
+    ) -> Result<Vec<u8>, Error> {
+        todo!()
+        // let db = self.db.read().await;
+        // let spent_notes = db.list_spent_notes(headstash_id)?;
+
+        // // Convert to serializable format
+        // let serialized_notes: Vec<SerializedNoteData> =
+        //     spent_notes.iter().map(|n| n.into()).collect();
+
+        // // Create nullifier state
+        // let state = NullifierState {
+        //     headstash_id: headstash_id.clone(),
+        //     spent_notes: serialized_notes,
+        // };
+
+        // // Encrypt
+        // let encrypted = encrypt_nullifier_state(&state, recipient_pk, sender_sk)?;
+
+        // // Serialize encrypted payload
+        // serde_json::to_vec(&encrypted)
+        //     .map_err(|e| Error::Js(format!("Failed to serialize encrypted state: {}", e).into()))
+    }
+
+    // /// Sync encrypted spent note details from endpoint
+    // ///
+    // /// Retrieves and decrypts spent notes, merging into local storage.
+    // /// This allows synchronizing nullifier state across devices.
+    // ///
+    // /// # Arguments
+    // /// * `headstash_id` - Contract address
+    // /// * `recipient_sk` - Secret key to decrypt with
+    // /// * `sender_pk` - Expected sender's public key (for verification)
+    // /// * `encrypted_data` - Encrypted nullifier state from API
+    // pub async fn sync_spent_note_details_encrypted(
+    //     &self,
+    //     headstash_id: &String,
+    //     recipient_sk: &EligibleSk,
+    //     sender_pk: &EligiblePk,
+    //     encrypted_data: Vec<u8>,
+    // ) -> Result<(), Error> {
+    //     // 1. Deserialize encrypted payload
+    //     let encrypted: EncryptedNullifierState =
+    //         serde_json::from_slice(&encrypted_data).map_err(|e| {
+    //             Error::Js(format!("Failed to deserialize encrypted data: {}", e).into())
+    //         })?;
+
+    //     // 2. Decrypt and verify
+    //     let state = decrypt_nullifier_state(&encrypted, recipient_sk, sender_pk)?;
+
+    //     // 3. Verify headstash ID matches
+    //     if &state.headstash_id != headstash_id {
+    //         return Err(Error::Js("Headstash ID mismatch".into()));
+    //     }
+
+    //     // 4. Merge notes into storage (only add new ones, don't overwrite)
+    //     let mut db = self.db.write().await;
+    //     for serialized_note in state.spent_notes {
+    //         // Convert back to NoteData
+    //         // For now, we'll skip notes we don't already have since we need
+    //         // the full note data structures, not just serialized bytes
+    //         // In a real implementation, you'd reconstruct the full structures
+
+    //         // This is a simplified merge - in production, you'd want more sophisticated logic
+    //         let nullifier = Nullifier::from_bytes(
+    //             serialized_note
+    //                 .nullifier
+    //                 .as_slice()
+    //                 .try_into()
+    //                 .map_err(|_| Error::Js("Invalid nullifier bytes".into()))?,
+    //         )
+    //         .expect("nullifier derivation");
+
+    //         // // Check if we already have this note
+    //         // if let Ok(Some(_)) = db.get_note_by_nullifier(headstash_id, &nullifier) {
+    //         //     // Mark it as spent if it isn't already
+    //         //     db.mark_note_spent(headstash_id, &nullifier)?;
+    //         // }
+    //     }
+
+    //     Ok(())
+    // }
+
+    // /// Upload nullifier state to headstash-api for sync
+    // ///
+    // /// This encrypts and uploads spent nullifier state to the API server
+    // /// for cross-device synchronization.
+    // ///
+    // /// # Arguments
+    // /// * `headstash_id` - Contract address
+    // /// * `recipient_pk` - Public key (usually your own) to encrypt to
+    // /// * `sender_sk` - Secret key for signing
+    // pub async fn upload_nullifier_state(
+    //     &self,
+    //     headstash_id: &String,
+    //     recipient_pk: &EligiblePk,
+    //     sender_sk: &EligibleSk,
+    // ) -> Result<(), Error> {
+    //     // Export encrypted state
+    //     let encrypted_data = self
+    //         .export_spent_note_details_encrypted(headstash_id, recipient_pk, sender_sk)
+    //         .await?;
+
+    //     // Sign the encrypted data
+    //     use sha3::{Digest, Sha3_256};
+    //     let data_hash = Sha3_256::digest(&encrypted_data);
+
+    //     // Create signature message
+    //     let mut sig_message = Vec::new();
+    //     sig_message.extend_from_slice(headstash_id.as_bytes());
+    //     sig_message.extend_from_slice(&data_hash);
+
+    //     // Sign
+    //     let signature = sign_message(&sig_message, sender_sk)?;
+
+    //     // Upload via client
+    //     let client = self
+    //         .client
+    //         .as_ref()
+    //         .ok_or_else(|| Error::Js("No client configured".into()))?;
+
+    //     client
+    //         .upload_nullifier_state(headstash_id, encrypted_data, signature)
+    //         .await?;
+
+    //     Ok(())
+    // }
+
+    // /// Download and sync nullifier state from headstash-api
+    // ///
+    // /// This downloads encrypted nullifier state from the API server
+    // /// and merges it into local storage.
+    // ///
+    // /// # Arguments
+    // /// * `headstash_id` - Contract address
+    // /// * `recipient_sk` - Secret key to decrypt with
+    // /// * `sender_pk` - Expected sender's public key (for verification)
+    // pub async fn download_and_sync_nullifier_state(
+    //     &self,
+    //     headstash_id: &String,
+    //     recipient_sk: &EligibleSk,
+    //     sender_pk: &EligiblePk,
+    // ) -> Result<(), Error> {
+    //     // Download from API
+    //     let client = self
+    //         .client
+    //         .as_ref()
+    //         .ok_or_else(|| Error::Js("No client configured".into()))?;
+
+    //     let recipient_pk_bytes = recipient_sk.epk().0.serialize();
+    //     let encrypted_data = client
+    //         .download_nullifier_state(headstash_id, &recipient_pk_bytes)
+    //         .await?;
+
+    //     // Sync into storage
+    //     self.sync_spent_note_details_encrypted(
+    //         headstash_id,
+    //         recipient_sk,
+    //         sender_pk,
+    //         encrypted_data,
+    //     )
+    //     .await?;
+
+    //     Ok(())
+    // }
+}
+
+/// In-memory implementation of HeadstashApiDbInstance (for testing and development)
+#[derive(Debug, Clone, Default)]
+pub struct MemoryHeadstashDb {
+    // Maps: String → (Nullifier bytes → NoteData)
+    storage: HashMap<String, HashMap<[u8; 32], NoteData>>,
+}
+
+// ============================================================================
+// Helper Functions
+// ============================================================================
+
+/// Sign a message with secp256k1
+fn sign_message(message: &[u8], sk: &EligibleSk) -> Result<Vec<u8>, Error> {
+    use secp256k1::{Message, Secp256k1};
+    use sha3::{Digest, Sha3_256};
+
+    let secp = Secp256k1::new();
+
+    // Hash the message
+    let msg_hash = Sha3_256::digest(message);
+    let message = Message::from_digest_slice(&msg_hash)
+        .map_err(|e| Error::Js(format!("Invalid message: {}", e).into()))?;
+
+    // Sign
+    let signature = secp.sign_ecdsa(message, &sk.0);
+
+    Ok(signature.serialize_compact().to_vec())
+}
+
 pub struct Wallet<W> {
     /// Internal database used to maintain wallet data (e.g. accounts, transactions, cached blocks)
     pub(crate) db: Arc<RwLock<W>>,
@@ -95,27 +672,18 @@ pub struct Wallet<W> {
     pub(crate) min_split_output_value: u64,
 }
 
-// impl<W, T: Clone> Clone for Wallet<W, T> {
-//     fn clone(&self) -> Self {
-//         Self {
-//             db: self.db.clone(),
-//             client: self.client.clone(),
-//             network: self.network,
-//             min_confirmations: self.min_confirmations,
-//             target_note_count: self.target_note_count,
-//             min_split_output_value: self.min_split_output_value,
-//         }
-//     }
-// }
-
-// impl<P: Parameters, T> Wallet<MemoryWalletDb<P>, T> {
-//     // Encodes the MemoryWallet into protobuf bytes
-//     pub async fn db_to_bytes(&self) -> Result<Vec<u8>, Error> {
-//         let mut memory_wallet_bytes = Vec::new();
-//         self.db.read().await.encode(&mut memory_wallet_bytes)?;
-//         Ok(memory_wallet_bytes)
-//     }
-// }
+impl<W: Clone> Clone for Wallet<W> {
+    fn clone(&self) -> Self {
+        Self {
+            db: self.db.clone(),
+            // client: self.client.clone(),
+            network: self.network,
+            min_confirmations: self.min_confirmations,
+            target_note_count: self.target_note_count,
+            min_split_output_value: self.min_split_output_value,
+        }
+    }
+}
 
 // impl<W, T, AccountId, NoteRef> Wallet<W, T>
 // where
@@ -270,31 +838,6 @@ pub struct Wallet<W> {
 //                 })
 //                 .collect()
 //         })?)
-//     }
-
-//     pub async fn sync(&self) -> Result<(), Error> {
-//         let mut client = self.client.clone();
-//         // TODO: This should be held in the Wallet struct so we can download in parallel
-//         let db_cache = MemBlockCache::new();
-
-//         let mut db = self.db.write().await;
-//         run(
-//             &mut client,
-//             &self.network.clone(),
-//             &db_cache,
-//             &mut *db,
-//             BATCH_SIZE,
-//         )
-//         .await
-//         .map_err(Into::into)
-//     }
-
-//     pub async fn get_wallet_summary(&self) -> Result<Option<WalletSummary<AccountId>>, Error> {
-//         Ok(self
-//             .db
-//             .read()
-//             .await
-//             .get_wallet_summary(self.min_confirmations.into())?)
 //     }
 
 //     ///
@@ -639,20 +1182,93 @@ pub struct Wallet<W> {
 //     }
 // }
 
-// pub(crate) fn usk_from_seed_str(
-//     seed: &str,
-//     account_id: u32,
-//     network: &Network,
-// ) -> Result<(UnifiedSpendingKey, SeedFingerprint), Error> {
-//     let mnemonic = <Mnemonic<English>>::from_phrase(seed).map_err(|_| Error::InvalidSeedPhrase)?;
-//     let seed = {
-//         let mut seed = mnemonic.to_seed("");
-//         let secret = seed.to_vec();
-//         seed.zeroize();
-//         SecretVec::new(secret)
-//     };
-//     let seed_fingerprint =
-//         SeedFingerprint::from_seed(seed.expose_secret()).expect("seed fingerprint");
-//     let usk = UnifiedSpendingKey::from_seed(network, seed.expose_secret(), account_id.try_into()?)?;
-//     Ok((usk, seed_fingerprint))
-// }
+#[cfg(test)]
+mod tests {
+    use zk_headstash::address::RecpAddr;
+    use zk_headstash::value::NoteValue;
+
+    use crate::wallet::MemoryHeadstashDb;
+
+    use super::*;
+
+    #[tokio::test]
+    async fn test_headstash_wallet_creation() {
+        let db = MemoryHeadstashDb::default();
+        let wallet = HeadstashWallet::new(Network::TestNetwork, None)
+            .await
+            .unwrap();
+
+        assert_eq!(wallet.network, Network::TestNetwork);
+    }
+
+    // #[tokio::test]
+    // async fn test_store_and_list_notes() {
+    //     let db = MemoryHeadstashDb::default();
+    //     let wallet = HeadstashWallet::new(db, Network::TestNetwork, None)
+    //         .await
+    //         .unwrap();
+
+    //     let headstash_id = "terp1contract123".to_string();
+    //     let sk_bytes = [42u8; 32];
+    //     let esk = EligibleSk::from_hex(&hex::encode(sk_bytes));
+
+    //     let mut rho_bytes = [0u8; 32];
+    //     getrandom::getrandom(&mut rho_bytes);
+    //     let rho = Rho::from_bytes(&rho_bytes).unwrap();
+    //     let recp =
+    //         RecpAddr::try_from(rho_bytes.try_into().unwrap()).expect("recpAdd from rho_bytes");
+    //     let value = HeadstashValue::from_raw(1000, "uterp").unwrap();
+
+    //     // Store note
+    //     wallet
+    //         .store_note(headstash_id.clone(), esk, rho, 0, recp, value, &rho_bytes)
+    //         .await
+    //         .unwrap();
+
+    //     // List unspent notes
+    //     let unspent = wallet.list_unspent_notes(&headstash_id).await.unwrap();
+    //     assert_eq!(unspent.len(), 1);
+    //     assert_eq!(unspent[0].value.raw_amount(), 1000);
+    //     assert!(!unspent[0].spent);
+    // }
+
+    // #[tokio::test]
+    // async fn test_mark_note_spent() {
+    //     let db = MemoryHeadstashDb::default();
+    //     let wallet = HeadstashWallet::new(db, Network::TestNetwork, None)
+    //         .await
+    //         .unwrap();
+
+    //     let headstash_id = "terp1contract123".to_string();
+    //     let sk_bytes = [42u8; 32];
+    //     let esk = EligibleSk::from_hex(&hex::encode(sk_bytes));
+
+    //     let mut rng = rand::thread_rng();
+    //     let mut rho_bytes = [0u8; 32];
+    //     rand::RngCore::fill_bytes(&mut rng, &mut rho_bytes);
+    //     let rho = Rho::from_bytes(&rho_bytes).unwrap();
+
+    //     let hv = HeadstashValue::from_raw(1000, "uterp").unwrap();
+
+    //     let recp = String::default().as_bytes();
+    //     // Store note
+    //     wallet
+    //         .store_note(headstash_id.clone(), esk, rho, 0, recp, hv, rng)
+    //         .await
+    //         .unwrap();
+
+    //     // Get note
+    //     let unspent = wallet.list_unspent_notes(&headstash_id).await.unwrap();
+    //     let nullifier = unspent[0].nullifier;
+
+    //     // Mark as spent
+    //     let mut db = wallet.db.write().await;
+    //     db.mark_note_spent(&headstash_id, &nullifier).unwrap();
+    //     drop(db);
+
+    //     // Verify spent
+    //     let spent = wallet.list_spent_notes(&headstash_id).await.unwrap();
+    //     assert_eq!(spent.len(), 1);
+    //     assert!(spent[0].spent);
+    // }
+}

@@ -7,9 +7,8 @@
 pub mod bindgen;
 
 pub mod init;
-
 pub mod wallet;
-pub use wallet::Wallet;
+pub use wallet::{HeadstashWallet, MemoryHeadstashDb, NoteData};
 
 use wasm_bindgen::prelude::*;
 
@@ -22,6 +21,3 @@ pub use wasm_bindgen_rayon::init_thread_pool;
 #[cfg(not(feature = "wasm-parallel"))]
 #[wasm_bindgen(js_name = initThreadPool)]
 pub fn init_thread_pool(_threads: usize) {}
-
-#[wasm_bindgen]
-pub struct BlockRange(pub u32, pub u32);

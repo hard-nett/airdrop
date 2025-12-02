@@ -5,7 +5,7 @@ package headstash.actions.v1;
 import "google/protobuf/struct.proto";
 
 
-service HeadstashPreparationService {
+service HeadstashService {
       // retrieve token holder distribution
       rpc CreateHeadstashNotes(MsgCreateHeadstashNotes) returns (MsgCreateHeadstashNoteResponse);
       rpc CreateNewHeadstash(MsgCreateHeadstash) returns (MsgCreateHeadstashResponse);
@@ -13,12 +13,11 @@ service HeadstashPreparationService {
       // generate headstash instance tree
       rpc CreateHeadstashTree(MsgCreateHeadstashTree) returns (MsgCreateHeadstashTreeResponse);
       // determine piecewise distribution
-
       // prepare headstash config
       // create new headstash 
 }
 
-service HeadstashService {
+service HeadstashActionsService {
       // find new headstash
       // list headstash info 
       // perform headstash action
@@ -32,3 +31,5 @@ message MsgCreateHeadstash {}
 message MsgCreateHeadstashResponse {}
 message MsgCreateHeadstashNotes {}
 message MsgCreateHeadstashNoteResponse {}
+
+ 

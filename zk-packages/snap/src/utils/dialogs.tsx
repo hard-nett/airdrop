@@ -9,7 +9,7 @@ export const installDialog = async () => {
         <Box>
           <Heading>You have installed the Headstash Snap!</Heading>
           <Text>
-            This snap performs math on your device to claim headstash notes, involving your privat key.\
+            This snap powers the serialization of proof inputs and the actual proof generation of, involving your private key.\
             Please verify the headstash spec & also review the scripts we have for released package binary recreation & verification {' '}
             <Link href="https://headstash.terp.network/trustless/">
               https://headstash.terp.network/trustless

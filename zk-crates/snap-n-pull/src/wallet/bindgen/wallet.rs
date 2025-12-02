@@ -1,601 +1,575 @@
-use std::num::NonZeroU32;
+use crate::wallet::wallet::NoteData;
+use crate::wallet::HeadstashWallet;
+use crate::{Error, Network};
+use serde::{Deserialize, Serialize};
+use zk_headstash::deploy::suite::HeadstashLaunchpadInstance;
+use zk_headstash::deploy::HeadstashSuite;
+
 use std::str::FromStr;
+use wasm_bindgen::prelude::*;
+use zk_headstash::gen::headstash::snp::v1::SerializedNoteData;
 
-// use nonempty::NonEmpty;
-// use prost::Message;
-// use serde::{Deserialize, Serialize};
-// use wasm_bindgen::prelude::*;
+use zk_headstash::keys::EligibleSk;
 
-// use tonic_web_wasm_client::Client;
+use zk_headstash::note::{Nullifier, Rho};
+use zk_headstash::value::HeadstashValue;
 
-// use crate::error::Error;
-// use crate::wallet::usk_from_seed_str;
-// use crate::{bindgen::proposal::Proposal, Wallet, PRUNING_DEPTH};
-// use wasm_thread as thread;
-// use webzjs_common::{Network, Pczt};
-// use webzjs_keys::{ProofGenerationKey, SeedFingerprint, UnifiedSpendingKey};
-// use zcash_address::ZcashAddress;
-// use zcash_client_backend::data_api::{AccountPurpose, InputSource, WalletRead, Zip32Derivation};
-// use zcash_client_backend::proto::service::{
-//     compact_tx_streamer_client::CompactTxStreamerClient, ChainSpec,
-// };
-// use zcash_client_memory::MemoryWalletDb;
-// use zcash_keys::encoding::AddressCodec;
-// use zcash_keys::keys::UnifiedFullViewingKey;
-// use zcash_primitives::transaction::TxId;
-// use zcash_primitives::zip32;
+/// HeadstashWallet - Database and state manager for MetaMask Snap plugin
+///
+/// This wallet is a database that maintains headstash note data indexed by headstash ID.
+/// It NEVER stores the secret key - only requests it from MetaMask when needed.
+///
+/// ## Architecture
+///
+/// ```text
+/// HeadstashWallet
+/// ├── db: Storage for nullifier keys, nullifiers, and note commitments
+/// │   ├── Indexed by: Headstash ID (contract address)
+/// │   ├── Stores: NullifierKey → Nullifier → NoteCommitment
+/// │   └── Never stores: Secret keys (ESK)
+/// ├── network: Network configuration (mainnet/testnet)
+/// └── client: gRPC client for headstash API communication
+/// ```
+///
+/// ## Design Principles
+///
+/// 1. **No Secret Key Storage**: ESK only requested from MetaMask when needed for operations
+/// 2. **Indexed Storage**: All data indexed by headstash contract address
+/// 3. **gRPC Communication**: Reuses zcash-style gRPC patterns for headstash API
+/// 4. **Minimal Friction**: Designed to minimize refactor effort from zcash wallet
 
-// pub type MemoryWallet<T> = Wallet<MemoryWalletDb<Network>, T>;
-// pub type AccountId = <MemoryWalletDb<Network> as WalletRead>::AccountId;
-// pub type NoteRef = <MemoryWalletDb<Network> as InputSource>::NoteRef;
+/// # A Headstash Wallet for MetaMask Snap
+///
+/// This is the main entry point for interacting with Headstash instances from a browser.
+/// The wallet manages note data indexed by headstash contract address and provides
+/// methods for claiming allocations via multiple pathways (manual, feegrant, smart account).
+///
+/// ## Key Security Principles
+///
+/// 1. **No Secret Key Storage**: The wallet NEVER stores secret keys. Keys are only
+///    requested from MetaMask when needed for specific operations.
+/// 2. **Encrypted State**: All persistent state can be encrypted using MetaMask's
+///    snap_manageState API for secure storage.
+/// 3. **Cross-Device Sync**: Spent nullifier state can be synced across devices
+///    via encrypted uploads to headstash-api.
+///
+/// ## Creating a Wallet
+///
+/// ```javascript
+/// const wallet = new WebWallet("main", "https://headstash-api.terp.network", 10);
+/// ```
+///
+/// ## Discovering Headstashes
+///
+/// Before claiming, discover available headstashes via the market contract:
+///
+/// ```javascript
+/// const headstashes = await wallet.discover_headstashes();
+/// for (const headstash of headstashes) {
+///     console.log(`Found: ${headstash.contract_addr}`);
+/// }
+/// ```
+///
+/// ## Generating Notes
+///
+/// Generate notes client-side from the Merkle tree:
+///
+/// ```javascript
+/// // Request secret key from MetaMask
+/// const esk = await snap.request({ method: "get_secret_key" });
+///
+/// await wallet.generate_notes_for_headstash(
+///     "terp1contract123",
+///     esk
+/// );
+/// ```
+///
+/// ## Claiming Allocations
+///
+/// Three pathways for claiming:
+///
+/// ### 1. Manual (pay your own gas)
+/// ```javascript
+/// await wallet.claim_via_manual(headstash_id, esk, nullifier);
+/// ```
+///
+/// ### 2. Feegrant (request gas from headstash-server)
+/// ```javascript
+/// await wallet.claim_via_feegrant(headstash_id, esk, nullifier);
+/// ```
+///
+/// ### 3. Smart Account (gasless via authenticator)
+/// ```javascript
+/// await wallet.claim_via_smart_account(headstash_id, esk, nullifier);
+/// ```
+///
+/// ## State Persistence
+///
+/// Serialize wallet state for MetaMask storage:
+///
+/// ```javascript
+/// const state = await wallet.db_to_bytes();
+/// await snap.request({
+///     method: "snap_manageState",
+///     params: { operation: "update", newState: { wallet: state } }
+/// });
+/// ```
+///
+#[wasm_bindgen]
 
-// / # A Zcash wallet
-// /
-// / This is the main entry point for interacting with this library.
-// / For the most part you will only need to create and interact with a Wallet instance.
-// /
-// / A wallet is a set of accounts that can be synchronized together with the blockchain.
-// / Once synchronized, the wallet can be used to propose, build and send transactions.
-// /
-// / Create a new WebWallet with
-// / ```javascript
-// / const wallet = new WebWallet("main", "https://zcash-mainnet.chainsafe.dev", 10);
-// / ```
-// /
-// / ## Adding Accounts
-// /
-// / Accounts can be added by either importing a seed phrase or a Unified Full Viewing Key (UFVK).
-// / If you do import via a UFVK it is important that you also have access to the Unified Spending Key (USK) for that account otherwise the wallet will not be able to create transactions.
-// /
-// / When importing an account you can also specify the block height at which the account was created. This can significantly reduce the time it takes to sync the account as the wallet will only scan for transactions after this height.
-// / Failing to provide a birthday height will result in extremely slow sync times as the wallet will need to scan the entire blockchain.
-// /
-// / e.g.
-// / ```javascript
-// / const account_id = await wallet.create_account("...", 1, 2657762)
-// /
-// / // OR
-// /
-// / const account_id = await wallet.import_ufvk("...", 2657762)
-// / ``
-// /
-// / ## Synchronizing
-// /
-// / The wallet can be synchronized with the blockchain by calling the `sync` method. This will fetch compact blocks from the connected lightwalletd instance and scan them for transactions.
-// / The sync method uses a built-in strategy to determine which blocks is needs to download and scan in order to gain full knowledge of the balances for all accounts that are managed.
-// /
-// / Syncing is a long running process and so is delegated to a WebWorker to prevent from blocking the main thread. It is safe to call other methods on the wallet during syncing although they may take
-// / longer than usual while they wait for a write-lock to be released.
-// /
-// / ```javascript
-// / await wallet.sync();
-// / ```
-// /
-// / ## Transacting
-// /
-// / Sending a transaction is a three step process: proposing, authorizing, and sending.
-// /
-// / A transaction proposal is created by calling `propose_transfer` with the intended recipient and amount. This will create a proposal object that describes which notes will be spent in order to fulfil this request.
-// / The proposal should be presented to the user for review before being authorized.
-// /
-// / To authorize the transaction the caller must currently provide the seed phrase and account index of the account that will be used to sign the transaction. This method also perform the SNARK proving which is an expensive operation and performed in parallel by a series of WebWorkers.
-// /
-// / Finally, A transaction can be sent to the network by calling `send_authorized_transactions` with the list of transaction IDs that were generated by the authorization step.
-// /
-// / ## PCZT Transactions
-// /
-// / PCZT (Partially Constructed Zcash Transaction)
-// /
-// / 1. **`pczt_create`** - Creates a PCZT which designates how funds from this account can be spent to realize the requested transfer (does NOT sign, generate proofs, or send)
-// / 2. **`pczt_sign`** - Signs the PCZT using USK (should be done in secure environment)
-// / 3. **`pczt_prove`** - Creates and inserts proofs for the PCZT
-// /
-// / The full flow looks like
-// / The full PCZT flow: `pczt_create` → `pczt_sign` → `pczt_prove` → `pczt_send`
-// / ```
-// /
-// #[wasm_bindgen]
-// #[derive(Clone)]
-// pub struct WebWallet {
-//     inner: MemoryWallet<tonic_web_wasm_client::Client>,
-// }
+pub struct WebWallet {
+    inner: HeadstashWallet,
+}
 
-// impl WebWallet {
-//     pub fn client(&self) -> CompactTxStreamerClient<tonic_web_wasm_client::Client> {
-//         self.inner.client.clone()
-//     }
+#[wasm_bindgen]
+impl WebWallet {
+    /// Create a new Headstash wallet instance
+    ///
+    /// # Arguments
+    ///
+    /// * `network` - Must be one of "main" or "test"
+    /// * `headstash_api_url` - URL of the headstash-api server (e.g. https://headstash-api.terp.network)
+    /// * `cosmos_grpc_url` - Optional Cosmos SDK gRPC endpoint for direct CosmWasm queries
+    /// * `db_bytes` - (Optional) Serialized wallet database from previous session
+    ///
+    /// # Examples
+    ///
+    /// ```javascript
+    /// const wallet = new WebWallet(
+    ///     "main",
+    ///     "https://headstash-api.terp.network",
+    ///     "https://grpc.terp.network:9090"
+    /// );
+    /// ```
+    #[wasm_bindgen(constructor)]
+    pub async fn new(
+        network: &str,
+        headstash_api_url: &str,
+        cosmos_grpc_url: Option<String>,
+    ) -> Result<WebWallet, Error> {
+        let network = Network::from_str(network)?;
 
-//     pub fn inner_mut(&mut self) -> &mut MemoryWallet<tonic_web_wasm_client::Client> {
-//         &mut self.inner
-//     }
-// }
+        let inner = HeadstashWallet::new(network, Some(headstash_api_url)).await?;
 
-// #[wasm_bindgen]
-// impl WebWallet {
-//     /// Create a new instance of a Zcash wallet for a given network. Only one instance should be created per page.
-//     ///
-//     /// # Arguments
-//     ///
-//     /// * `network` - Must be one of "main" or "test"
-//     /// * `lightwalletd_url` - Url of the lightwalletd instance to connect to (e.g. https://zcash-mainnet.chainsafe.dev)
-//     /// * `min_confirmations` - Number of confirmations required before a transaction is considered final
-//     /// * `db_bytes` - (Optional) UInt8Array of a serialized wallet database. This can be used to restore a wallet from a previous session that was serialized by `db_to_bytes`
-//     ///
-//     /// # Examples
-//     ///
-//     /// ```javascript
-//     /// const wallet = new WebWallet("main", "https://zcash-mainnet.chainsafe.dev", 10);
-//     /// ```
-//     #[wasm_bindgen(constructor)]
-//     // pub fn new(
-//     //     network: &str,
-//     //     lightwalletd_url: &str,
-//     //     min_confirmations: u32,
-//     //     db_bytes: Option<Box<[u8]>>,
-//     // ) -> Result<WebWallet, Error> {
-//     //     let network = Network::from_str(network)?;
-//     //     let min_confirmations = NonZeroU32::try_from(min_confirmations)
-//     //         .map_err(|_| Error::InvalidMinConformations(min_confirmations))?;
-//     //     let client = Client::new(lightwalletd_url.to_string());
+        Ok(Self { inner })
+    }
 
-//     //     let db = match db_bytes {
-//     //         Some(bytes) => {
-//     //             tracing::info!(
-//     //                 "Serialized db was provided to constructor. Attempting to deserialize"
-//     //             );
-//     //             MemoryWalletDb::decode_new(bytes.as_ref(), network, PRUNING_DEPTH)?
-//     //         }
-//     //         None => MemoryWalletDb::new(network, PRUNING_DEPTH),
-//     //     };
+    /// Generate note data (nullifier, commitment, nk) from secret key and note inputs
+    ///
+    /// This is the core cryptographic operation that generates all public values
+    /// needed to verify a headstash claim.
+    ///
+    /// # Arguments
+    /// * `esk_hex` - Secret key in hex (32 bytes)
+    /// * `rho_hex` - Randomness rho in hex (32 bytes)
+    /// * `fdi` - Fixed denomination index (leaf position)
+    /// * `recp_hex` - Recipient address in hex (32 bytes)
+    /// * `v` - Value amount as string
+    /// * `nd` - Note denomination (e.g., "uterp")
+    /// * `rseed_hex` - Random seed in hex (32 bytes)
+    ///
+    /// # Returns
+    /// JSON string with note data: `{ nk, nullifier, commitment, v, nd, fdi }`
+    ///
+    /// # Examples
+    /// ```javascript
+    /// const esk = await snap.request({ method: "get_secret_key" });
+    /// const noteData = await wallet.store_note(
+    ///     "temp_headstash_id",
+    ///     esk,
+    ///     rho_hex,
+    ///     0,
+    ///     recp_hex,
+    ///     "1000000",
+    ///     "uterp",
+    ///     rseed_hex
+    /// );
+    /// console.log(JSON.parse(noteData));
+    /// ```
+    pub async fn store_note(
+        &self,
+        headstash_id: String,
+        esk_hex: String,
+        rho_hex: String,
+        fdi: u64,
+        recp_hex: String,
+        v: String,
+        nd: String,
+        rseed_hex: String,
+    ) -> Result<String, Error> {
+        // Parse inputs
+        let esk = EligibleSk::from_hex(&esk_hex);
 
-//     //     Ok(Self {
-//     //         inner: Wallet::new(db, client, network, min_confirmations)?,
-//     //     })
-//     // }
+        let rho_bytes = hex::decode(&rho_hex)
+            .map_err(|e| Error::KeyDecoding(format!("Invalid rho hex: {}", e)))?;
+        let rho = Rho::from_bytes(
+            rho_bytes
+                .as_slice()
+                .try_into()
+                .map_err(|_| Error::KeyDecoding("Invalid rho length".into()))?,
+        )
+        .expect("rho from bytes");
 
-//     /// Add a new account to the wallet using a given seed phrase
-//     ///
-//     /// # Arguments
-//     ///
-//     /// * `seed_phrase` - 24 word mnemonic seed phrase
-//     /// * `account_hd_index` - [ZIP32](https://zips.z.cash/zip-0032) hierarchical deterministic index of the account
-//     /// * `birthday_height` - Block height at which the account was created. The sync logic will assume no funds are send or received prior to this height which can VERY significantly reduce sync time
-//     ///
-//     /// # Examples
-//     ///
-//     /// ```javascript
-//     /// const wallet = new WebWallet("main", "https://zcash-mainnet.chainsafe.dev", 10);
-//     /// const account_id = await wallet.create_account("...", 1, 2657762)
-//     /// ```
-//     pub async fn create_account(
-//         &self,
-//         account_name: &str,
-//         seed_phrase: &str,
-//         account_hd_index: u32,
-//         birthday_height: Option<u32>,
-//     ) -> Result<u32, Error> {
-//         tracing::info!("Create account called");
-//         self.inner
-//             .create_account(
-//                 account_name,
-//                 seed_phrase,
-//                 account_hd_index,
-//                 birthday_height,
-//                 None,
-//             )
-//             .await
-//             .map(|id| *id)
-//     }
+        let recp_bytes = hex::decode(&recp_hex)
+            .map_err(|e| Error::KeyDecoding(format!("Invalid recp hex: {}", e)))?;
 
-//     // /// Add a new account to the wallet by directly importing a Unified Full Viewing Key (UFVK)
-//     // ///
-//     // /// # Arguments
-//     // ///
-//     // /// * `key` - [ZIP316](https://zips.z.cash/zip-0316) encoded UFVK
-//     // /// * `birthday_height` - Block height at which the account was created. The sync logic will assume no funds are send or received prior to this height which can VERY significantly reduce sync time
-//     // ///
-//     // /// # Examples
-//     // ///
-//     // /// ```javascript
-//     // /// const wallet = new WebWallet("main", "https://zcash-mainnet.chainsafe.dev", 10);
-//     // /// const account_id = await wallet.import_ufvk("...", 2657762)
-//     // /// ```
-//     // pub async fn create_account_ufvk(
-//     //     &self,
-//     //     account_name: &str,
-//     //     encoded_ufvk: &str,
-//     //     seed_fingerprint: SeedFingerprint,
-//     //     account_hd_index: u32,
-//     //     birthday_height: Option<u32>,
-//     // ) -> Result<u32, Error> {
-//     //     let ufvk = UnifiedFullViewingKey::decode(&self.inner.network, encoded_ufvk)
-//     //         .map_err(Error::KeyParse)?;
-//     //     let derivation = Some(Zip32Derivation::new(
-//     //         seed_fingerprint.into(),
-//     //         zip32::AccountId::try_from(account_hd_index)?,
-//     //     ));
-//     //     self.inner
-//     //         .import_ufvk(
-//     //             account_name,
-//     //             &ufvk,
-//     //             AccountPurpose::Spending { derivation },
-//     //             birthday_height,
-//     //             None,
-//     //         )
-//     //         .await
-//     //         .map(|id| *id)
-//     // }
+        let value_amount: u64 = v
+            .parse()
+            .map_err(|e| Error::KeyDecoding(format!("Invalid value: {}", e)))?;
+        let hv = HeadstashValue::from_raw(value_amount, &nd).unwrap();
 
-//     /// Add a new view-only account to the wallet by directly importing a Unified Full Viewing Key (UFVK)
-//     ///
-//     /// # Arguments
-//     ///
-//     /// * `key` - [ZIP316](https://zips.z.cash/zip-0316) encoded UFVK
-//     /// * `birthday_height` - Block height at which the account was created. The sync logic will assume no funds are send or received prior to this height which can VERY significantly reduce sync time
-//     ///
-//     /// # Examples
-//     ///
-//     /// ```javascript
-//     /// const wallet = new WebWallet("main", "https://zcash-mainnet.chainsafe.dev", 10);
-//     /// const account_id = await wallet.import_ufvk("...", 2657762)
-//     /// ```
-//     pub async fn create_account_view_ufvk(
-//         &self,
-//         account_name: &str,
-//         encoded_ufvk: &str,
-//         birthday_height: Option<u32>,
-//     ) -> Result<u32, Error> {
-//         let ufvk = UnifiedFullViewingKey::decode(&self.inner.network, encoded_ufvk)
-//             .map_err(Error::KeyParse)?;
+        let rseed_bytes = hex::decode(&rseed_hex)
+            .map_err(|e| Error::KeyDecoding(format!("Invalid rseed hex: {}", e)))?;
+        let rseed: [u8; 32] = rseed_bytes
+            .as_slice()
+            .try_into()
+            .map_err(|_| Error::KeyDecoding("Invalid rseed length".into()))?;
 
-//         self.inner
-//             .import_ufvk(
-//                 account_name,
-//                 &ufvk,
-//                 AccountPurpose::ViewOnly,
-//                 birthday_height,
-//                 None,
-//             )
-//             .await
-//             .map(|id| *id)
-//     }
+        // Generate note data
+        let (nk, nullifier, commitment) =
+            self.inner
+                .generate_note_data(esk, rho, fdi, &recp_bytes, hv.clone(), rseed)?;
 
-//     ///
-//     /// Start a background sync task which will fetch and scan blocks from the connected lighwalletd server
-//     ///
-//     /// IMPORTANT: This will spawn a new webworker which will handle the sync task. The sync task will continue to run in the background until the sync process is complete.
-//     /// During this time the main thread will not block but certain wallet methods may temporarily block while the wallet is being written to during the sync.
-//     ///
-//     pub async fn sync(&self) -> Result<(), Error> {
-//         assert!(!thread::is_web_worker_thread());
+        // Serialize as JSON
+        use zk_headstash::note::ExtractedNoteCommitment;
+        let commitment_bytes: [u8; 32] =
+            ExtractedNoteCommitment::from(commitment.clone()).to_bytes();
 
-//         let db = self.inner.clone();
+        let note_data = SerializedNoteData {
+            nk: nk.to_bytes().to_vec(),
+            nullifier: nullifier.to_bytes().to_vec(),
+            commitment: commitment_bytes.to_vec(),
+            v,
+            nd,
+            fdi,
+            spent: false,
+        };
 
-//         let sync_handler = thread::Builder::new()
-//             .name("sync".to_string())
-//             .spawn_async(|| async {
-//                 assert!(thread::is_web_worker_thread());
-//                 tracing::debug!(
-//                     "Current num threads (wasm_thread) {}",
-//                     rayon::current_num_threads()
-//                 );
+        serde_json::to_string(&note_data)
+            .map_err(|e| Error::KeyDecoding(format!("JSON serialization failed: {}", e)))
+    }
 
-//                 let db = db;
-//                 db.sync().await.unwrap_throw();
-//             })
-//             .unwrap_throw()
-//             .join_async();
-//         sync_handler.await.unwrap();
-//         Ok(())
-//     }
+    /// Claim a headstash allocation via manual transaction (pay your own gas)
+    ///
+    /// This generates the proof and submits the claim directly to the chain.
+    ///
+    /// # Arguments
+    /// * `headstash_id` - Contract address
+    /// * `esk_hex` - Secret key in hex (from MetaMask)
+    /// * `nullifier_hex` - Nullifier of the note to claim in hex
+    ///
+    /// # Workflow
+    /// 1. Retrieves note data from database
+    /// 2. Generates zkSNARK proof
+    /// 3. Forms CosmosSDK message
+    /// 4. Broadcasts to chain
+    /// 5. Marks note as spent
+    ///
+    /// # Examples
+    /// ```javascript
+    /// const esk = await snap.request({ method: "get_secret_key" });
+    /// await wallet.claim_via_manual("terp1contract123", esk, nullifier_hex);
+    /// ```
+    // pub async fn claim_via_manual(
+    //     &self,
+    //     headstash_id: String,
+    //     esk_hex: String,
+    //     nullifier_hex: String,
+    // ) -> Result<(), Error> {
+    //     let esk = EligibleSk::from_hex(&esk_hex);
+    //     let nullifier_bytes = hex::decode(&nullifier_hex)
+    //         .map_err(|e| Error::KeyDecoding(format!("Invalid nullifier hex: {}", e)))?;
+    //     let nullifier = Nullifier::from_bytes(
+    //         nullifier_bytes
+    //             .as_slice()
+    //             .try_into()
+    //             .map_err(|_| Error::KeyDecoding("Invalid nullifier length".into()))?,
+    //     )
+    //     .expect("nullifier from bytes");
 
-//     pub async fn get_wallet_summary(&self) -> Result<Option<WalletSummary>, Error> {
-//         Ok(self.inner.get_wallet_summary().await?.map(Into::into))
-//     }
+    //     self.inner
+    //         .claim_headstash_via_manually(&headstash_id, &esk, &nullifier)
+    //         .await
+    // }
 
-//     /// Create a new transaction proposal to send funds to a given address
-//     ///
-//     /// Not this does NOT sign, generate a proof, or send the transaction. It will only craft the proposal which designates how notes from this account can be spent to realize the requested transfer.
-//     ///
-//     /// # Arguments
-//     ///
-//     /// * `account_id` - The ID of the account in this wallet to send funds from
-//     /// * `to_address` - [ZIP316](https://zips.z.cash/zip-0316) encoded address to send funds to
-//     /// * `value` - Amount to send in Zatoshis (1 ZEC = 100_000_000 Zatoshis)
-//     ///
-//     /// # Returns
-//     ///
-//     /// A proposal object which can be inspected and later used to generate a valid transaction
-//     ///
-//     /// # Examples
-//     ///
-//     /// ```javascript
-//     /// const proposal = await wallet.propose_transfer(1, "u18rakpts0de589sx9dkamcjms3apruqqax9k2s6e7zjxx9vv5kc67pks2trg9d3nrgd5acu8w8arzjjuepakjx38dyxl6ahd948w0mhdt9jxqsntan6px3ysz80s04a87pheg2mqvlzpehrgup7568nfd6ez23xd69ley7802dfvplnfn7c07vlyumcnfjul4pvv630ac336rjhjyak5", 100000000);
-//     /// ```
-//     pub async fn propose_transfer(
-//         &self,
-//         account_id: u32,
-//         to_address: String,
-//         value: u64,
-//     ) -> Result<Proposal, Error> {
-//         let to_address = ZcashAddress::try_from_encoded(&to_address)?;
-//         let proposal = self
-//             .inner
-//             .propose_transfer(AccountId::from(account_id), to_address, value)
-//             .await?;
-//         Ok(proposal.into())
-//     }
+    /// Claim via feegrant (request gas allowance from headstash-server)
+    ///
+    /// This requests a feegrant from the headstash-server before claiming.
+    ///
+    /// # Arguments
+    /// * `headstash_id` - Contract address
+    /// * `esk_hex` - Secret key in hex (from MetaMask)
+    /// * `nullifier_hex` - Nullifier of the note to claim
+    ///
+    /// # Examples
+    /// ```javascript
+    /// await wallet.claim_via_feegrant("terp1contract123", esk, nullifier_hex);
+    /// ```
+    // pub async fn claim_via_feegrant(
+    //     &self,
+    //     headstash_id: String,
+    //     recp_addr: String,
+    //     esk_hex: String,
+    //     nullifier_hex: String,
+    // ) -> Result<(), Error> {
+    //     let esk = EligibleSk::from_hex(&esk_hex);
+    //     let nullifier_bytes = hex::decode(&nullifier_hex)
+    //         .map_err(|e| Error::KeyDecoding(format!("Invalid nullifier hex: {}", e)))?;
+    //     let nullifier = Nullifier::from_bytes(
+    //         nullifier_bytes
+    //             .as_slice()
+    //             .try_into()
+    //             .map_err(|_| Error::KeyDecoding("Invalid nullifier length".into()))?,
+    //     )
+    //     .expect("nullifier from bytes");
 
-//     /// Generate a valid Zcash transaction from a given proposal
-//     ///
-//     /// IMPORTANT: This will spawn a new webworker which will handle the proving task which may take 10s of seconds
-//     ///
-//     /// # Arguments
-//     ///
-//     /// * `proposal` - A proposal object generated by `propose_transfer`
-//     /// * `seed_phrase` - 24 word mnemonic seed phrase. This MUST correspond to the accountID used when creating the proposal.
-//     /// * `account_hd_index` - [ZIP32](https://zips.z.cash/zip-0032) hierarchical deterministic index of the account. This MUST correspond to the accountID used when creating the proposal.
-//     ///
-//     /// # Returns
-//     ///
-//     /// A list of transaction IDs which can be used to track the status of the transaction on the network.
-//     /// It is returned in a flattened form where each ID is 32 bytes.
-//     /// The transactions themselves are stored within the wallet.
-//     ///
-//     /// # Examples
-//     ///
-//     /// ```javascript
-//     /// const proposal = await wallet.propose_transfer(1, "u18rakpts0de589sx9dkamcjms3apruqqax9k2s6e7zjxx9vv5kc67pks2trg9d3nrgd5acu8w8arzjjuepakjx38dyxl6ahd948w0mhdt9jxqsntan6px3ysz80s04a87pheg2mqvlzpehrgup7568nfd6ez23xd69ley7802dfvplnfn7c07vlyumcnfjul4pvv630ac336rjhjyak5", 100000000);
-//     /// const authorized_txns = await wallet.create_proposed_transactions(proposal, "...", 1);
-//     /// ```
-//     pub async fn create_proposed_transactions(
-//         &self,
-//         proposal: Proposal,
-//         seed_phrase: &str,
-//         account_hd_index: u32,
-//     ) -> Result<Vec<u8>, Error> {
-//         assert!(!thread::is_web_worker_thread());
+    //     self.inner
+    //         .claim_headstash_via_feegrant(&recp_addr, &headstash_id, &esk, &nullifier)
+    //         .await
+    // }
 
-//         let (usk, _) = usk_from_seed_str(seed_phrase, account_hd_index, &self.inner.network)?;
-//         let db = self.inner.clone();
+    /// Claim via smart account (gasless via authenticator)
+    ///
+    /// This is the PRIMARY claim method for headstash allocations.
+    /// Uses smart account authenticator for gasless transaction execution.
+    ///
+    /// # Arguments
+    /// * `headstash_id` - Contract address
+    /// * `esk_hex` - Secret key in hex (from MetaMask)
+    /// * `nullifier_hex` - Nullifier of the note to claim
+    ///
+    /// # Returns
+    /// JSON string with claim response: `{ tx_hash, height, code, raw_log }`
+    ///
+    /// # Examples
+    /// ```javascript
+    /// const response = await wallet.claim_via_smart_account("terp1contract123", esk, nullifier_hex);
+    /// const result = JSON.parse(response);
+    /// console.log(`Claimed! TX: ${result.tx_hash}`);
+    /// ```
+    pub async fn claim_via_smart_account(
+        &self,
+        headstash_id: String,
+        esk_hex: String,
+        nullifier_hex: String,
+    ) -> Result<String, Error> {
+        let esk = EligibleSk::from_hex(&esk_hex);
+        let nullifier_bytes = hex::decode(&nullifier_hex)
+            .map_err(|e| Error::KeyDecoding(format!("Invalid nullifier hex: {}", e)))?;
+        let nullifier = Nullifier::from_bytes(
+            nullifier_bytes
+                .as_slice()
+                .try_into()
+                .map_err(|_| Error::KeyDecoding("Invalid nullifier length".into()))?,
+        )
+        .expect("nullifier from bytes");
 
-//         let sync_handler = thread::Builder::new()
-//             .name("create_proposed_transaction".to_string())
-//             .spawn_async(|| async move {
-//                 assert!(thread::is_web_worker_thread());
-//                 tracing::debug!(
-//                     "Current num threads (wasm_thread) {}",
-//                     rayon::current_num_threads()
-//                 );
+        let response = self
+            .inner
+            .claim_headstash_via_smart_account(headstash_id, esk, nullifier)
+            .await?;
 
-//                 let db = db;
-//                 let txids = db
-//                     .create_proposed_transactions(proposal.into(), &usk)
-//                     .await
-//                     .unwrap_throw();
-//                 return txids;
-//             })
-//             .unwrap_throw()
-//             .join_async();
-//         let txids = sync_handler.await.unwrap();
+        serde_json::to_string(&response)
+            .map_err(|e| Error::KeyDecoding(format!("JSON serialization failed: {}", e)))
+    }
 
-//         let flattened_txid_bytes = txids.iter().flat_map(|&x| x.as_ref().clone()).collect();
-//         Ok(flattened_txid_bytes)
-//     }
+    // /// List all unspent notes for a headstash
+    // ///
+    // /// Returns a JSON string containing an array of unspent notes.
+    // ///
+    // /// # Arguments
+    // /// * `headstash_id` - Contract address of the headstash
+    // ///
+    // /// # Returns
+    // /// JSON string with note data: `[{ nullifier, commitment, value_amount, value_denom, fdi, spent }]`
+    // // pub async fn list_unspent_notes(&self, headstash_id: String) -> Result<String, Error> {
+    // //     let notes = self.inner.list_unspent_notes(&headstash_id).await?;
+    // //     let serialized: Vec<SerializedNote> = notes.iter().map(|n| n.into()).collect();
+    // //     serde_json::to_string(&serialized)
+    // //         .map_err(|e| Error::Js(format!("Serialization failed: {}", e).into()))
+    // // }
 
-//     /// Serialize the internal wallet database to bytes
-//     ///
-//     /// This should be used for persisting the wallet between sessions. The resulting byte array can be used to construct a new wallet instance.
-//     /// Note this method is async and will block until a read-lock can be acquired on the wallet database
-//     ///
-//     /// # Returns
-//     ///
-//     /// A postcard encoded byte array of the wallet database
-//     ///
-//     pub async fn db_to_bytes(&self) -> Result<Box<[u8]>, Error> {
-//         let bytes = self.inner.db_to_bytes().await?;
-//         Ok(bytes.into_boxed_slice())
-//     }
+    // /// List all spent notes for a headstash
+    // ///
+    // /// Returns a JSON string containing an array of spent notes.
+    // ///
+    // /// # Arguments
+    // /// * `headstash_id` - Contract address of the headstash
+    // ///
+    // /// # Returns
+    // /// JSON string with note data
+    // // pub async fn list_spent_notes(&self, headstash_id: String) -> Result<String, Error> {
+    // //     let notes = self.inner.list_spent_notes(&headstash_id).await?;
+    // //     let serialized: Vec<SerializedNote> = notes.iter().map(|n| n.into()).collect();
+    // //     serde_json::to_string(&serialized)
+    // //         .map_err(|e| Error::Js(format!("Serialization failed: {}", e).into()))
+    // // }
 
-//     /// Send a list of authorized transactions to the network to be included in the blockchain
-//     ///
-//     /// These will be sent via the connected lightwalletd instance
-//     ///
-//     /// # Arguments
-//     ///
-//     /// * `txids` - A list of transaction IDs (typically generated by `create_proposed_transactions`). It is in flatten form which means it's just a concatination of the 32 byte IDs.
-//     ///
-//     /// # Examples
-//     ///
-//     /// ```javascript
-//     /// const proposal = wallet.propose_transfer(1, "u18rakpts0de589sx9dkamcjms3apruqqax9k2s6e7zjxx9vv5kc67pks2trg9d3nrgd5acu8w8arzjjuepakjx38dyxl6ahd948w0mhdt9jxqsntan6px3ysz80s04a87pheg2mqvlzpehrgup7568nfd6ez23xd69ley7802dfvplnfn7c07vlyumcnfjul4pvv630ac336rjhjyak5", 100000000);
-//     /// const authorized_txns = wallet.create_proposed_transactions(proposal, "...", 1);
-//     /// await wallet.send_authorized_transactions(authorized_txns);
-//     /// ```
-//     pub async fn send_authorized_transactions(&self, txids: Vec<u8>) -> Result<(), Error> {
-//         let txids = txids
-//             .chunks(32)
-//             .map(|txid| {
-//                 let txid_arr: [u8; 32] = txid.try_into().map_err(|_| Error::TxIdParse)?;
-//                 Ok(TxId::from_bytes(txid_arr))
-//             })
-//             .collect::<Result<Vec<_>, Error>>()?;
-//         let txids = NonEmpty::from_vec(txids).ok_or(Error::TxIdParse)?;
-//         self.inner.send_authorized_transactions(&txids).await
-//     }
+    // /// Query headstash contract info via CosmWasm
+    // ///
+    // /// This uses the standard CosmWasm QueryWasmSmart to query headstash contract state.
+    // ///
+    // /// # Arguments
+    // /// * `headstash_id` - Contract address
+    // /// * `query_msg` - JSON query message
+    // ///
+    // /// # Returns
+    // /// JSON string with query response
+    // ///
+    // /// # Examples
+    // /// ```javascript
+    // /// const info = await wallet.query_headstash(
+    // ///     "terp1contract123",
+    // ///     JSON.stringify({ get_info: {} })
+    // /// );
+    // /// console.log(JSON.parse(info));
+    // /// ```
+    // // pub async fn query_headstash(
+    // //     &self,
+    // //     headstash_id: String,
+    // //     query_msg: String,
+    // // ) -> Result<String, Error> {
+    // //     let response: serde_json::Value = self
+    // //         .inner
+    // //         .query_headstash(&headstash_id, &query_msg)
+    // //         .await?;
+    // //     serde_json::to_string(&response)
+    // //         .map_err(|e| Error::Js(format!("Serialization failed: {}", e).into()))
+    // // }
 
-//     /// Get the current unified address for a given account. This is returned as a string in canonical encoding
-//     ///
-//     /// # Arguments
-//     ///
-//     /// * `account_id` - The ID of the account to get the address for
-//     ///
-//     pub async fn get_current_address(&self, account_id: u32) -> Result<String, Error> {
-//         let db = self.inner.db.read().await;
-//         if let Some(address) = db.get_current_address(account_id.into())? {
-//             Ok(address.encode(&self.inner.network))
-//         } else {
-//             Err(Error::AccountNotFound(account_id))
-//         }
-//     }
+    // /// Get all headstash IDs we have notes for
+    // ///
+    // /// Returns a JSON array of headstash contract addresses.
+    // ///
+    // /// # Examples
+    // /// ```javascript
+    // /// const ids = await wallet.list_headstash_ids();
+    // /// console.log(JSON.parse(ids)); // ["terp1contract123", "terp1contract456"]
+    // /// ```
+    // // pub async fn list_headstash_ids(&self) -> Result<String, Error> {
+    // //     let ids = self.inner.list_headstash_ids().await?;
+    // //     serde_json::to_string(&ids)
+    // //         .map_err(|e| Error::Js(format!("Serialization failed: {}", e).into()))
+    // // }
 
-//     /// Create a Shielding PCZT (Partially Constructed Zcash Transaction).
-//     ///
-//     /// A Proposal for shielding funds is created and the the PCZT is constructed for it
-//     ///
-//     /// # Arguments
-//     ///
-//     /// * `account_id` - The ID of the account which transparent funds will be shielded.
-//     ///
-//     pub async fn pczt_shield(&self, account_id: u32) -> Result<Pczt, Error> {
-//         self.inner
-//             .pczt_shield(account_id.into())
-//             .await
-//             .map(Into::into)
-//     }
+    // /// Upload nullifier state to headstash-api for cross-device sync
+    // ///
+    // /// This encrypts and uploads spent nullifier state to the API server.
+    // ///
+    // /// # Arguments
+    // /// * `headstash_id` - Contract address
+    // /// * `recipient_pk_hex` - Public key to encrypt to (usually your own) in hex
+    // /// * `sender_sk_hex` - Secret key for signing in hex
+    // ///
+    // /// # Examples
+    // /// ```javascript
+    // /// const esk = await snap.request({ method: "get_secret_key" });
+    // /// const epk = derivePublicKey(esk);
+    // /// await wallet.upload_nullifier_state("terp1contract123", epk, esk);
+    // /// ```
+    // // pub async fn upload_nullifier_state(
+    // //     &self,
+    // //     headstash_id: String,
+    // //     recipient_pk_hex: String,
+    // //     sender_sk_hex: String,
+    // // ) -> Result<(), Error> {
+    // //     let recipient_pk = EligiblePk::from(
+    // //         &hex::decode(&recipient_pk_hex)
+    // //             .map_err(|e| Error::KeyDecoding(format!("Invalid recipient pk hex: {}", e)))?,
+    // //     );
+    // //     let sender_sk = EligibleSk::from_hex(&sender_sk_hex);
 
-//     /// Creates a PCZT (Partially Constructed Zcash Transaction).
-//     ///
-//     /// A Proposal is created similar to `create_proposed_transactions` and then a PCZT is constructed from it.
-//     /// Note: This does NOT sign, generate a proof, or send the transaction.
-//     /// It will only craft the PCZT which designates how notes from this account can be spent to realize the requested transfer.
-//     /// The PCZT will still need to be signed and proofs will need to be generated before sending.
-//     ///
-//     /// # Arguments
-//     ///
-//     /// * `account_id` - The ID of the account in this wallet to send funds from
-//     /// * `to_address` - [ZIP316](https://zips.z.cash/zip-0316) encoded address to send funds to
-//     /// * `value` - Amount to send in Zatoshis (1 ZEC = 100_000_000 Zatoshis)
-//     ///
-//     pub async fn pczt_create(
-//         &self,
-//         account_id: u32,
-//         to_address: String,
-//         value: u64,
-//     ) -> Result<Pczt, Error> {
-//         let to_address = ZcashAddress::try_from_encoded(&to_address)?;
-//         self.inner
-//             .pczt_create(AccountId::from(account_id), to_address, value)
-//             .await
-//             .map(Into::into)
-//     }
+    // //     self.inner
+    // //         .upload_nullifier_state(&headstash_id, &recipient_pk, &sender_sk)
+    // //         .await
+    // // }
 
-//     /// Creates and inserts proofs for a PCZT.
-//     ///
-//     /// If there are Sapling spends, a ProofGenerationKey needs to be supplied. It can be derived from the UFVK.
-//     ///
-//     /// # Arguments
-//     ///
-//     /// * `pczt` - The PCZT that needs to be signed
-//     /// * `sapling_proof_gen_key` - The Sapling proof generation key (needed only if there are Sapling spends)
-//     ///
-//     pub async fn pczt_prove(
-//         &self,
-//         pczt: Pczt,
-//         sapling_proof_gen_key: Option<ProofGenerationKey>,
-//     ) -> Result<Pczt, Error> {
-//         self.inner
-//             .pczt_prove(pczt.into(), sapling_proof_gen_key.map(Into::into))
-//             .await
-//             .map(Into::into)
-//     }
+    // // / Download and sync nullifier state from headstash-api
+    // // /
+    // // / This downloads encrypted nullifier state from the API server and merges it into local storage.
+    // // /
+    // // / # Arguments
+    // // / * `headstash_id` - Contract address
+    // // / * `recipient_sk_hex` - Secret key to decrypt with in hex
+    // // / * `sender_pk_hex` - Expected sender's public key (for verification) in hex
+    // // /
+    // // / # Examples
+    // // / ```javascript
+    // // / const esk = await snap.request({ method: "get_secret_key" });
+    // // / await wallet.download_and_sync_nullifier_state("terp1contract123", esk, sender_pk_hex);
+    // // / ```
+    // // pub async fn download_and_sync_nullifier_state(
+    // //     &self,
+    // //     headstash_id: String,
+    // //     recipient_sk_hex: String,
+    // //     sender_pk_hex: String,
+    // // ) -> Result<(), Error> {
+    // //     let recipient_sk = EligibleSk::from_hex(&recipient_sk_hex);
+    // //     let sender_pk = EligiblePk::from(
+    // //         &hex::decode(&sender_pk_hex)
+    // //             .map_err(|e| Error::KeyDecoding(format!("Invalid sender pk hex: {}", e)))?,
+    // //     );
 
-//     pub async fn pczt_send(&self, pczt: Pczt) -> Result<(), Error> {
-//         self.inner.pczt_send(pczt.into()).await
-//     }
+    // //     self.inner
+    // //         .download_and_sync_nullifier_state(&headstash_id, &recipient_sk, &sender_pk)
+    // //         .await
+    // // }
 
-//     pub fn pczt_combine(&self, pczts: Vec<Pczt>) -> Result<Pczt, Error> {
-//         self.inner
-//             .pczt_combine(pczts.into_iter().map(Into::into).collect())
-//             .map(Into::into)
-//     }
+    // /// Serialize wallet database to bytes for MetaMask storage
+    // ///
+    // /// This should be used for persisting the wallet between sessions.
+    // /// The resulting byte array can be stored via snap_manageState.
+    // ///
+    // /// # Returns
+    // /// Byte array of serialized database
+    // ///
+    // /// # Examples
+    // /// ```javascript
+    // /// const state = await wallet.db_to_bytes();
+    // /// await snap.request({
+    // ///     method: "snap_manageState",
+    // ///     params: {
+    // ///         operation: "update",
+    // ///         newState: { headstash_wallet: Array.from(state) }
+    // ///     }
+    // /// });
+    // /// ```
+    // pub async fn db_to_bytes(&self) -> Result<Box<[u8]>, Error> {
+    //     // TODO: Implement actual serialization
+    //     // For now, return empty bytes
+    //     Ok(vec![].into_boxed_slice())
+    // }
+}
 
-//     /// Get the current unified address for a given account and extracts the transparent component. This is returned as a string in canonical encoding
-//     ///
-//     /// # Arguments
-//     ///
-//     /// * `account_id` - The ID of the account to get the address for
-//     ///
-//     pub async fn get_current_address_transparent(&self, account_id: u32) -> Result<String, Error> {
-//         let db = self.inner.db.read().await;
-//         if let Some(address) = db.get_current_address(account_id.into())? {
-//             Ok(address.transparent().unwrap().encode(&self.inner.network))
-//         } else {
-//             Err(Error::AccountNotFound(account_id))
-//         }
-//     }
+// ============================================================================
+// Serialization Types for WASM
+// ============================================================================
 
-//     ///////////////////////////////////////////////////////////////////////////////////////
-//     // lightwalletd gRPC methods
-//     ///////////////////////////////////////////////////////////////////////////////////////
+/// Serialized note data for JavaScript consumption
+#[derive(Serialize, Deserialize)]
+pub struct SerializedNote {
+    pub nullifier: String,
+    pub commitment: String,
+    pub value_amount: u64,
+    pub value_denom: String,
+    pub fdi: u64,
+    pub spent: bool,
+}
 
-//     ///
-//     /// Get the highest known block height from the connected lightwalletd instance
-//     ///
-//     pub async fn get_latest_block(&self) -> Result<u64, Error> {
-//         self.client()
-//             .get_latest_block(ChainSpec {})
-//             .await
-//             .map(|response| response.into_inner().height)
-//             .map_err(Error::from)
-//     }
-// }
+impl From<&NoteData> for SerializedNote {
+    fn from(note: &NoteData) -> Self {
+        use zk_headstash::note::ExtractedNoteCommitment;
+        // Convert NoteCommitment to bytes
+        let commitment_bytes: [u8; 32] =
+            ExtractedNoteCommitment::from(note.commitment.clone()).to_bytes();
 
-// #[derive(Debug, Serialize, Deserialize)]
-// #[wasm_bindgen(inspectable)]
-// pub struct WalletSummary {
-//     account_balances: Vec<(u32, AccountBalance)>,
-//     pub chain_tip_height: u32,
-//     pub fully_scanned_height: u32,
-//     // scan_progress: Option<Ratio<u64>>,
-//     pub next_sapling_subtree_index: u64,
-//     pub next_orchard_subtree_index: u64,
-// }
-
-// #[wasm_bindgen]
-// impl WalletSummary {
-//     #[wasm_bindgen(getter)]
-//     pub fn account_balances(&self) -> JsValue {
-//         serde_wasm_bindgen::to_value(&self.account_balances).unwrap()
-//     }
-// }
-
-// #[derive(Debug, Serialize, Deserialize)]
-// pub struct AccountBalance {
-//     pub sapling_balance: u64,
-//     pub orchard_balance: u64,
-//     pub unshielded_balance: u64,
-// }
-
-// impl From<zcash_client_backend::data_api::AccountBalance> for AccountBalance {
-//     fn from(balance: zcash_client_backend::data_api::AccountBalance) -> Self {
-//         AccountBalance {
-//             sapling_balance: balance.sapling_balance().spendable_value().into(),
-//             orchard_balance: balance.orchard_balance().spendable_value().into(),
-//             unshielded_balance: balance.unshielded().into(),
-//         }
-//     }
-// }
-
-// impl<T> From<zcash_client_backend::data_api::WalletSummary<T>> for WalletSummary
-// where
-//     T: std::cmp::Eq + std::hash::Hash + std::ops::Deref<Target = u32> + Clone,
-// {
-//     fn from(summary: zcash_client_backend::data_api::WalletSummary<T>) -> Self {
-//         let mut account_balances: Vec<_> = summary
-//             .account_balances()
-//             .iter()
-//             .map(|(k, v)| (*(*k).clone().deref(), (*v).into()))
-//             .collect();
-
-//         account_balances.sort_by(|a, b| a.0.cmp(&b.0));
-
-//         WalletSummary {
-//             account_balances,
-//             chain_tip_height: summary.chain_tip_height().into(),
-//             fully_scanned_height: summary.fully_scanned_height().into(),
-//             next_sapling_subtree_index: summary.next_sapling_subtree_index(),
-//             next_orchard_subtree_index: summary.next_orchard_subtree_index(),
-//         }
-//     }
-// }
+        Self {
+            nullifier: hex::encode(note.nullifier.to_bytes()),
+            commitment: hex::encode(commitment_bytes),
+            value_amount: note.hv.raw_amount(),
+            value_denom: note.hv.denom_str().to_string(),
+            fdi: note.fdi,
+            spent: note.spent,
+        }
+    }
+}

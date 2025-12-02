@@ -1,2 +1,0 @@
-
-# Headstash Circuit

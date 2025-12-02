@@ -2,60 +2,10 @@
 
 # egui headstash : front end tools
 
-- charcute: resuable deployment, framework client, and trustless verification library
 - dedicated wasm-bindgen api library: complete,reusable,lightweight wasm-bindgen crate powering headstash note-nullifier data preparation & proof generation via web communication through wasm-bindgeen.
 - snap-n-pull: Metamask-snap plugin powered by wasm-bindgen crate
 
-## Snap-N-Pull
-
-Wires in our verifiable wasm binaries to a metamask snap plugin. THis lets us pack up our functions to generate note nullifiers and return them with an encrypted spent note.
-
-## Charcute: Trustless & Scalable
-
-### Versioning
-
-### Verifying What You Are Using On Your Device
-
-### Reviewing Centralization Surface Area
-
-### Communicating Fees
-
-## Permissionless Specs
-
-### Developing
-
-### Compiling
-
-### Deployment
-
-### Publishing
-
-### Interacting
-
-```
-
-- keep things flexible and organized in grids that react to window format
-
-
-- use authenticators: iframe window/prewired application extensions/windows for authenticator support:
-  - smart-account powered tx signing via non_crititical_extension preparation and injection ( x/402 authentication,webauthn / passkey / bls12-381 / etc)
-
-- user actions should have hooks: since we expect to have stateful things happening when user clicks on instance (like stateful queries spefici to results of actions chosen), we can wire in query hooks to the client middleware for retrival of data related to spefic instance, and also use caching for storage of this data and extremely effecieve applicatoin
-
-- main view shows verified deployed contract instances, search bar for manual contract input and saving to localstorage. once contract instance is selected query for retrieving active market objects to display in list occurs, render infusion instances for users to select to interact with
-- tab for displaying registered authenticators for an account (indexerquery,chainfallback)
-- tab for registering authenticator (via known ones, or manually via known tx steps take (instantiate+register || upload+instanitate+register))
-- tab for using authenticator: (calling smart contract state genericlly)
-# human notes
-- queries headstash registry for list of all active headstsh (indexer priority chain contract callback)
-- Current headstash: table grid wired into queries of all current headstashes
-- Create headstash: tab with form to register new headstash
-- Interacting with headstash: viewed when selected a headstash, dedicated information regarding global headtash metrics, specific to wallet connected as well, actions for interacting with headsatsh
-- bluetooth / 2fa / passkey / auth app support
-- penumbra wallet view and client sdk implementati9on
-```
-
-### Front End DashBoard: Headstash
+## Front End DashBoard: Headstash
 
 - **layer-climb-core**: Full-featured QueryClient with middleware system already implemented
 - **AppClient**: Wraps QueryClient with network management and gRPC/REST fallback

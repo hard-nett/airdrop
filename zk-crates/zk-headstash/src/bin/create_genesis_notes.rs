@@ -1,4 +1,4 @@
-use zk_crates::deploy::suite::*;
+use zk_headstash::deploy::suite::*;
 
 /// # create geneisis notes: Sinsemilla HashDomain
 /// - generates default note using posiedon hashing algo & Fixed-Denomination Notes
@@ -10,9 +10,9 @@ use zk_crates::deploy::suite::*;
 ///  cargo run -- --bin gen_headstash_notes ./data/genesis_sinsemilla.json 0x0000000000000000000000000000000000000000
 /// ```
 fn main() -> Result<(), BoxError> {
-    TerpHeadstash::new().gen_headstash_notes()?;
+    HeadstashSuite::new().create_headstash_notes()?;
     let output_path = std::path::Path::new("./data").join("merkle_output.json");
-    let root_hex = TerpHeadstash::new().gen_headstash_tree(output_path)?;
+    let root_hex = HeadstashSuite::new().gen_headstash_tree(output_path)?;
     println!("🌳 Merkle Root: {}", root_hex);
     Ok(())
 }

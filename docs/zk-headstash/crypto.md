@@ -4,16 +4,35 @@
 
 ```mermaid
 graph LR
-    A[Secret s] -> B[Commitment: $$c = g^s * h^r$$]
-    B <-> C[Alice checks: $$c == g^s * h^r?$$]
-    D[Random r] -> B
-    B -> E[Perfect Secrecy: c reveals no info about s]
+    A[Secret s] --> B[Commitment: c]
+    B <--> C[Alice checks: c]
+    D[Random r] --> B
+    B --> E[Perfect Secrecy: c reveals no info about s]
     A -.-> C
     style B fill:#1b0d33,stroke:#333
     style C fill:#0d3323,stroke:#333,color:#fff
 ```
 
-## PLUME SIGNATURES
+```math
+c = g^s * h^r
+```
+
+## Key Pairing
+
+## Sinsemilla
+
+### HashDomain
+
+### CommitDomain
+
+## Proof-Input Serialization
+
+## Halo2-Circuit Field
+
+## Proof Circuit Key & Witness Proof Verification
+
+## Recursive Proofs: pallas:: Curves
+
 <!-- 
 ```mermaid
 flowchart TD
@@ -100,8 +119,9 @@ flowchart TD
 ## Commit Merkle Tree
 
 ```mermaid
-flowchart TD
-    subgraph Leaves [Leaf Layer(Layer 0)]
+
+flowchart LR
+    subgraph Leaves [Leaf Layer ]
         L0[Hash 0]
         L1[Hash 1]
         L2[Hash 2]
@@ -110,7 +130,7 @@ flowchart TD
         L5[Hash n]
     end
 
-    subgraph Tree [Non-Leaf Layers (Layers 1 to 31)]
+    subgraph Tree [Non-Leaf Layers ]
         H1_0["H(H0 + H1)"]
         H1_1["H(H2 + H3)"]
         H1_2[...]
@@ -122,7 +142,7 @@ flowchart TD
         H30_0["H(...)"]
         H30_1["H(...)"]
 
-        Root["Merkle Root<br>(Layer 32 / Root)"]
+        Root["Merkle Root"]
     end
 
     subgraph Proof [Merkle Proof for Hash 0]

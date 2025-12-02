@@ -37,7 +37,7 @@ A predetermined set of notes for users are generated based on initial allocation
 >
 > **2. Viewing key magic is simplified for this iteration**
 > We do not use diversifiers, viewing-keys & spending-keys as defined in multiple Zcash protocols, which is how note-commitments and nullifiers are
-> derived. We instead implement a simplified version that satisfies our requirements, without sacraficing any of the privacy
+> derived. We instead implement a simplified version that satisfies our requirements, without sacraficing the core privacy
 > guarantees that are available with use of halo2 circuits.
 >
 ## Requirements
@@ -351,7 +351,7 @@ Note Commitments `cm` are also is disclosed publicly during claiming. They are d
 >
 > q: how can we actually implement a note-commitment tree given our specification, and taking into account possible discrepencies with
 > note-commitment generation timing between multiple parties?\
-> a: nullifiers are provided with note-commitments, and are batched process via vote-extensions, allow us to update the merkle root each block. 
+> a: nullifiers are provided with note-commitments, and are batched process via vote-extensions, allow us to update the merkle root each block.
 
 > **q: do we damage the blinding of the rest of the inputs to the hashing function due to some being public and some being private?**
 >
@@ -452,12 +452,6 @@ pub struct ProperCrtUint<F> {
 2. **Modular Reduction:** After operations, values must be reduced mod foreign_prime
 3. **Native Consistency:** `native ≡ Σ limbs (mod Pallas::Fq)`
 4. **Carry Propagation:** Multi-limb arithmetic must handle carries correctly
-
-<!-- ## Circuit: User Interface
-**Public Inputs (exposed to verifier):**
-**Constants (hardwired into circuit):**
-**Private Witnesses (only prover knows):**
-**Derived Values (computed in-circuit):** -->
 
 ```rust
 let m = poseidon_hash(dst_hkdf,[recp, v, nd, fdi,psi]); 
@@ -582,101 +576,11 @@ pub type FqChip<'range, F> = fp::FpChip<'range, F, Secp256k1::Fq>;
 
 ### NoteCommitChip Chip
 
-## Non-Circuit Tooling
+## HeadstashAPI: Verifiable Service Mesh
 
 ## Metamask Snap: Headstash
 
-"A good UX does not require the user to learn anything they do not already know." Powered by this principle, we can make use of a metamask snap plugin to power the hkdf & note management steps:
-
-### Snap Requirements
-
-- download/import/store pubkeys eligible notes from headstash registry: download entire set once, discard non-related notes
-- free will derived entropy generation
-- perform hkdf + nullifier generation
-- broadcast to sc/verifiable service mesh/smart-contract
-
-## Smart-Account Use
-
-This contracts will keep hold the static verification key, record of the spent nullifiers, maintain control of funds to distribute, and power the proof verification.
-
-- x/token-factory contract/module middleware, or manually fund contract
-- middleware for external distribution contract & internal state.
-- cw-orchestrator: reproducible deployment
-
-## Verifiable Service Mesh
-
-A Verifiable Service mesh of nodes acting an a proxy for broadcasting proofs on chain unlocks a number of UX benefits:
-
-- dedicated API for broadcasting claims
-- minimizing fee-grants
-- delayed claiming support
-
-### Key Aggregation & Rotation
-
-- `AllOf(passkey,wallet,password confirmation)` authenticator for authorized key rotation (macro injected into authenticators for modular resuable injection of keyrotation workflow)
-
-### Additional Features
-
 ## Genesis Bootstrapping
-
-### 1. Genesis Distribution Tree Construction
-
-First, the tree is constructed by separating separating all distributions into the smallest amount of fixed denomination notes, for each token allocated (The Headstash Airdrop distributes TERP & THIOL, so there is a set of leaves for each address due to their allocation including 2 tokens.). We generate leaves in an non-interactive manner using the pre-known public information available:
-
-### Step 2: Deploy Verifiable Proxy Service
-
-This steps involves deploying the verifiable service used to route claiming actions on-chain for proof validation,nullifier & note commitment storage, and also token distributions.
-
-#### Upload/Instantiate Zk-Headstash Contract
-
-#### Create/Seed Tokens To Distribute
-
-#### Register Service Owned Address w/ Smart-Account
-
-The proxy service must control an on-chain account, in order to register the zk-headstash contract as its on-chain authenticator.
-
-- **single feegrant/payment address**: Instead of allocating feegrants to each public address claiming headstashes, we can allocate a single feegrant to the services owned account.
-
-- **granularizes sequence of operations**: authenticators require specific steps of a tx broadcasted to be performed within the scope defined by the x/smart-account authentication module. This allows us to separate the signature verification coming from the off-chain service from the users proof verification sequence.
-
-### Step 3: Eligible Addresses Generate Proofs for claiming
-
-In the proof circuit, the user generates a proof that essentially encodes the following statements:
-
-- They own `addr_eligible` via `epk` `esk` pairing.
-- The note being spent corresponds to an unclaimed entry in the genesis Merkle tree.
-- The nullifier for the note being spent has been accurately defined to this note.
-
-### Step 4: Claim Spent Note By Contract Call
-
-A user will broadcast their proof generated to the verifiable service, which has feegrants registered under an account it controls to cover gas cost to broadcast to a chain state. The smart contract will enforce that a nullifier doesnt yet exist
-
-## Implementation Checklist
-
-- [x] Define Sinsemilla hashing parameters for Merkle trees and commitments.
-- [ ] Implement Halo2 circuits for:
-  - [ ] Merkle inclusion proofs
-  - [ ] Proof Of Ownership (key-pairing)
-  - [ ] Proof Of Destination (erc-7524)
-  - [ ] Nullifier derivation
-  - [ ] Note commitment derivation
-- [ ] Design smart contract to manage:
-  - Nullifier set
-  - Note commitment tree
-  - Token transfers
-  - Wavs service authentication
-- [ ] Develop off-line tools for key generation and proof construction.
-  - [x] secure random number generator
-  - [x] genesis proof generator
-  - [x] genesis fixed amount note generator
-
-### Claiming API
-
-- exposes API used for users to broadcast & claim allocations.
-
-### Fee Grants
-
-- provides single time feegrants to diversifier keys of claiming addresses
 
 ## Randomness Generation
 

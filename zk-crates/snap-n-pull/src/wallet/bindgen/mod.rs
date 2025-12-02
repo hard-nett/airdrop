@@ -1,4 +1,4 @@
-use serde::{Deserialize, Serialize};
-
-pub mod proposal;
 pub mod wallet;
+
+#[cfg(test)]
+mod tests;

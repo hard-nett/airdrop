@@ -1,0 +1,98 @@
+syntax = "proto3";
+
+package headstash.snp.v1;
+
+import "google/protobuf/struct.proto";
+
+
+service HeadstashSnapService {
+      // find new headstash
+      // list headstash info 
+      // perform headstash action
+  // Gets the app parameters.
+  rpc NoteByNullifier(GetNoteByNullifierRequest) returns (GetNoteByNullifierResponse);
+  rpc ListUnspentNotes(ListUnspentNotesRequest) returns (ListUnspentNotesResponse);
+  rpc ListSpentNotes(ListSpentNotesRequest) returns (ListSpentNotesResponse);
+  rpc DownloadNullifierState(ListSpentNotesRequest) returns (DownloadNullifierStateResponse);
+  rpc ClaimHeadstash(ClaimHeadstashRequest) returns (ClaimHeadstashResponse);
+}
+
+// Requests the list of all transactions that occurred within a given block.
+message ListSpentNotesRequest {
+
+}
+
+// Requests the list of all transactions that occurred within a given block.
+message ListSpentNotesResponse {
+
+}
+
+// Requests the list of all transactions that occurred within a given block.
+message ListUnspentNotesRequest {
+ 
+}
+// Requests the list of all transactions that occurred within a given block.
+message ListUnspentNotesResponse {
+ 
+}
+
+// Requests the list of all transactions that occurred within a given block.
+message GetNoteByNullifierRequest {
+    string nul = 1;
+}
+
+// A transaction that appeared within a given block.
+message GetNoteByNullifierResponse {
+ string id =1;
+
+}
+// A transaction that appeared within a given block.
+message DownloadNullifierStateResponse {
+    bytes data = 1;
+}
+// A transaction that appeared within a given block.
+message DownloadNullifierStateRequest {
+  string id = 1;
+  bytes pk = 2;
+}
+// A transaction that appeared within a given block.
+message UploadNullifierStateRequest {
+  string id = 1;
+  bytes data = 2;
+  bytes sig = 3;
+ 
+}
+// A transaction that appeared within a given block.
+message UploadNullifierStateResponse {
+ 
+}
+// A transaction that appeared within a given block.
+message ClaimHeadstashRequest {
+ 
+}
+// A transaction that appeared within a given block.
+message ClaimHeadstashResponse {
+    string id = 1;
+    bytes msg = 2;
+    bytes signature = 3;
+}
+
+// Encrypted payload for nullifier state sync
+message EncryptedNullifierState {
+    bytes epk = 1;
+    bytes ciphertext = 2;
+    bytes mac = 3;
+    bytes signature = 4;
+}
+ 
+message SerializedNoteData {
+    bytes nk = 1;
+    bytes nullifier = 2;
+    bytes commitment = 3;
+    string v = 4;
+    string nd = 5;
+    uint64 fdi = 6;
+    bool spent = 7;
+}
+
+ 
