@@ -1,6 +1,6 @@
 use cosmwasm_std::{
-    to_json_binary, Api, Binary, HashFunction, StdError, StdResult, BLS12_381_G1_GENERATOR as G1,
-    BLS12_381_G2_GENERATOR as G2,
+    to_json_binary, Addr, Api, Binary, HashFunction, StdError, StdResult,
+    BLS12_381_G1_GENERATOR as G1, BLS12_381_G2_GENERATOR as G2,
 };
 
 use sha2::{Digest, Sha256};
@@ -20,13 +20,13 @@ pub struct WavsParams {
 #[cosmwasm_schema::cw_serde]
 pub struct WavsAuthMetadata {
     pub aggregate_key: String,
+    // if 0, disable threshold assertions & allow single aggregate signature to be provided for authetnication
     pub threshold: usize,
     pub total_operators: usize,
     pub nonce: u64,
 }
 
 #[cosmwasm_schema::cw_serde]
-#[derive(Default)]
 
 pub struct WavsProofOfOwnership {
     /// list of aggregated keys (used for proof of ownership )
@@ -51,30 +51,20 @@ pub struct WavsOpAuth {
     /// proof of ownership signature of `H(WavsAuthMetadata)` from the public key
     pub poo: String,
 }
-impl Default for WavsAuthMetadata {
-    fn default() -> Self {
-        Self {
-            ..Default::default()
-        }
-    }
-}
-impl Default for WavsOperatorSet {
-    fn default() -> Self {
-        Self {
-            c: Default::default(),
-            keys: Default::default(),
-            msg: Default::default(),
-        }
-    }
-}
 
 impl WavsOperatorSet {
     /// Proof of ownership verification where H(pk) is signed with sk. Required before instantiation for certainty in inital keyset.
-    pub fn proof_of_ownership(&self, api: &dyn Api, p: &WavsProofOfOwnership) -> StdResult<()> {
-        for p in &p.poos {
-            let ps = hex::decode(&p.key)?;
+    /// Message is <contract-addr>-<pubkey>> for doublespend-prevention.
+    pub fn proof_of_ownership(
+        &self,
+        c: &Addr,
+        api: &dyn Api,
+        pte: &WavsProofOfOwnership,
+    ) -> StdResult<()> {
+        for poo in &pte.poos {
+            let ps = hex::decode(&poo.key)?;
             let qs = api.bls12_381_hash_to_g2(HashFunction::Sha256, &ps, &G2)?;
-            let s = hex::decode(&p.poo)?;
+            let s = hex::decode(&poo.poo)?;
             if !api.bls12_381_pairing_equality(&ps, &qs, &G1, &s)? {
                 return Err(StdError::msg("proof of ownership failed"));
             }
@@ -82,38 +72,14 @@ impl WavsOperatorSet {
         Ok(())
     }
 
-    // pub fn verify(&self, api: &dyn Api) -> StdResult<()> {
-    //     // if self.msg.nonce != nonce {
-    //     //     return Err(StdError::msg("incorrect nonce"));
-    //     // }
-    //     let g: Vec<&[u8]> = self
-    //         .keys
-    //         .iter()
-    //         .flat_map(|i| [i.key.as_bytes(), i.poo.as_bytes()].into_iter())
-    //         .collect();
-    //     let agg_g1 = api.bls12_381_aggregate_g1(g[0])?;
-    //     let agg_g2 = api.bls12_381_aggregate_g2(g[1])?;
-    //     if self.msg.aggregate_key.as_bytes() != agg_g1 {
-    //         return Err(StdError::msg("aggregate key does not match"));
-    //     }
-    //     let g2 = &api.bls12_381_hash_to_g2(
-    //         HashFunction::Sha256,
-    //         &Sha256::digest(to_json_binary(&self.msg)?.to_vec()),
-    //         &G2,
-    //     )?;
-    //     if !api.bls12_381_pairing_equality(&G1, &agg_g2, &agg_g1, g2)? {
-    //         return Err(StdError::msg("incorrect signature verification"));
-    //     }
-    //     Ok(())
-    // }
-
-    fn handle_key_rotation() -> StdResult<()> {
+    fn handle_key_rotation(&self) -> StdResult<()> {
         // validate key rotating is in current set & has a valid signature for key rotation
         // update state to replace old pubkey with new pubkey
         // calculate new aggregated pk
         Ok(())
     }
 }
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -139,7 +105,7 @@ mod tests {
     }
 
     // Helper to create a key pair and proof of possession
-    fn create_operator(api: &dyn Api, secret_key: &Fr) -> (WavsOpAuth, G2Affine) {
+    fn create_operator(c: &Addr, api: &dyn Api, secret_key: &Fr) -> (WavsOpAuth, G2Affine) {
         // Generate public key in G1: pk = sk * G1_generator
         let public_key: G1Affine = (G1Affine::generator() * secret_key).into();
         let pk_bytes = serialize_g1(&public_key);
@@ -169,8 +135,9 @@ mod tests {
     #[test]
     fn test_bls12_381_pop() {
         let api = MockApi::default();
+        let c = api.addr_make("head");
         let r = G1;
-        let (operator, _) = create_operator(&api, &Fr::rand(&mut OsRng));
+        let (operator, _) = create_operator(&c, &api, &Fr::rand(&mut OsRng));
         let ps = hex::decode(&operator.key).unwrap();
         let s = hex::decode(&operator.poo).unwrap();
         let qs = api
@@ -185,9 +152,9 @@ mod tests {
     #[test]
     fn test_proof_of_possession_valid_single_key() {
         let api = MockApi::default();
-
+        let c = api.addr_make("head");
         let secret_key = Fr::rand(&mut OsRng);
-        let (wauth, _) = create_operator(&api, &secret_key);
+        let (wauth, _) = create_operator(&c, &api, &secret_key);
 
         let pk_bytes = hex::decode(&wauth.key).unwrap();
         let key = wauth.key.clone();
@@ -213,7 +180,7 @@ mod tests {
         };
 
         // Should pass
-        let result = wavs.proof_of_ownership(&api, &poos);
+        let result = wavs.proof_of_ownership(&c, &api, &poos);
         assert!(
             result.is_ok(),
             "PoP verification should succeed: {:?}",
@@ -224,7 +191,7 @@ mod tests {
     #[test]
     fn test_proof_of_possession_invalid_signature() {
         let api = MockApi::default();
-
+        let c = api.addr_make("head");
         let secret_key = Fr::rand(&mut OsRng);
         let public_key: G1Affine = (G1Affine::generator() * secret_key).into();
         let pk_bytes = serialize_g1(&public_key);
@@ -263,7 +230,7 @@ mod tests {
         };
 
         // Should fail
-        let result = wavs.proof_of_ownership(&api, &poos);
+        let result = wavs.proof_of_ownership(&c, &api, &poos);
         assert!(result.is_err());
         assert!(result
             .unwrap_err()
@@ -274,12 +241,12 @@ mod tests {
     #[test]
     fn test_proof_of_possession_multiple_keys() {
         let api = MockApi::default();
-
+        let c = api.addr_make("head");
         // Generate 3 operators
         let secret_keys: Vec<Fr> = (0..3).map(|_| Fr::rand(&mut OsRng)).collect();
         let operators: Vec<WavsOpAuth> = secret_keys
             .iter()
-            .map(|sk| create_operator(&api, sk).0)
+            .map(|sk| create_operator(&c, &api, sk).0)
             .collect();
 
         // Aggregate public keys
@@ -314,7 +281,7 @@ mod tests {
         };
 
         // All PoPs should be valid
-        let result = wavs.proof_of_ownership(&api, &poos);
+        let result = wavs.proof_of_ownership(&c, &api, &poos);
         assert!(
             result.is_ok(),
             "All PoPs should be valid: {:?}",

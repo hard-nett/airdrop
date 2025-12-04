@@ -30,7 +30,7 @@ use crate::{
             assign_free_advice,
             secp256k1_chip::{Secp256k1Chip, Secp256k1Config},
         },
-        note_commit::{NoteCommitChip, NoteCommitConfig},
+        note_commit::{gadgets, NoteCommitChip, NoteCommitConfig},
     },
     constants::{
         fixed_bases::HeadstashFixedBases as HFixedBases,
@@ -221,7 +221,6 @@ impl plonk::Circuit<pallas::Base> for HeadstashCircuit {
         }
     }
 
-    // Prove epk = esk * G_secp256k1 using CRT representation (3x88-bit limbs)
     fn synthesize(
         &self,
         config: Self::Config,
@@ -229,7 +228,7 @@ impl plonk::Circuit<pallas::Base> for HeadstashCircuit {
     ) -> Result<(), plonk::Error> {
         SinsemillaChip::load(config.sinsemilla_cfg.clone(), &mut layouter)?;
         let ecc_chip = config.ecc_chip();
-        // 1. CONSTRAINT: Foreign-field (secp256k1) key pairing
+        // 1. --------------- Eligible Key Pairing Constraint -------------------------
         let secp256k1_chip = Secp256k1Chip::construct(config.secp256k1.clone());
         let (e_sk_crt, (_e_pk_x_crt, _e_pk_y_crt)) = secp256k1_chip.prove_key_pairing(
             layouter.namespace(|| "secp256k1 key pairing: epk = esk * G"),
@@ -294,7 +293,7 @@ impl plonk::Circuit<pallas::Base> for HeadstashCircuit {
             (psi, rho, nk, cm, fdi, v, nd, recp)
         };
 
-        // 2. Merkle path validity check (GENESIS DISTRIBUTION INCLUSION).
+        // 2. --------------- Headstash Distribution Inclusion Contraint (Sinsemilla HashDomain Merkle Tree) -------------------------
         let root = {
             let path = self
                 .path
@@ -309,7 +308,7 @@ impl plonk::Circuit<pallas::Base> for HeadstashCircuit {
             merkle_inputs.calculate_root(layouter.namespace(|| "Merkle path"), leaf)?
         };
 
-        // 3. Nullifier integrity: constraint that hkdf nullifier is equal to known with public and private inputs
+        // 3. ------------- Nullifier Authenticity Constraint --------------------------------------------------
         let nf = {
             let nf_old = gadget::derive_nullifier(
                 layouter.namespace(|| "nf = DeriveNullifier_nk(rho,psi,m)"),
@@ -324,15 +323,30 @@ impl plonk::Circuit<pallas::Base> for HeadstashCircuit {
             nf_old
         };
 
-        // 4. OPTIMIZATION: Hash all public inputs into one using Poseidon
+        // 4. ------------- Nullifier Authenticity Constraint --------------------------------------------------
+        // g★_d || pk★_d || i2lebsp_{64}(v) || i2lebsp_{255}(rho) || i2lebsp_{255}(psi)
+        let cm_new = gadgets::note_commit(
+            layouter.namespace(|| {
+                "g★_d || pk★_d || i2lebsp_{64}(v) || i2lebsp_{255}(rho) || i2lebsp_{255}(psi)"
+            }),
+            config.sinsemilla_chip(),
+            config.ecc_chip(),
+            config.note_commit_chip(),
+            // g_d_new.inner(),
+            // pk_d_new.inner(),
+            // v_new.clone(),
+            // rho_new,
+            // psi_new,
+            // rcm_new,
+        )?;
+
+        // 5. ------------- OPTIMIZATION: Hash all public inputs into one using Poseidon --------------------------------------------------
         // This reduces on-chain verification gas cost by ~75% (700k → 150k gas)
-        //
         // Instead of exposing (root, nf, cmx) as 3 separate public inputs,
         // we hash them together: H(root, nf, cmx)
         let public_input_hash = {
             // Extract x-coordinate from note commitment point
             let cmx = cm.extract_p().inner().clone();
-
             // Use the gadget function to hash public inputs
             gadget::hash_public_inputs(
                 layouter.namespace(|| "hash public inputs"),

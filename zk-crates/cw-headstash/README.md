@@ -43,3 +43,66 @@ Rotation keys accepts a list of tuples containing the old key to rotate out with
 ## TODO
 
 - cw-json-filter support: filter preinput for tokens for prevention in duplicates
+
+```
+                                      ╭──────────────────────╮
+                                      │  MsgAddAuthenticator │
+                                      │   config arrives     │
+                                      ╰─────────△────────────╯
+                                                │
+                                          ┌─────▼─────┐
+                                          │ on_auth_  │
+                                          │  added()  │
+                                          │ validate  │
+                                          │ + store   │
+                                          └─────△─────┘
+                                                │
+                                                ▼
+                              ┌───────────────────────────────────────┐
+                              │        AUTHENTICATOR NOW ACTIVE       │
+                              └─────────────────△───────────────────────△───────────┘
+                                │                         │
+                ┌───────────────▼───────┐   ┌─────────────▼──────────────┐
+                │   Tx comes in         │   │   MsgRemoveAuthenticator   │
+                │   msgs + signatures   │   └─────────────△──────────────┘
+                └─────────────△─────────┘                 │
+                              │                       ┌─────▼─────┐
+            ┌─────────────────▼─────────────────┐     │ on_auth_  │
+            │       on_auth_request()          │     │ removed() │
+            │      stateless validation          │     │  cleanup  │
+            │   (MUST NOT mutate state)          │     └─────△─────┘
+            └─────────────────△─────────────────┘           │
+                              │                             │
+                  ┌───────────▼───────────┐                 │
+                  │   AUTH PASSES         │                 │
+                  └───────────△───────────┘                 │
+                              │                             │
+            ┌─────────────────▼─────────────────┐           │
+            │          on_auth_track()          │           │
+            │    safe to mutate state now      │           │
+            │   (committed even if exec fails) │           │
+            └─────────────────△─────────────────┘           │
+                              │                             │
+                              ▼                             │
+                  ┌─────────────────────┐                   │
+                  │   Handler Executes   │                   │
+                  │   (normal msg logic) │                   │
+                  └───────────△─────────┘                   │
+                              │                             │
+                  ┌───────────▼───────────┐                 │
+                  │   on_auth_confirm()   │                 │
+                  │ post-exec checks     │                 │
+                  │ can REVERT whole tx  │                 │
+                  └───────────△───────────┘                 │
+                              │                             │
+                  ┌───────────▼───────────┐                 │
+                  │   TX COMMITTED        ◀─────────────────┘
+                  │   (or reverted)   │
+                  └───────────────────────┘
+
+                          ║║║║║║║║║║║║║║║║║║║║║║║║║║║║║║
+                          ║   RIVER OF AUTHENTICATION   ║
+                          ║ process_sudo_auth() routes ║
+                          ║   every arrow above        ║
+                          ╚════════════════════════════╝
+```

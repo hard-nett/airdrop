@@ -47,6 +47,7 @@ fn main() -> anyhow::Result<()> {
         .compile_with_config(
             config,
             &[
+                "./headstash/extendo/v1/extendo.proto",
                 "./headstash/snp/v1/snp.proto",
                 "./headstash/actions/v1/actions.proto",
                 "./headstash/types/v1/types.proto",

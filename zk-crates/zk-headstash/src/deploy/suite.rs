@@ -3,15 +3,18 @@ use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use std::{env, fs};
 
+use cosmwasm_std::CanonicalAddr;
 use pasta_curves::pallas::Base;
 
 use rayon::prelude::*;
 use secp256k1::SecretKey;
 
+use crate::address::RecpAddr;
 use crate::constants::fixed_bases::FIXED_AMOUNTS;
 use crate::constants::sinsemilla::{LEAF_PERSONALIZATION, MERKLE_CRH_PERSONALIZATION};
 use crate::keys::{EligibleSk, NullifierDerivingKey};
 use crate::note::{Note, Rho};
+use crate::spec;
 use crate::value::NoteDenom;
 
 use base64::{engine::general_purpose, Engine as _};
@@ -36,64 +39,65 @@ pub struct TerpHeadstashConfig {}
 pub struct HeadstashSuite {}
 impl HeadstashBitwiseInstance for HeadstashSuite {}
 impl HeadstashLaunchpadInstance for HeadstashSuite {}
-impl HeadstashProofInstance for HeadstashSuite {}
-impl HeadstashInstance for HeadstashSuite {
-    type HsErr = BoxError;
-}
+// impl HeadstashProofInstance for HeadstashSuite {}
+// impl HeadstashInstance for HeadstashSuite {
+//     type HsErr = BoxError;
+// }
 impl HeadstashSuite {
     pub fn new() -> Self {
         Self {}
     }
 }
 
-/// # Trait: `HeadstashProofInstance`
-///
-/// implement expected functions for client side interactions headstashes.
-pub trait HeadstashProofInstance {
-    fn generate_note_proof() -> Result<(), BoxError> {
-        Ok(())
-    }
-    fn verify_note_proof() -> Result<(), BoxError> {
-        Ok(())
-    }
-}
+// /// # Trait: `HeadstashProofInstance`
+// ///
+// /// implement expected functions for client side interactions headstashes.
+// pub trait HeadstashProofInstance {
+//     /// generates a note proof by preparing raw inputs and then calling
+//     fn generate_note_proof() -> Result<(), BoxError> {
+//         Ok(())
+//     }
+//     fn verify_note_proof() -> Result<(), BoxError> {
+//         Ok(())
+//     }
+// }
 
 /// # Trait: `HeadstashInstance`
 ///
 /// implement expected functions for client side interactions headstashes.
-pub trait HeadstashInstance {
-    type HsErr;
+// pub trait HeadstashInstance {
+//     type HsErr;
 
-    /// TODO: wire into network client for headstash market contract state queries
-    fn find_new_headstashes() -> Result<(), Self::HsErr> {
-        todo!()
-    }
+//     /// TODO: wire into network client for headstash market contract state queries
+//     fn find_new_headstashes() -> Result<(), Self::HsErr> {
+//         todo!()
+//     }
 
-    /// TODO: query ipfs file to retrieve headstash config
-    fn list_headstash_info() -> Result<(), Self::HsErr> {
-        todo!()
-    }
+//     /// TODO: query ipfs file to retrieve headstash config
+//     fn list_headstash_info() -> Result<(), Self::HsErr> {
+//         todo!()
+//     }
 
-    /// TODO: read folder and display sum of notes and number of fdi counts
-    fn list_unspent_notes() -> Vec<Note> {
-        todo!()
-    }
+//     /// TODO: read folder and display sum of notes and number of fdi counts
+//     fn list_unspent_notes() -> Vec<Note> {
+//         todo!()
+//     }
 
-    /// TODO: read folder and display notes spent
-    fn list_spent_notes() -> Vec<Note> {
-        todo!()
-    }
+//     /// TODO: read folder and display notes spent
+//     fn list_spent_notes() -> Vec<Note> {
+//         todo!()
+//     }
 
-    /// TODO: select unspent notes used to claim and move note file over into spent,
-    /// specify method of preparing and harvesting (creating proof) for a given note (either wasm-bindgen invocation,locally via cargo script, or external method invoked with a bash script)
-    fn prepare_and_harvest_note() -> Result<(), Self::HsErr> {
-        todo!()
-    }
+//     /// TODO: select unspent notes used to claim and move note file over into spent,
+//     /// specify method of preparing and harvesting (creating proof) for a given note (either wasm-bindgen invocation,locally via cargo script, or external method invoked with a bash script)
+//     fn prepare_and_harvest_note() -> Result<(), Self::HsErr> {
+//         todo!()
+//     }
 
-    fn headstash_action() -> Result<(), Self::HsErr> {
-        todo!()
-    }
-}
+//     fn headstash_action() -> Result<(), Self::HsErr> {
+//         todo!()
+//     }
+// }
 
 pub trait HeadstashBitwiseInstance {
     fn derive_m(
@@ -109,7 +113,7 @@ pub trait HeadstashBitwiseInstance {
             Fp::from_repr(NoteDenom::new_for_proof(nd).as_bytes().try_into().unwrap()).expect("nd"),
             Fp::from_u128(u64::from_le_bytes(self.derive_v(v)) as u128),
         );
-        Ok(crate::spec::prf_pallas_m(fdi, v, nd, esk))
+        Ok(crate::spec::prf_pallas_m(fdi, esk, v, nd))
     }
     fn derive_esk(&self, sk: [u8; 32]) -> [Fp; 3] {
         let skfq =
@@ -155,12 +159,16 @@ pub trait HeadstashBitwiseInstance {
         let limb1 = &bytes[2];
         limb1.add(&limb2.add(&limb3))
     }
-    /// Note‑Denom (nd): blake3 hash of the token denomination string, represented as the sum of the 3 88-bit pallas curve point representation of private key.
+    /// Note‑Denom (nd): blake3 hash of the token, 1 bit cleared.
     fn derive_nd(&self, raw_nd: &str) -> [u8; 32] {
         NoteDenom::new_for_proof(raw_nd)
             .as_bytes()
             .try_into()
             .expect("NoteDenom is always 32 bytes")
+    }
+    /// Recipient (recp): posiedon hash of 2x16byte limbs
+    fn derive_recp(&self, addr: CanonicalAddr) -> pallas::Base {
+        spec::recp_to_fp(&RecpAddr::try_from(addr).unwrap())
     }
 
     fn extend_with_base_field_bits(bits: &mut Vec<bool>, a: pallas::Base) {
@@ -749,3 +757,5 @@ mod test {
     //     Ok(())
     // }
 }
+
+

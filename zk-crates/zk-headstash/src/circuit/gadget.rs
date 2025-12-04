@@ -8,6 +8,7 @@ use halo2_gadgets::poseidon::{
     primitives::{self as poseidon},
     Hash as PoseidonHash, PoseidonSpongeInstructions, Pow5Chip as PoseidonChip,
 };
+use halo2_gadgets::sinsemilla::chip::SinsemillaChip;
 use halo2_gadgets::sinsemilla::merkle::chip::MerkleChip;
 use pasta_curves::pallas;
 
@@ -16,6 +17,7 @@ use halo2_proofs::{
     plonk::{self, Advice, Assigned, Column},
 };
 
+use crate::circuit::note_commit::NoteCommitChip;
 use crate::constants::fixed_bases::{HeadstashFixedBases as HFixedBases, NullifierK};
 use crate::constants::sinsemilla::HeadstashCommitDomains as HCommitDomains;
 use crate::constants::HeadstashHashDomains as HashDomain;
@@ -41,6 +43,14 @@ impl super::HeadstashConfig {
     }
     pub(super) fn merkle_chip(&self) -> MerkleChip<HashDomain, HCommitDomains, HFixedBases> {
         MerkleChip::construct(self.merkle_cfg.clone())
+    }
+    pub(super) fn sinsemilla_chip(
+        &self,
+    ) -> SinsemillaChip<HashDomain, HCommitDomains, HFixedBases> {
+        SinsemillaChip::construct(self.sinsemilla_cfg.clone())
+    }
+    pub(super) fn note_commit_chip(&self) -> NoteCommitChip {
+        NoteCommitChip::construct(self.nc_cfg.clone())
     }
 }
 

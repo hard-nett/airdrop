@@ -65,7 +65,7 @@ ___
 We have 3 main types of keys involved in this process.
 
 1. **Eligible Keys:**  *the keys that has a public allocation set for them, and is what we must keep any signature or hash derived from private, in order to retain privacy.*
-2. **Redemption Keys:** *the keys that will be recieving the public allocations claimed by the eligible keys*
+2. **Recipient Keys:** *the keys that will be recieving the public allocations claimed by the eligible keys*
 3. **HKDF keys:** *the keys that are deterministically derived from private inputs of a circuit*
 
 > HKDF keys are specifically used to make our proof of ownership step effecient & feasable in-circuit.
@@ -73,7 +73,7 @@ We have 3 main types of keys involved in this process.
 | # | Key type         | Curve used | Primary crate | Public / Private usage | Typical Rust type (example) | Key‑derivation notes |
 |---|------------------|------------|--------------|------------------------|-----------------------------|----------------------|
 | 1 | **Eligible Key** | `secp256k1`  | `k256` (or `secp256k1`) | Public key is **published** in the allocation; **private key + any signatures / hashes must stay secret** to preserve privacy. | `k256::ecdsa::SigningKey` / `k256::ecdsa::VerifyingKey` | - |
-| 2 | **Redemption Key** | secp256k1 | `k256` (or `secp256k1`) | Public key is **the recp** of the claimed allocation; private key is used only to sign the redemption proof. | Same as Eligible (`SigningKey`/`VerifyingKey`) | May be pre‑generated or created on‑the‑fly; no HKDF involved. |
+| 2 | **Recipient Key** | secp256k1 |  `cosmwasm_std` | Public key is **the recp** key the claimed allocation. This is the raw bech32 bytes of an account for the chain we are claiming a headstash on.| May be pre‑generated or created on‑the‑fly; no HKDF involved. | In-circuit we constrain a posiedon hash of a raw canonical bech32 addr represented in 2x16 byte limbs |
 | 3 | **HKDF‑derived Key** |  `pallas` | `pasta-curves` | Private key **only**; the corresponding public key is *not* exposed – it is used inside the circuit for proof‑of‑ownership. |   | Deterministically derived via posiedon based HKDF from circuit‑private inputs (e.g., a seed, a note commitment, a nullifier). The derived scalar is mapped to a pallas point using the crate’s `generator` |
 
 > NOTE: zcash orchard protocol implements key derivation for viewing, authorization, and privacy retention purposes. Our scope does not require the use of viewing or authorization keys, as the end results of tokens claimed will be public. A large portion of the modifications from the orchard protocol altering how note-commitments & nullifiers are derived, as they rely heavily on the use of the key structure used by zcash orchard protocol.
@@ -120,6 +120,7 @@ This lets the circuit use the known curve equation & generator points to constra
 >     - `v`: fully padded `u64` value
 >     - `fdi`: fully padded `u64` value
 >     - `nd`: Blake3 Hash of token denomination, with top-most byte cleared to fit as Pallas field element.
+>     - `recp`: Posiedon Hash of the recipients canonical bech32 addr in 2x16 byte chunks.
 >     - `esk`: the Posiedon Hash of `esk`, where `esk` is a 3x88 bit pallas base field elemements representing the esk. *note this is derived in circuit and never exposed in our library*
 >
 > 3. **derive note-commitment**: deriving `cm` requires `recp`, `fdi`, `nd`,`v`,`rho`, `esk`,`psi`,and blinded to r with`rcm`.\
@@ -309,7 +310,6 @@ A leaf is computed using the sinsemilla hashing function with the following inpu
 \begin{cases}
 \mathsf{v}\in \mathbb{F}_p      &\text{(fully padded u64 of value being spent in note)}\\[2pt]
 \mathsf{H(nd\_{raw})}\in \mathbb{F}_p      &\text{(Posiedon Hash of notes token denomination }nd\text{)}\\[2pt]
-% \mathsf{recp}^{\ast}\in \mathbb{F}_p      &\text{(Posiedon Hash of recipient of notes token }nd\text{)}\\[2pt]
 \end{cases}
 \end{array}
 ```

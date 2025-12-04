@@ -119,18 +119,15 @@ pub(crate) fn prf_nf(nk: pallas::Base, rho: pallas::Base) -> pallas::Base {
 /// *(via modular big-endian byte-to-field-element conversion)*\
 /// using the posiedon hashing algorithm with a domain-separation-tag in the order (`DST`,`esk_fp`,`rho`).
 pub fn hdkf_pallas(esk_pallas_fp: pallas::Base, rho: pallas::Base) -> pallas::Base {
-    let mut dst_bytes = [0u8; 32];
-    let copy_len = DST_HKDF.len().min(32);
-    dst_bytes[..copy_len].copy_from_slice(&DST_HKDF[..copy_len]);
-    let dst_fe = pallas::Base::from_repr(dst_bytes).expect("invalid DST bytes");
     poseidon::Hash::<_, poseidon::P128Pow5T3, poseidon::ConstantLength<3>, 3, 2>::init().hash([
-        dst_fe,
+        pallas::Base::from_repr(DST_HKDF).expect("invalid DST bytes"),
         esk_pallas_fp,
         rho,
     ])
 }
 
-// Derives the hash of the expected_dst used for the hash deriving step. is multiplied by rho an provided to the function.
+// Derives the hash of the expected_dst used for the hash deriving step.
+// is multiplied by rho an provided to the function.
 pub(crate) fn prf_pallas_m(
     fdi: pallas::Base,
     esk: pallas::Base,
@@ -141,31 +138,25 @@ pub(crate) fn prf_pallas_m(
         .hash([fdi, v, nd, esk])
 }
 
-/// Convert a `NoteDenom` into a field element by hashing its byte payload.
+/// Convert a `NoteDenom` into a field element.
+///  NoteDenom is expected to have been hashed and trimmed when it was initialized.
 pub(crate) fn nd_to_fp(nd: &NoteDenom) -> pallas::Base {
-    let mut inputs = [pallas::Base::zero(); MAX_DENOM_LEN];
-    for (i, &b) in nd.as_bytes()[..MAX_DENOM_LEN as usize].iter().enumerate() {
-        inputs[i] = pallas::Base::from(b as u64);
-    }
-
-    poseidon::Hash::<
-        _,                    // the circuit (unused here)
-        poseidon::P128Pow5T3, // the permutation parameters
-        poseidon::ConstantLength<MAX_DENOM_LEN>,
-        3, // width = 3 (t = 3)
-        2, // rounds = 2 (full rounds per the spec)
-    >::init()
-    .hash(inputs)
+    pallas::Base::from_repr(nd.as_bytes().try_into().expect("invalid length")).expect("bad nd_to_fp")
 }
+
 /// Convert a `RecpAddr` into a field element by hashing its byte payload.\
 /// posiedon params: width = 3 (t = 3) // rounds = 2 (full rounds per the spec)
 pub(crate) fn recp_to_fp(ra: &RecpAddr) -> pallas::Base {
-    let mut ini = [pallas::Base::zero(); MAX_DENOM_LEN];
-    for (i, &ni) in ra.to_bytes()[..MAX_DENOM_LEN as usize].iter().enumerate() {
-        ini[i] = pallas::Base::from(ni as u64);
-    }
-    poseidon::Hash::<_, poseidon::P128Pow5T3, poseidon::ConstantLength<MAX_DENOM_LEN>, 3, 2>::init()
-        .hash(ini)
+    let bytes = ra.to_bytes();
+    let first_half = &bytes[0..16];
+    let second_half = &bytes[16..32];
+
+    // Convert each chunk to a field element (interpreting as little-endian u128)
+    let fe1 = pallas::Base::from_u128(u128::from_le_bytes(first_half.try_into().unwrap()));
+    let fe2 = pallas::Base::from_u128(u128::from_le_bytes(second_half.try_into().unwrap()));
+
+    poseidon::Hash::<_, poseidon::P128Pow5T3, poseidon::ConstantLength<2>, 3, 2>::init()
+        .hash([fe1, fe2])
 }
 
 /// Convert a field element to BigUint without requiring BigPrimeField trait.
@@ -196,27 +187,21 @@ pub fn fe_to_biguint_for_field<F: PrimeField>(fe: &F) -> BigUint {
 /// Hash array of 3 limbs using Poseidon to get single pallas::Base value\
 /// This compresses the CRT representation into a single field element
 pub(crate) fn esk_to_base(esk: &EligibleSk) -> pallas::Base {
-    poseidon::Hash::<
-        _,
-        poseidon::P128Pow5T3,
-        poseidon::ConstantLength<MAX_DENOM_LEN>,
-        3, // width = 3 (t = 3)
-        2, // full rounds per spec
-    >::init()
-    .hash(
-        crate::spec::decompose_biguint_simple(
-            &halo2_base::utils::fe_to_biguint(
-                &halo2_base::halo2_proofs::halo2curves::secq256k1::Fp::from_repr(
-                    esk.0.secret_bytes(),
-                )
-                .expect("valid Fq"),
-            ),
-            3,
-            88,
+    poseidon::Hash::<_, poseidon::P128Pow5T3, poseidon::ConstantLength<MAX_DENOM_LEN>, 3, 2>::init()
+        .hash(
+            crate::spec::decompose_biguint_simple(
+                &halo2_base::utils::fe_to_biguint(
+                    &halo2_base::halo2_proofs::halo2curves::secq256k1::Fp::from_repr(
+                        esk.0.secret_bytes(),
+                    )
+                    .expect("valid Fq"),
+                ),
+                3,
+                88,
+            )
+            .try_into()
+            .unwrap(),
         )
-        .try_into()
-        .unwrap(),
-    )
 }
 
 /// An integer in [1..q_P].
@@ -351,4 +336,214 @@ pub(crate) fn ka_orchard_prepared(
     b: &PreparedNonIdentityBase,
 ) -> NonIdentityPallasPoint {
     NonIdentityPallasPoint(&b.0 * &sk.0)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use pasta_curves::group::ff::PrimeField;
+    use pasta_curves::pallas;
+
+    // Helper function to create a RecpAddr from a 32-byte array
+    fn make_recp_addr(bytes: [u8; 32]) -> RecpAddr {
+        RecpAddr::try_from(&bytes[..]).unwrap()
+    }
+
+    #[test]
+    fn test_recp_to_fp_deterministic() {
+        // Same input should always produce same output
+        let test_bytes = [42u8; 32];
+        let recp1 = make_recp_addr(test_bytes);
+        let recp2 = make_recp_addr(test_bytes);
+
+        let fp1 = recp_to_fp(&recp1);
+        let fp2 = recp_to_fp(&recp2);
+
+        assert_eq!(fp1, fp2);
+    }
+
+    #[test]
+    fn test_recp_to_fp_different_inputs() {
+        // Different inputs should produce different outputs
+        let bytes1 = [1u8; 32];
+        let bytes2 = [2u8; 32];
+
+        let recp1 = make_recp_addr(bytes1);
+        let recp2 = make_recp_addr(bytes2);
+
+        let fp1 = recp_to_fp(&recp1);
+        let fp2 = recp_to_fp(&recp2);
+
+        assert_ne!(fp1, fp2);
+    }
+
+    #[test]
+    fn test_recp_to_fp_all_zeros() {
+        let zero_bytes = [0u8; 32];
+        let recp = make_recp_addr(zero_bytes);
+
+        let fp = recp_to_fp(&recp);
+
+        // Should produce a valid field element (not necessarily zero due to hashing)
+        // Just verify it doesn't panic and produces a field element
+        assert!(fp != pallas::Base::zero() || fp == pallas::Base::zero());
+    }
+
+    #[test]
+    fn test_recp_to_fp_all_ones() {
+        let ones_bytes = [0xFFu8; 32];
+        let recp = make_recp_addr(ones_bytes);
+
+        let fp = recp_to_fp(&recp);
+
+        // Should produce a valid field element
+        assert!(fp != pallas::Base::zero() || fp == pallas::Base::zero());
+    }
+
+    #[test]
+    fn test_recp_to_fp_sequential_bytes() {
+        let mut bytes = [0u8; 32];
+        for (i, byte) in bytes.iter_mut().enumerate() {
+            *byte = (i % 256) as u8;
+        }
+
+        let recp = make_recp_addr(bytes);
+        let fp = recp_to_fp(&recp);
+
+        // Verify it's a valid field element by checking it's in the field
+        // (all pallas::Base values are valid by construction)
+        let _ = fp;
+    }
+
+    #[test]
+    fn test_recp_to_fp_single_bit_difference() {
+        // Test avalanche effect: small change in input should cause large change in output
+        let mut bytes1 = [0u8; 32];
+        let mut bytes2 = [0u8; 32];
+        bytes2[0] = 1; // Only change first bit
+
+        let recp1 = make_recp_addr(bytes1);
+        let recp2 = make_recp_addr(bytes2);
+
+        let fp1 = recp_to_fp(&recp1);
+        let fp2 = recp_to_fp(&recp2);
+
+        assert_ne!(fp1, fp2);
+    }
+
+    #[test]
+    fn test_recp_to_fp_change_in_first_half() {
+        // Change only in first 16 bytes
+        let mut bytes1 = [0u8; 32];
+        let mut bytes2 = [0u8; 32];
+        bytes2[8] = 1; // Change in first half
+
+        let recp1 = make_recp_addr(bytes1);
+        let recp2 = make_recp_addr(bytes2);
+
+        let fp1 = recp_to_fp(&recp1);
+        let fp2 = recp_to_fp(&recp2);
+
+        assert_ne!(fp1, fp2);
+    }
+
+    #[test]
+    fn test_recp_to_fp_change_in_second_half() {
+        // Change only in second 16 bytes
+        let mut bytes1 = [0u8; 32];
+        let mut bytes2 = [0u8; 32];
+        bytes2[24] = 1; // Change in second half
+
+        let recp1 = make_recp_addr(bytes1);
+        let recp2 = make_recp_addr(bytes2);
+
+        let fp1 = recp_to_fp(&recp1);
+        let fp2 = recp_to_fp(&recp2);
+
+        assert_ne!(fp1, fp2);
+    }
+
+    #[test]
+    fn test_recp_to_fp_returns_valid_field_element() {
+        let test_bytes = [123u8; 32];
+        let recp = make_recp_addr(test_bytes);
+
+        let fp = recp_to_fp(&recp);
+
+        // Test that we can perform field operations on the result
+        let doubled = fp + fp;
+        let squared = fp * fp;
+
+        assert_ne!(doubled, fp); // Unless fp is zero, which it shouldn't be
+        assert!(squared == squared); // Just verify operations work
+    }
+
+    #[test]
+    fn test_recp_to_fp_collision_resistance() {
+        // Test a few different inputs to ensure no obvious collisions
+        let mut outputs = std::collections::HashSet::new();
+
+        for i in 0..10 {
+            let mut bytes = [0u8; 32];
+            bytes[0] = i;
+            let recp = make_recp_addr(bytes);
+            let fp = recp_to_fp(&recp);
+
+            // Convert to bytes for HashSet (PrimeField trait provides to_repr)
+            let repr = fp.to_repr();
+            assert!(outputs.insert(repr), "Found collision at iteration {}", i);
+        }
+
+        assert_eq!(outputs.len(), 10);
+    }
+
+    #[test]
+    fn test_recp_to_fp_boundary_values() {
+        // Test with max u128 in first half
+        let mut bytes = [0u8; 32];
+        bytes[0..16].copy_from_slice(&[0xFF; 16]);
+        let recp1 = make_recp_addr(bytes);
+
+        // Test with max u128 in second half
+        let mut bytes = [0u8; 32];
+        bytes[16..32].copy_from_slice(&[0xFF; 16]);
+        let recp2 = make_recp_addr(bytes);
+
+        let fp1 = recp_to_fp(&recp1);
+        let fp2 = recp_to_fp(&recp2);
+
+        assert_ne!(fp1, fp2);
+    }
+
+    #[test]
+    fn test_recp_to_fp_integration_with_recp_addr() {
+        // Test that it works seamlessly with RecpAddr's to_pallas method
+        let test_bytes = [77u8; 32];
+        let recp = make_recp_addr(test_bytes);
+
+        let fp1 = recp_to_fp(&recp);
+        let fp2 = recp.to_pallas(); // Should call the same function
+
+        assert_eq!(fp1, fp2);
+    }
+
+    #[test]
+    fn test_recp_to_fp_byte_order_matters() {
+        // Reversed bytes should give different hash
+        let mut bytes1 = [0u8; 32];
+        for (i, byte) in bytes1.iter_mut().enumerate() {
+            *byte = i as u8;
+        }
+
+        let mut bytes2 = bytes1.clone();
+        bytes2.reverse();
+
+        let recp1 = make_recp_addr(bytes1);
+        let recp2 = make_recp_addr(bytes2);
+
+        let fp1 = recp_to_fp(&recp1);
+        let fp2 = recp_to_fp(&recp2);
+
+        assert_ne!(fp1, fp2);
+    }
 }

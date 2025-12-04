@@ -1,547 +1,772 @@
 # Snap-n-Pull: MetaMask Snap Plugin for Headstash Interaction
 
-"A good UX does not require the user to learn anything they do not already know." Powered by this principle, we can make use of a metamask snap plugin to power the hkdf & note management steps:
-
-- download/import/store pubkeys eligible notes from headstash registry: download entire set once, discard non-related notes
-- free will derived entropy generation
-- perform hkdf + nullifier generation
-- broadcast to sc/verifiable service mesh/smart-contract
-
-Wires in our verifiable wasm binaries to a metamask snap plugin. THis lets us pack up our functions to generate note nullifiers and return them with an encrypted spent note.
-
-```
-
-- keep things flexible and organized in grids that react to window format
-
-
-- use authenticators: iframe window/prewired application extensions/windows for authenticator support:
-  - smart-account powered tx signing via non_crititical_extension preparation and injection ( x/402 authentication,webauthn / passkey / bls12-381 / etc)
-
-- user actions should have hooks: since we expect to have stateful things happening when user clicks on instance (like stateful queries spefici to results of actions chosen), we can wire in query hooks to the client middleware for retrival of data related to spefic instance, and also use caching for storage of this data and extremely effecieve applicatoin
-
-- main view shows verified deployed contract instances, search bar for manual contract input and saving to localstorage. once contract instance is selected query for retrieving active market objects to display in list occurs, render infusion instances for users to select to interact with
-- tab for displaying registered authenticators for an account (indexerquery,chainfallback)
-- tab for registering authenticator (via known ones, or manually via known tx steps take (instantiate+register || upload+instanitate+register))
-- tab for using authenticator: (calling smart contract state genericlly)
-# human notes
-- queries headstash registry for list of all active headstsh (indexer priority chain contract callback)
-- Current headstash: table grid wired into queries of all current headstashes
-- Create headstash: tab with form to register new headstash
-- Interacting with headstash: viewed when selected a headstash, dedicated information regarding global headtash metrics, specific to wallet connected as well, actions for interacting with headsatsh
-- bluetooth / 2fa / passkey / auth app support
-- penumbra wallet view and client sdk implementati9on
-```
-
-**Location**: `zk-crates/snap-n-pull/`
-
-IMPORTANT: this defines the previous existing specification for interacing with ZCASH, so keep this in context when reading theis specification as we are going to replace these with functions,logic and definitions to be specific to
+**Version:** 2.0
+**Status:** Production Implementation
+**Last Updated:** 2025-01-20
 
 ## Overview
 
-The `snap-n-pull` crate is a WebAssembly-based MetaMask Snap plugin that enables secure, client-side interaction with Headstash instances. It provides key management, cryptographic operations, transaction building, and wallet synchronization capabilities within the MetaMask browser extension environment.
+The `snap-n-pull` MetaMask Snap plugin provides secure, client-side nullifier generation for Headstash airdrop claims. It enables users to prove ownership of eligible addresses and claim allocations without revealing their private keys or creating on-chain associations between eligible and recipient addresses.
 
-**Key Characteristics**:
+**Core Principle:** "A good UX does not require the user to learn anything they do not already know."
 
-- **WASM-first**: Compiled to WebAssembly for browser execution
-- **Security-focused**: Key operations isolated within MetaMask's secure snap environment
-- **Feature-gated**: Modular architecture with optional components
-- **Parallel-capable**: Leverages rayon for concurrent operations in WASM
+### Key Capabilities
 
----◊
+✅ **Nullifier Generation** - Generate note nullifiers from private keys without revealing them
+✅ **Note Commitment** - Create cryptographic commitments to notes
+✅ **Public Key Derivation** - Derive public keys for verification
+✅ **Zero Private Key Storage** - Private keys are NEVER stored, only used transiently
+✅ **MetaMask Integration** - Seamless integration with MetaMask's secure environment
+✅ **WASM-Powered** - Rust cryptographic core compiled to WebAssembly
+
+---
 
 ## Architecture
 
-### Crate Type
+### High-Level Flow
 
-```toml
-crate-type = ["cdylib", "rlib"]
+```
+┌─────────────────────────────────────────────────────────────┐
+│                    dApp (Frontend)                           │
+│  - User selects headstash to claim                          │
+│  - Provides public note inputs (recp, nd, v, fdi, rho, rseed)│
+│  - Calls snap via window.ethereum.request()                 │
+└───────────────────────────────┬─────────────────────────────┘
+                                 │
+                                 │ JSON-RPC: generateNullifier
+                                 │
+                                 ▼
+┌─────────────────────────────────────────────────────────────┐
+│                MetaMask Snap Plugin (Isolated)               │
+│                                                               │
+│  ┌───────────────────────────────────────────────────────┐  │
+│  │ index.tsx (RPC Handler)                               │  │
+│  │  - Validates requests                                 │  │
+│  │  - Initializes WASM                                   │  │
+│  │  - Routes to gn() handler                             │  │
+│  └────────────────────────┬──────────────────────────────┘  │
+│                            │                                 │
+│                            ▼                                 │
+│  ┌───────────────────────────────────────────────────────┐  │
+│  │ rpc/gn.tsx (Generate Nullifier)                       │  │
+│  │  1. Show user confirmation dialog                     │  │
+│  │  2. Request user approval                             │  │
+│  │  3. Call getSk() to retrieve private key              │  │
+│  └────────────────────────┬──────────────────────────────┘  │
+│                            │                                 │
+│                            ▼                                 │
+│             ┌──────────────────────────────┐                 │
+│             │ getSk() (BIP-32 Derivation)  │                 │
+│             │  - snap_getBip32Entropy()    │                 │
+│             │  - Path: m/44'/133'/0'/0'/0' │                 │
+│             │  - Returns: 32-byte esk      │                 │
+│             └──────────┬───────────────────┘                 │
+│                        │                                     │
+│                        │ esk (TRANSIENT - never stored!)     │
+│                        │                                     │
+│             ┌──────────▼───────────────────┐                 │
+│             │ getPk(esk)                   │                 │
+│             │  - Derives secp256k1 pubkey  │                 │
+│             │  - Returns: 33-byte pk (hex) │                 │
+│             └──────────┬───────────────────┘                 │
+│                        │                                     │
+│                        │ pk (PUBLIC - safe to reveal)        │
+│                        │                                     │
+│             ┌──────────▼────────────────────────────────┐    │
+│             │ generateNullifier(wasm, esk, noteInputs)  │    │
+│             │                                           │    │
+│             │ Sequential Derivation (esk is root):     │    │
+│             │  1. nk = HKDF(esk, rho)                   │    │
+│             │  2. nullifier = PRF_nf(nk, rho, psi)      │    │
+│             │  3. commitment = NoteCommit(esk, ...)     │    │
+│             └──────────┬────────────────────────────────┘    │
+│                        │                                     │
+│                        ▼                                     │
+│             ┌────────────────────────────┐                   │
+│             │ WASM Module (snap-n-pull)  │                   │
+│             │  - Rust cryptographic core │                   │
+│             │  - HeadstashWallet         │                   │
+│             │  - generate_note_data()    │                   │
+│             └────────────┬───────────────┘                   │
+│                          │                                   │
+│                          ▼                                   │
+│                   ┌──────────────┐                           │
+│                   │ esk.fill(0)  │                           │
+│                   │ Clear secret │                           │
+│                   │ from memory  │                           │
+│                   └──────────────┘                           │
+└───────────────────────────────┬─────────────────────────────┘
+                                 │
+                                 │ Returns: { nullifier, commitment, pk }
+                                 │
+                                 ▼
+┌─────────────────────────────────────────────────────────────┐
+│                    dApp (Frontend)                           │
+│  - Receives nullifier + commitment + pk                      │
+│  - Generates ZK proof (separate step)                        │
+│  - Broadcasts claim transaction to chain                     │
+└─────────────────────────────────────────────────────────────┘
 ```
 
-- **cdylib**: For WASM binary generation via wasm-pack
-- **rlib**: For use as Rust library dependency
-
-### Feature Flags
-
-| Feature | Description | Status |
-|---------|-------------|--------|
-| `default` | Enables all features (wasm, common, keys, req, wallet) | Active |
-| `wasm` | Enables wasm-bindgen for JavaScript interop | Active |
-| `common` | Error types and network configuration | Active |
-| `keys` | Cryptographic key operations | Active |
-| `req` | Transaction request handling | Active |
-| `wallet` | Full wallet functionality | Active |
+**Critical Security Note:** The secret key (esk) is the root of all cryptographic operations. It must be obtained first from MetaMask's BIP-32 derivation, then used to derive both the nullifier and commitment sequentially. The key is never stored and is cleared from memory immediately after use.
 
 ---
 
-## Module Structure
+## Core Components
 
-### Core Modules
+### 1. MetaMask Snap Package (`zk-packages/snap`)
+
+**Location:** `zk-packages/snap/src/`
+
+#### File Structure
 
 ```
-snap-n-pull/
-├── src/
-│   ├── lib.rs                    # Root module, feature gates, Network enum
-│   ├── keys/
-│   │   ├── mod.rs                # Key management module exports
-│   │   ├── keys.rs               # UnifiedSpendingKey, UFVK, SeedFingerprint
-│   │   └── pczt_sign.rs          # PCZT signing operations
-│   ├── req/
-│   │   ├── mod.rs                # Request module exports
-│   │   ├── requests.rs           # TransactionRequest, PaymentRequest (commented)
-│   │   └── error.rs              # SnapReqErr error type
-│   └── wallet/
-│       ├── mod.rs                # Wallet module root
-│       ├── init.rs               # Wallet initialization utilities
-│       ├── wallet.rs             # Core Wallet struct and implementation
-│       └── bindgen/
-│           ├── mod.rs            # WASM bindgen exports
-│           ├── wallet.rs         # WebWallet WASM bindings
-│           └── proposal.rs       # Proposal WASM bindings
+zk-packages/snap/src/
+├── index.tsx                 # RPC entry point, WASM initialization
+├── rpc/
+│   └── gn.tsx                # generateNullifier RPC handler
+├── utils/
+│   ├── getSk.tsx             # BIP-32 key retrieval from MetaMask
+│   ├── getPk.tsx             # Public key derivation
+│   ├── nullifier.tsx         # Nullifier generation via WASM
+│   └── initialiseWasm.ts     # WASM module initialization
+└── package.json              # Snap manifest
 ```
 
----
+#### Key Functions
 
-## Core Types and Structures
+**`index.tsx` - RPC Router**
 
-### Network Configuration
+```typescript
+export const onRpcRequest: OnRpcRequestHandler = async ({ request, origin }) => {
+  const wasmModule = await ensureWasmInitialized();
 
-**Location**: `lib.rs:27`
+  switch (request.method) {
+    case 'generateNullifier': {
+      // Validate params
+      const params = request.params as GenerateNullifierParams;
+      // Generate nullifier
+      return await gn(wasmModule, params, origin);
+    }
+    default:
+      throw new Error(`Method not found: ${request.method}`);
+  }
+};
+```
 
-```rust
-pub enum Network {
-    MainNetwork,
-    TestNetwork,
+**`rpc/gn.tsx` - Nullifier Generation Handler**
+
+```typescript
+export async function gn(
+  wasm: InitOutput,
+  params: GenerateNullifierParams,
+  origin: string,
+): Promise<GenerateNullifierResponse> {
+  // 1. Show confirmation dialog
+  const approved = await snap.request({ method: 'snap_dialog', ... });
+  if (!approved) throw new Error('User rejected');
+
+  // 2. Retrieve secret key (TRANSIENT)
+  const sk = await getSk();
+
+  // 3. Derive public key
+  const pk = await getPk(sk);
+
+  // 4. Generate nullifier and commitment
+  const nullifierData = await generateNullifier(wasm, sk, noteInputs);
+
+  // 5. Clear secret key from memory
+  sk.fill(0);
+
+  // 6. Return only public data
+  return {
+    nullifier: nullifierData.nullifier,
+    commitment: nullifierData.commitment,
+    pk, // Public key - safe to reveal
+  };
 }
 ```
 
-**Purpose**: Network-agnostic operations supporting both mainnet and testnet environments
+**`utils/getSk.tsx` - Secret Key Retrieval**
 
-**Features**:
+Uses `snap_getBip32Entropy` as per [MetaMask Snaps API Reference](https://docs.metamask.io/snaps/reference/snaps-api/#snap_getbip32entropy):
 
-- Implements `FromStr` for parsing from strings ("main", "test")
-- Serializable via Serde for cross-boundary communication
-- Default: `MainNetwork`
+```typescript
+export async function getSk(): Promise<Uint8Array> {
+  // Request BIP-32 entropy from MetaMask
+  const entropyResult = await snap.request({
+    method: 'snap_getBip32Entropy',
+    params: {
+      path: ['m', "44'", "133'", "0'", "0'", "0'"],
+      curve: 'secp256k1',
+    },
+  });
 
----
+  // Convert hex to bytes
+  const privateKeyBytes = new Uint8Array(32);
+  for (let i = 0; i < 32; i++) {
+    privateKeyBytes[i] = parseInt(entropyResult.privateKey.substr(i * 2, 2), 16);
+  }
 
-### Error Handling
-
-**Location**: `lib.rs:75`
-
-```rust
-pub enum Error {
-    InvalidNetwork(String),
-    SnapReqError(SnapReqErr),
-    Js(wasm_bindgen::JsValue),
-    KeyDecoding(String),
-    PcztSign(String),
-    SeedFingerprint,
+  return privateKeyBytes;
 }
 ```
 
-**Purpose**: Unified error type for all snap-n-pull operations
+**Path Explanation:** `m/44'/133'/0'/0'/0'`
+- `44'` - BIP-44 purpose
+- `133'` - Zcash coin type (placeholder for Terp Network)
+- `0'` - Account index
+- `0'` - Change index
+- `0'` - Address index
 
-**Error Categories**:
+**`utils/getPk.tsx` - Public Key Derivation**
 
-- Network configuration errors
-- Request processing errors
-- JavaScript interop errors
-- Cryptographic key errors
-- PCZT signing errors
+```typescript
+export async function getPk(sk: Uint8Array): Promise<string> {
+  const { secp256k1 } = await import('@noble/curves/secp256k1');
+  const publicKey = secp256k1.getPublicKey(sk, true); // compressed
+  return Buffer.from(publicKey).toString('hex');
+}
 
----
+export async function pkToAddress(pk: string): Promise<string> {
+  const { secp256k1 } = await import('@noble/curves/secp256k1');
+  const { keccak_256 } = await import('@noble/hashes/sha3');
 
-## Module Specifications
+  // Get uncompressed public key
+  const pkBytes = Buffer.from(pk, 'hex');
+  const uncompressed = secp256k1.ProjectivePoint.fromHex(pkBytes).toRawBytes(false);
 
-### 1. Keys Module
+  // Keccak256 hash (Ethereum-style)
+  const hash = keccak_256(uncompressed.slice(1));
 
-**Purpose**: Cryptographic key management, derivation, and PCZT signing within secure snap environment
-
-#### Key Types (Currently Commented Out)
-
-| Type | Purpose | Status | Location |
-|------|---------|--------|----------|
-| `SeedFingerprint` | Blake2b hash of seed for key derivation tracking | TODO | keys.rs:17 |
-| `UnifiedSpendingKey` | ZIP-32 spending key for account operations | TODO | keys.rs:83 |
-| `UnifiedFullViewingKey` | View-only key for balance queries | TODO | keys.rs:135 |
-| `ProofGenerationKey` | Sapling proof generation key | TODO | keys.rs:63 |
-
-#### Functions
-
-| Function | Signature | Purpose | Status | Location |
-|----------|-----------|---------|--------|----------|
-| `generate_seed_phrase()` | `() -> String` | Generate 24-word BIP39 mnemonic | TODO | keys.rs:178 |
-| `pczt_sign()` | `(network: &str, pczt: Pczt, usk: USK, seed_fp: SeedFingerprint) -> Result<Pczt, Error>` | Sign PCZT with spending key | TODO | pczt_sign.rs:23 |
-| `pczt_sign_inner()` | See impl | Internal PCZT signing logic for Orchard/Sapling/Transparent | TODO | pczt_sign.rs:39 |
-
-**PCZT Signing Flow**:
-
-1. Verify PCZT structure and extract spends
-2. Match spends to account indices via seed fingerprint
-3. Derive appropriate keys per protocol (Orchard/Sapling/Transparent)
-4. Sign each spend with corresponding key
-5. Return fully signed PCZT
-
----
-
-### 2. Request Module
-
-**Purpose**: ZIP-321 payment request handling and transaction construction
-
-#### Types (Currently Commented Out)
-
-| Type | Purpose | Status | Location |
-|------|---------|--------|----------|
-| `TransactionRequest` | ZIP-321 compliant transaction request | TODO | requests.rs:13 |
-| `PaymentRequest` | Individual payment within transaction request | TODO | requests.rs:70 |
-
-#### TransactionRequest Methods
-
-| Method | Purpose | Status | Location |
-|--------|---------|--------|----------|
-| `new(payments: Vec<PaymentRequest>)` | Construct from payment list | TODO | requests.rs:19 |
-| `from_uri(uri: &str)` | Parse from "zcash:" URI | TODO | requests.rs:58 |
-| `to_uri()` | Encode as URI string | TODO | requests.rs:63 |
-| `total()` | Sum payment values | TODO | requests.rs:42 |
-| `payment_requests()` | Get payment list | TODO | requests.rs:32 |
-
-#### PaymentRequest Methods
-
-| Method | Purpose | Status | Location |
-|--------|---------|--------|----------|
-| `new(...)` | Construct payment with memo/metadata | TODO | requests.rs:76 |
-| `simple_payment(addr, amount)` | Quick payment without memo | TODO | requests.rs:103 |
-| `recipient_address()` | Get encoded address | TODO | requests.rs:112 |
-| `amount()` | Get payment value | TODO | requests.rs:117 |
-| `memo()` | Get optional memo bytes | TODO | requests.rs:122 |
-| `label()` / `message()` | Get metadata fields | TODO | requests.rs:130 |
-
----
-
-### 3. Wallet Module
-
-**Purpose**: Complete wallet management including account creation, synchronization, and transaction building
-
-#### Core Wallet Structure
-
-**Location**: `wallet/wallet.rs:85`
-
-```rust
-pub struct Wallet<W> {
-    db: Arc<RwLock<W>>,
-    network: Network,
-    min_confirmations: NonZeroU32,
-    target_note_count: usize,
-    min_split_output_value: u64,
+  // Take last 20 bytes
+  const address = hash.slice(-20);
+  return '0x' + Buffer.from(address).toString('hex');
 }
 ```
 
-**Generic Parameter**: `W` - Database backend (e.g., `MemoryWalletDb`)
+**`utils/nullifier.tsx` - Nullifier Generation**
 
-**Fields**:
+```typescript
+export async function generateNullifier(
+  wasm: InitOutput,
+  esk: Uint8Array,
+  noteInputs: NoteInputs,
+): Promise<NullifierData> {
+  const eskHex = Buffer.from(esk).toString('hex');
+  const { WebWallet } = wasm;
 
-- `db`: Thread-safe wallet database for accounts/transactions/blocks
-- `network`: Network configuration
-- `min_confirmations`: Required confirmations before finality
-- `target_note_count`: Note management for change splitting
-- `min_split_output_value`: Minimum value for split outputs
+  // Create temporary wallet instance
+  const wallet = await WebWallet.new('test', 'http://localhost:8080', null, null);
+
+  // Store note (triggers generation)
+  await wallet.store_note(
+    'temp_headstash_id',
+    eskHex,
+    noteInputs.rho,
+    noteInputs.fdi,
+    noteInputs.recp,
+    noteInputs.v.toString(),
+    noteInputs.nd,
+    noteInputs.rseed,
+  );
+
+  // Retrieve generated note data
+  const notesJson = await wallet.list_unspent_notes('temp_headstash_id');
+  const notes = JSON.parse(notesJson);
+  const note = notes[0];
+
+  return {
+    nullifier: note.nullifier,
+    commitment: note.commitment,
+    nk: note.nk,
+  };
+}
+```
 
 ---
 
-#### WebWallet WASM Bindings
+### 2. WASM Cryptographic Core (`zk-crates/snap-n-pull`)
 
-**Location**: `wallet/bindgen/wallet.rs:98`
+**Location:** `zk-crates/snap-n-pull/src/`
+
+#### Module Structure
+
+```
+zk-crates/snap-n-pull/src/
+├── lib.rs                    # Root module, Network enum
+├── wallet/
+│   ├── mod.rs                # Wallet module exports
+│   ├── wallet.rs             # HeadstashWallet implementation
+│   ├── headstash.rs          # NoteData, HeadstashApiDbInstance
+│   └── bindgen/
+│       ├── mod.rs
+│       └── headstash.rs      # WebWallet WASM bindings
+├── client.rs                 # HeadstashClient (gRPC)
+└── crypto.rs                 # Encryption/decryption for nullifier sync
+```
+
+#### Core Types
+
+**`HeadstashWallet<W>` - Main Wallet Structure**
+
+```rust
+pub struct HeadstashWallet<W> {
+    /// Internal database for note data
+    pub(crate) db: Arc<RwLock<W>>,
+    /// Network configuration
+    pub(crate) network: Network,
+    /// gRPC client for headstash API
+    pub(crate) client: Option<HeadstashClient>,
+}
+
+impl<W: HeadstashApiDbInstance> HeadstashWallet<W> {
+    /// Generate nullifier and commitment for a note
+    pub fn generate_note_data(
+        &self,
+        esk: EligibleSk,
+        rho: Rho,
+        fdi: u64,
+        recp: &[u8],
+        hv: HeadstashValue,
+        rseed: [u8; 32],
+    ) -> Result<(NullifierDerivingKey, Nullifier, NoteCommitment), Error> {
+        // Derive nullifier key: nk = HKDF(esk, rho)
+        let nk = NullifierDerivingKey::derive_from(esk, rho);
+
+        // Create note
+        let recp = RecpAddr::try_from(recp)?;
+        let rseed = RandomSeed::from_bytes(rseed, &rho)?;
+        let (v, nd) = hv.into_parts();
+        let note = Note::from_parts(recp, v, nd, fdi, esk, rho, rseed)?;
+
+        // Derive nullifier and commitment
+        let nullifier = note.nullifier();
+        let commitment = note.commitment();
+
+        Ok((nk, nullifier, commitment))
+    }
+}
+```
+
+**`WebWallet` - WASM Bindings**
 
 ```rust
 #[wasm_bindgen]
 pub struct WebWallet {
-    inner: MemoryWallet<tonic_web_wasm_client::Client>,
+    inner: HeadstashWallet<MemoryHeadstashDb>,
+}
+
+#[wasm_bindgen]
+impl WebWallet {
+    #[wasm_bindgen(constructor)]
+    pub async fn new(
+        network: &str,
+        headstash_api_url: &str,
+        cosmos_grpc_url: Option<String>,
+        db_bytes: Option<Box<[u8]>>,
+    ) -> Result<WebWallet, Error> { ... }
+
+    /// Store note and generate nullifier/commitment
+    pub async fn store_note(
+        &self,
+        headstash_id: String,
+        esk_hex: String,
+        rho_hex: String,
+        fdi: u64,
+        recp_hex: String,
+        value_amount: u64,
+        value_denom: String,
+        rseed_hex: String,
+    ) -> Result<(), Error> { ... }
+
+    /// List unspent notes (includes nullifiers)
+    pub async fn list_unspent_notes(&self, headstash_id: String) -> Result<String, Error> { ... }
 }
 ```
 
-**Purpose**: JavaScript-accessible wallet interface for browser environments
-
----
-
-#### Account Management
-
-| Method | Signature | Purpose | Status | Location |
-|--------|-----------|---------|--------|----------|
-| `create_account()` | `(&self, name: &str, seed: &str, hd_index: u32, birthday: Option<u32>) -> Result<AccountId, Error>` | Create account from seed phrase | TODO | wallet.rs:176 |
-| `import_ufvk()` | `(&self, name: &str, ufvk: &UFVK, purpose: AccountPurpose, birthday: Option<u32>) -> Result<AccountId, Error>` | Import view-only account | TODO | wallet.rs:205 |
-| `import_account_ufvk()` | Internal helper for UFVK imports | TODO | wallet.rs:217 |
-
-**Account Creation Flow**:
-
-1. Decode BIP39 mnemonic and derive USK
-2. Generate UFVK from USK
-3. Query chain tip or use provided birthday height
-4. Fetch tree state at birthday - 1 (leaks birthday to server)
-5. Import account into database
-
----
-
-#### Synchronization
-
-| Method | Signature | Purpose | Status | Location |
-|--------|-----------|---------|--------|----------|
-| `sync()` | `(&self) -> Result<(), Error>` | Sync wallet with blockchain via gRPC | TODO | wallet.rs:275 |
-| `suggest_scan_ranges()` | `(&self) -> Result<Vec<BlockRange>, Error>` | Get recommended block ranges to scan | TODO | wallet.rs:261 |
-
-**Sync Strategy**:
-
-- Uses `MemBlockCache` for temporary block storage
-- Batch size: 10,000 blocks
-- Delegates to background worker to prevent main thread blocking
-- Updates wallet database with scanned transactions
-
----
-
-#### Transaction Building (Standard Flow)
-
-| Method | Signature | Purpose | Status | Location |
-|--------|-----------|---------|--------|----------|
-| `propose_transfer()` | `(&self, account_id: AccountId, to: ZcashAddress, value: u64) -> Result<Proposal, Error>` | Create transaction proposal | TODO | wallet.rs:303 |
-| `create_proposed_transactions()` | `(&self, proposal: Proposal, usk: &USK) -> Result<NonEmpty<TxId>, Error>` | Prove and sign proposal | TODO | wallet.rs:356 |
-| `send_authorized_transactions()` | `(&self, txids: &NonEmpty<TxId>) -> Result<(), Error>` | Broadcast transactions | TODO | wallet.rs:383 |
-| `transfer()` | Helper combining all three steps | TODO | wallet.rs:415 |
-
-**Proposal Configuration**:
-
-- Input selector: Greedy (selects notes greedily)
-- Fee rule: ZIP-317 standard fees
-- Change strategy: Multi-output with note splitting
-- Dust policy: Default (configurable minimum)
-- Split policy: Target `target_note_count` outputs
-
----
-
-#### PCZT Transaction Flow
-
-**Purpose**: Separate transaction construction, signing, and proving for multi-party or hardware wallet scenarios
-
-| Method | Signature | Purpose | Status | Location |
-|--------|-----------|---------|--------|----------|
-| `pczt_create()` | `(&self, account_id: AccountId, to: ZcashAddress, value: u64) -> Result<Pczt, Error>` | Create unsigned PCZT | TODO | wallet.rs:498 |
-| `pczt_shield()` | `(&self, account_id: AccountId) -> Result<Pczt, Error>` | Create shielding PCZT | TODO | wallet.rs:435 |
-| `pczt_prove()` | `(&self, pczt: Pczt, sapling_pgk: Option<ProofGenerationKey>) -> Result<Pczt, Error>` | Generate proofs | TODO | wallet.rs:555 |
-| `pczt_send()` | `(&self, pczt: Pczt) -> Result<(), Error>` | Extract, verify, store, and broadcast | TODO | wallet.rs:613 |
-| `pczt_combine()` | `(&self, pczts: Vec<Pczt>) -> Result<Pczt, Error>` | Combine multiple PCZTs | TODO | wallet.rs:635 |
-
-**PCZT Flow**:
-
-1. **Create**: `pczt_create()` generates proposal and unsigned PCZT
-2. **Sign**: `pczt_sign()` (keys module) signs with USK in secure environment
-3. **Prove**: `pczt_prove()` generates zkSNARK proofs using LocalTxProver
-4. **Send**: `pczt_send()` extracts transaction, verifies, stores, and broadcasts
-
-**Shielding Threshold**: 100,000 zatoshis (0.001 ZEC)
-
----
-
-#### Query Methods
-
-| Method | Signature | Purpose | Status | Location |
-|--------|-----------|---------|--------|----------|
-| `get_wallet_summary()` | `(&self) -> Result<Option<WalletSummary>, Error>` | Get account balances and sync status | TODO | wallet.rs:292 |
-| `db_to_bytes()` | `(&self) -> Result<Vec<u8>, Error>` | Serialize wallet database | TODO | wallet.rs:113 |
-
-**WalletSummary Fields**:
-
-- `account_balances`: Per-account Sapling/Orchard/Transparent balances
-- `chain_tip_height`: Latest known block
-- `fully_scanned_height`: Fully synced height
-- `next_sapling_subtree_index` / `next_orchard_subtree_index`: Merkle tree indices
-
----
-
-## WebWallet WASM API
-
-**Purpose**: Browser-accessible wallet interface with WebWorker support for expensive operations
-
-### Constructor
+**`NoteData` - Note Information**
 
 ```rust
-#[wasm_bindgen(constructor)]
-pub fn new(
-    network: &str,
-    lightwalletd_url: &str,
-    min_confirmations: u32,
-    db_bytes: Option<Box<[u8]>>,
-) -> Result<WebWallet, Error>
+#[derive(Debug, Clone)]
+pub struct NoteData {
+    /// Nullifier deriving key
+    pub nk: NullifierDerivingKey,
+    /// The nullifier
+    pub nullifier: Nullifier,
+    /// The note commitment
+    pub commitment: NoteCommitment,
+    /// The value
+    pub hv: HeadstashValue,
+    /// Fixed denomination index
+    pub fdi: u64,
+    /// Spent status
+    pub spent: bool,
+}
 ```
 
-**Parameters**:
-
-- `network`: "main" or "test"
-- `lightwalletd_url`: gRPC endpoint (e.g., "<https://zcash-mainnet.chainsafe.dev>")
-- `min_confirmations`: Transaction finality threshold
-- `db_bytes`: Optional serialized database for session restoration
-
-**Status**: TODO (wallet.rs:130)
-
 ---
 
-### Async Operations via WebWorkers
+## Cryptographic Flow
 
-| Operation | Worker Usage | Purpose | Location |
-|-----------|--------------|---------|----------|
-| `sync()` | Spawns "sync" worker | Long-running blockchain sync | wallet.rs:269 |
-| `create_proposed_transactions()` | Spawns "create_proposed_transaction" worker | Expensive zkSNARK proving | wallet.rs:351 |
+### Sequential Derivation (Critical Security Property)
 
-**WebWorker Pattern**:
+**The secret key (esk) must be used FIRST to derive all other values:**
 
-- Prevents main thread blocking
-- Uses `wasm-thread` for worker management
-- Rayon for parallel proving within worker
-- Safe concurrent database access via `Arc<RwLock<Db>>`
+```
+esk (secret key - 32 bytes from BIP-32)
+  │
+  │ ← MUST obtain esk before any derivations
+  │
+  ├─────────────────────────────────────┐
+  │                                     │
+  ▼                                     ▼
+getPk(esk)                    generateNullifier(esk, ...)
+  │                                     │
+  │                                     │ ← esk is input to both paths
+  │                                     │
+  │                                     ▼
+  │                          nk = HKDF(esk, rho)
+  │                                     │
+  │                                     │  (Poseidon-based HKDF)
+  │                                     │
+  │                                     ▼
+  │                          nullifier = PRF_nf(nk, rho, psi)
+  │                                     │
+  │                                     │  (Poseidon PRF)
+  │                                     │
+  ▼                                     ▼
+pk (public key)              commitment = NoteCommit(esk, fdi, nd, v, recp, rho, rseed)
+  │                                     │
+  │                                     │  (Sinsemilla CommitDomain)
+  │                                     │
+  └─────────────┬───────────────────────┘
+                │
+                ▼
+          esk.fill(0)  ← Clear secret key from memory
+                │
+                ▼
+    Return: { nullifier, commitment, pk }
+```
 
----
+### Key Derivations
 
-### Address Retrieval
-
-| Method | Purpose | Status | Location |
-|--------|---------|--------|----------|
-| `get_current_address(account_id: u32)` | Get unified address | TODO | wallet.rs:433 |
-| `get_current_address_transparent(account_id: u32)` | Extract transparent component | TODO | wallet.rs:519 |
-
----
-
-### gRPC Lightwalletd Methods
-
-| Method | Purpose | Status | Location |
-|--------|---------|--------|----------|
-| `get_latest_block()` | Query current chain height | TODO | wallet.rs:535 |
-
----
-
-## Constants and Configuration
-
-### Pruning Depth
-
-**Location**: `wallet/mod.rs:17`
+**1. Nullifier Deriving Key (nk)**
 
 ```rust
-pub const PRUNING_DEPTH: usize = 100;
+// HKDF using Poseidon
+nk = hdkf_pallas(esk_to_base(&esk), rho.into_inner())
 ```
 
-**Purpose**: Maximum checkpoints stored in shard-tree for wallet history
-
----
-
-### Batch Processing
-
-**Location**: `wallet/wallet.rs:60` (commented)
+**2. Nullifier**
 
 ```rust
-const BATCH_SIZE: u32 = 10000;
+// PRF using Poseidon
+nullifier = prf_nf(nk.inner(), rho.into_inner(), psi)
 ```
 
-**Purpose**: Block batch size for synchronization
-
----
-
-### Shielding Threshold
-
-**Location**: `wallet/wallet.rs:64` (commented)
+**3. Note Commitment**
 
 ```rust
-const SHIELDING_THRESHOLD: Zatoshis = 100000;
+// Sinsemilla CommitDomain
+commitment = SinsemillaCommitDomain::commit(
+    recp, v, nd, fdi, esk, rho, rseed, rcm
+)
 ```
 
-**Purpose**: Minimum transparent balance to trigger auto-shielding proposal
+**Important:** Both nullifier and commitment depend on `esk`. The secret key must be retrieved once and used for both derivations, not retrieved separately for each.
 
 ---
 
-## Headstash Integration Points
+## API Reference
 
-### Current State
+### JSON-RPC Methods
 
-The snap-n-pull crate is currently based on Zcash libraries and patterns. To integrate with Headstash:
+#### `generateNullifier`
 
-### Required Adaptations
+Generate note nullifier and commitment for a headstash claim.
 
-1. **Replace Zcash Types**:
-   - `ZcashAddress` → Headstash-compatible address format
-   - `Zatoshis` → Generic value type for multiple denoms
-   - `TxId` → Headstash transaction identifiers
+**Request:**
 
-2. **Key Derivation**:
-   - Adapt `UnifiedSpendingKey` for secp256k1 → Pallas decomposition (see `HeadstashBitwiseInstance::derive_esk`)
-   - Integrate `EligibleSk`, `NullifierDerivingKey` from zk-headstash
+```typescript
+{
+  method: 'wallet_invokeSnap',
+  params: {
+    snapId: 'npm:@terpnetwork/headstash-snap',
+    request: {
+      method: 'generateNullifier',
+      params: {
+        headstashId: string,
+        noteInputs: {
+          recp: string,      // Recipient address (hex)
+          nd: string,        // Denomination (e.g., "uterp")
+          v: string,         // Value amount
+          fdi: number,       // Fixed denomination index
+          rho: string,       // Randomness (32 bytes hex)
+          rseed: string      // Random seed (32 bytes hex)
+        }
+      }
+    }
+  }
+}
+```
 
-3. **Note Management**:
-   - Replace Orchard/Sapling note tracking with Headstash `Note` structure
-   - Implement `list_unspent_notes()` / `list_spent_notes()` from `HeadstashInstance`
+**Response:**
 
-4. **Synchronization**:
-   - Replace lightwalletd gRPC with Headstash-API client
-   - Sync against Merkle tree commitments instead of blockchain state
-   - Implement `find_new_headstashes()` discovery
+```typescript
+{
+  nullifier: string,   // Note nullifier (32 bytes hex)
+  commitment: string,  // Note commitment (32 bytes hex)
+  pk: string          // Public key (33 bytes hex) - SAFE TO REVEAL
+}
+```
 
-5. **Transaction Building**:
-   - Adapt PCZT flow to Headstash claim/harvest operations
-   - Integrate `prepare_and_harvest_note()` from HeadstashInstance
-   - Wire in circuit proving via `zk-headstash` proving key
+**Example:**
 
----
+```javascript
+const response = await window.ethereum.request({
+  method: 'wallet_invokeSnap',
+  params: {
+    snapId: 'npm:@terpnetwork/headstash-snap',
+    request: {
+      method: 'generateNullifier',
+      params: {
+        headstashId: 'terp1contract123...',
+        noteInputs: {
+          recp: '0x742d35Cc6634C0532925a3b844Bc9e7595f0bEb',
+          nd: 'uterp',
+          v: '1000000',
+          fdi: 42,
+          rho: 'a1b2c3d4e5f6...', // 64 hex chars (32 bytes)
+          rseed: 'f1e2d3c4b5a6...', // 64 hex chars (32 bytes)
+        },
+      },
+    },
+  },
+});
 
-## Development Status
-
-### Implemented
-
-- ✅ Feature-gated module structure
-- ✅ Error type hierarchy
-- ✅ Network configuration
-- ✅ WASM compilation infrastructure
-- ✅ Core `Wallet<W>` generic structure
-
-### In Progress (Commented Out)
-
-- 🔄 All key management functions
-- 🔄 ZIP-321 request handling
-- 🔄 WebWallet WASM bindings
-- 🔄 PCZT signing implementation
-- 🔄 Synchronization logic
-- 🔄 Transaction building
-
-### TODO
-
-- ❌ Headstash-specific adaptations
-- ❌ Integration with `HeadstashInstance` trait
-- ❌ MetaMask Snap manifest and permissions
-- ❌ Browser testing harness
-- ❌ Documentation for MetaMask Snap API
-- ❌ Production cryptographic randomness verification
-
----
-
-## Usage Context
-
-This specification serves as the **primary router for snap-n-pull codebase navigation**. For detailed implementation:
-
-- **Headstash Integration**: See `docs/zk-headstash/suite.md` for HeadstashSuite trait specifications
-- **Cryptographic Primitives**: `zk-crates/zk-headstash/src/spec.rs`
-- **Note Structure**: `zk-crates/zk-headstash/src/note/`
-- **WASM Compilation**: Use `wasm-pack build --target web` with features
-- **MetaMask Snap**: Follow [MetaMask Snaps documentation](https://docs.metamask.io/snaps/)
+// response = { nullifier, commitment, pk }
+```
 
 ---
 
-## Security Considerations
+## Security Guarantees
 
-1. **Seed Phrase Handling**: Never expose seed phrases to JavaScript; keep within snap sandbox
-2. **Randomness**: Current `generate_seed_phrase()` may not use secure randomness in browser
-3. **Birthday Leakage**: Querying tree state at birthday - 1 leaks birthday to server
-4. **Key Storage**: Leverage MetaMask's encrypted storage for persistent keys
-5. **PCZT Verification**: Always verify proofs before broadcasting transactions
+### What the Snap NEVER Does
+
+❌ **Store the secret key** - Keys are only requested when needed
+❌ **Log the secret key** - No logging of sensitive material
+❌ **Return the secret key** - Only public outputs returned
+❌ **Transmit the secret key** - Never sent over network
+❌ **Store the seed phrase** - Managed by MetaMask only
+❌ **Persist keys to disk** - All operations in-memory
+❌ **Reveal the secret key in note records** - Only public key is stored
+
+### What the Snap DOES
+
+✅ **Request key transiently** - Only when generating nullifiers
+✅ **Use key temporarily** - For cryptographic operations only
+✅ **Clear key immediately** - `esk.fill(0)` after use
+✅ **Return public outputs** - nullifier, commitment, pk only
+✅ **Show user confirmation** - Before every operation
+✅ **Derive public key** - For verification purposes only
+✅ **Store only public key** - In spent note records for verification
+
+### Privacy Properties
+
+**Unlinkability:** The nullifier reveals nothing about:
+- The eligible address (epk)
+- The secret key (esk)
+- Other nullifiers generated by the same user
+- The recipient address (recp) - binding happens via proof
+
+**Double-Spend Prevention:** Each note has a unique nullifier:
+- Derived deterministically from esk + note data
+- Impossible to alter inputs and reuse a nullifier
+- Tracked on-chain in spent-nullifier list
+
+**No On-Chain Association:** The claiming transaction reveals:
+- Nullifier (unlinkable to epk)
+- Commitment (unlinkable to note details)
+- Public key (unlinkable to epk)
+- Recipient (recp) - intentionally public
+
+But does NOT reveal:
+- Eligible address (epk)
+- Secret key (esk)
+- Which specific allocation is being claimed
+- Link between multiple claims by the same user
+
+---
+
+## Workspace Integration
+
+### Cohesive Product Suite
+
+The MetaMask Snap is part of a larger workspace providing complete headstash interaction:
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                    HEADSTASH PRODUCT SUITE                   │
+├─────────────────────────────────────────────────────────────┤
+│                                                               │
+│  ┌───────────────────────────────────────────────────────┐  │
+│  │ 1. ZK-Headstash Circuit (zk-crates/zk-headstash)     │  │
+│  │    - Halo2 circuit implementation                     │  │
+│  │    - Key pairing verification (esk, epk)              │  │
+│  │    - HKDF derivation (nk from esk + rho)              │  │
+│  │    - Nullifier generation (PRF_nf)                    │  │
+│  │    - Note commitment (Sinsemilla)                     │  │
+│  │    - Merkle tree inclusion proofs                     │  │
+│  └───────────────────────────────────────────────────────┘  │
+│                            │                                 │
+│                            │ proving key, verification key    │
+│                            │                                 │
+│  ┌───────────────────────────────────────────────────────┐  │
+│  │ 2. Snap-n-Pull WASM (zk-crates/snap-n-pull)          │  │
+│  │    - Rust cryptographic core                          │  │
+│  │    - HeadstashWallet                                  │  │
+│  │    - Note management                                  │  │
+│  │    - Nullifier generation (without proof)             │  │
+│  │    - wasm-bindgen exports for browser use             │  │
+│  └───────────────────────────────────────────────────────┘  │
+│                            │                                 │
+│                            │ WebWallet API                    │
+│                            │                                 │
+│  ┌───────────────────────────────────────────────────────┐  │
+│  │ 3. MetaMask Snap (zk-packages/snap)                   │  │
+│  │    - TypeScript snap implementation                   │  │
+│  │    - BIP-32 key derivation via snap_getBip32Entropy   │  │
+│  │    - User confirmation dialogs                        │  │
+│  │    - WASM integration                                 │  │
+│  │    - JSON-RPC interface (generateNullifier)           │  │
+│  └───────────────────────────────────────────────────────┘  │
+│                            │                                 │
+│                            │ snap API                         │
+│                            │                                 │
+│  ┌───────────────────────────────────────────────────────┐  │
+│  │ 4. Frontend Dashboard (egui/web)                      │  │
+│  │    - Headstash marketplace                            │  │
+│  │    - Wallet connection (Keplr, MetaMask)              │  │
+│  │    - Smart account authentication                     │  │
+│  │    - Claim interface                                  │  │
+│  │    - Transaction broadcasting                         │  │
+│  └───────────────────────────────────────────────────────┘  │
+│                                                               │
+│  ┌───────────────────────────────────────────────────────┐  │
+│  │ 5. Headstash Smart Contract (Rust/CosmWasm)           │  │
+│  │    - Merkle root storage                              │  │
+│  │    - Spent nullifier tracking                         │  │
+│  │    - Proof verification                               │  │
+│  │    - Token distribution                               │  │
+│  └───────────────────────────────────────────────────────┘  │
+│                                                               │
+│  ┌───────────────────────────────────────────────────────┐  │
+│  │ 6. Headstash API (Verifiable Service)                 │  │
+│  │    - Merkle tree queries                              │  │
+│  │    - Note discovery                                   │  │
+│  │    - Nullifier state sync                             │  │
+│  │    - Fee grant support                                │  │
+│  └───────────────────────────────────────────────────────┘  │
+│                                                               │
+└─────────────────────────────────────────────────────────────┘
+```
+
+### Integration Flow
+
+**1. User discovers eligible headstash (Frontend)**
+- Query headstash API for available instances
+- Check merkle tree for eligible allocations
+- Display claimable notes
+
+**2. User initiates claim (Frontend → Snap)**
+- Frontend calls `generateNullifier` RPC method
+- Provides public note inputs (recp, nd, v, fdi, rho, rseed)
+
+**3. Snap generates nullifier (Snap → WASM)**
+- Retrieves esk from MetaMask BIP-32 derivation
+- Calls WASM `generate_note_data()`
+- Returns nullifier, commitment, pk
+
+**4. Frontend generates proof (Frontend → Circuit)**
+- Uses nullifier/commitment as public inputs
+- Generates ZK proof of ownership and merkle inclusion
+- Proof verifies: knows esk for epk, note is in tree
+
+**5. Frontend broadcasts claim (Frontend → Chain)**
+- Submits: nullifier, commitment, proof, publicInputs
+- Smart contract verifies proof
+- Contract checks nullifier uniqueness
+- Contract distributes tokens to recp
+
+---
+
+## Build and Deploy
+
+### Prerequisites
+
+- Node.js 18+
+- Yarn or npm
+- wasm-pack
+- Rust toolchain
+
+### Build WASM Module
+
+```bash
+cd zk-crates/snap-n-pull
+wasm-pack build --target web --out-dir ../../zk-packages/snap/wasm
+```
+
+### Build Snap
+
+```bash
+cd zk-packages/snap
+yarn install
+yarn build
+```
+
+### Test Locally
+
+```bash
+# Serve snap locally
+yarn serve
+
+# In another terminal, run test dApp
+cd examples/test-dapp
+yarn dev
+```
+
+### Deploy to npm
+
+```bash
+# Update version in package.json
+yarn version --new-version 1.0.0
+
+# Publish
+yarn publish --access public
+```
 
 ---
 
 ## References
 
-- **Copyright**: Based on ChainSafe Systems' Zcash WebWallet (Apache-2.0, MIT)
-- **ZIP-32**: [Shielded Hierarchical Deterministic Wallets](https://zips.z.cash/zip-0032)
-- **ZIP-316**: [Unified Addresses and Unified Viewing Keys](https://zips.z.cash/zip-0316)
-- **ZIP-321**: [Payment Request URIs](https://zips.z.cash/zip-0321)
-- **PCZT**: Partially Constructed Zcash Transaction format
+**Documentation:**
+- [MetaMask Snaps API](https://docs.metamask.io/snaps/)
+- [BIP-32 Entropy API](https://docs.metamask.io/snaps/reference/snaps-api/#snap_getbip32entropy)
+- [Headstash Spec](./spec.md)
+- [Frontend Guide](./frontend.md)
+
+**Research:**
+- [Zcash Orchard Protocol](https://zips.z.cash/protocol/protocol.pdf#orchard)
+- [ZK-ECDSA (0xPARC)](https://0xparc.org/blog/zk-ecdsa-1)
+- [Stealthdrop](https://github.com/stealthdrop/stealthdrop)
+- [Halo2 ECC](https://github.com/axiom-crypto/halo2-lib)
+
+**Copyright:** Based on ChainSafe Systems' Zcash WebWallet (Apache-2.0, MIT)
+
+---
+
+**Version History:**
+
+- **v2.0** (2025-01-20) - Complete rewrite for Headstash integration with actual implementation
+- **v1.0** (2024) - Initial Zcash-based specification (deprecated)

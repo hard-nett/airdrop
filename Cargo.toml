@@ -13,13 +13,12 @@ edition = "2021"
 version = "0.0.1"
 
 [workspace.dependencies]
-
 token-bindings = { git = "https://github.com/permissionlessweb/token-bindings", branch = "feat/cw@v3", library = "bindings" } 
 btsg-account = { git = "https://github.com/permissionlessweb/bs-accounts", branch = "feat/cw@v3", library = "btsg-account" } 
 btsg-auth = { git = "https://github.com/permissionlessweb/bs-accounts", branch = "feat/cw@v3", library = "btsg-auth" } 
 cosmos-sdk-proto = { git = "https://github.com/permissionlessweb/cosmos-rust",features = ["std","cosmwasm","grpc"],default-features = false }
 
-
+anyhow = "1.0"
 cosmwasm-schema = "3.0.2"
 cosmwasm-std = { version = "3.0.2", features = ["cosmwasm_1_4", "stargate"] }
 cw-headstash = { path = "./cw-headstash" }
@@ -29,7 +28,7 @@ hex = "0.4.3"
 serde = { version = "1.0.228", features = ["derive"] }
 sha2 = "0.10.9"
 snap-n-pull = { path = "./snap-n-pull" }
-tempfile = "3.20.0"
+tempfile = "3.23.0"
 secp256k1 = "0.31.1"
 prost = { version = "0.14.1", default-features = false, features = ["derive"] }
 tonic = "0.14.1"

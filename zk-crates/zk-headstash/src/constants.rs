@@ -12,7 +12,7 @@ pub const HEADSTASH_PERSONALIZATION: &str = "z.cash:Orchard";
 /// SWU hash-to-curve personalization for the note commitment generator
 pub const DST_CM: &str = "terp.network:Headstash-cm";
 pub const DST_V: &str = "terp.network:Headstash-v";
-pub const DST_HKDF: &[u8] = b"Hkdf-terp.network";
+pub const DST_HKDF: [u8; 32] = *b"Hkdf_headstash_710_terp.network\0"; 
 
 /// The Pallas scalar field modulus is $q = 2^{254} + \mathsf{t_q}$.
 /// <https://github.com/zcash/pasta>

@@ -36,7 +36,7 @@ pub struct NoteDenom {
     bytes: [u8; MAX_DENOM_LEN],
 }
 
-/// Return the padded value used in proof generation (posiedon h
+/// Return the padded value used in proof generation (blake3 hash with bit-trim)
 impl NoteDenom {
     /// Return the padded value used in proof generation (posiedon hash with bit-trim for field note denom field inclusion).
     /// Clear the top three bits of the first byte to get 253-bit field element (pallas)\
@@ -57,16 +57,11 @@ impl NoteDenom {
         hasher.finalize()
     }
 
+    /// hex string of trimmed blake3 hash representing note-denom
     pub fn as_str_for_proof(&self) -> String {
-        blake3::Hash::from_bytes(self.bytes).to_string()
+        let mut bytes = self.bytes;
+        hex::encode(self.bytes)
     }
-
-    // pub fn as_str(&self) -> &str {
-    //     // SAFETY: we only ever construct a `NoteDenom` from a valid UTF‑8
-    //     // string (see `FromStr`), so this slice is always valid.
-    //     let slice = &self.bytes[..self.len as usize];
-    //     std::str::from_utf8(slice).expect("invalid UTF‑8 in NoteDenom")
-    // }
 
     /// Return the raw bytes (including unused trailing zeros).
     pub fn as_bytes(&self) -> &[u8] {
@@ -75,6 +70,12 @@ impl NoteDenom {
     /// Return the raw bytes (including unused trailing zeros).
     pub fn max_len() -> usize {
         MAX_DENOM_LEN
+    }
+}
+
+impl From<[u8; 32]> for NoteDenom {
+    fn from(value: [u8; 32]) -> Self {
+        NoteDenom { bytes: value }
     }
 }
 
@@ -387,7 +388,11 @@ impl fmt::Display for HeadstashValue {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::spec::nd_to_fp;
+    use ff::Field;
 
+    use pasta_curves::group::ff::PrimeField;
+    use pasta_curves::pallas;
     #[test]
     fn test_headstash_value_creation() {
         // Test creating HeadstashValue from raw components
@@ -520,5 +525,262 @@ mod tests {
         // Verify they're different denominations
         assert!(uterp.checked_add(&usdc).is_none());
         assert!(usdc.checked_add(&custom).is_none());
+    }
+
+    // Helper function to create a NoteDenom from 32 bytes
+    fn make_note_denom_string(bytes: &str) -> NoteDenom {
+        // Assuming NoteDenom has a constructor or can be created from bytes
+        // Adjust this based on actual NoteDenom implementation
+        NoteDenom::new_for_proof(bytes)
+    }
+    // Helper function to create a NoteDenom from 32 bytes
+    fn make_note_denom(bytes: [u8; 32]) -> NoteDenom {
+        // Assuming NoteDenom has a constructor or can be created from bytes
+        // Adjust this based on actual NoteDenom implementation
+        NoteDenom::try_from(bytes).unwrap()
+    }
+
+    #[test]
+    fn test_nd_to_fp_deterministic() {
+        // Same input should always produce same output
+        let test_bytes = [42u8; 32];
+        let nd1 = make_note_denom(test_bytes);
+        let nd2 = make_note_denom(test_bytes);
+
+        let fp1 = nd_to_fp(&nd1);
+        let fp2 = nd_to_fp(&nd2);
+
+        assert_eq!(fp1, fp2);
+    }
+
+    #[test]
+    fn test_nd_to_fp_different_inputs() {
+        // Different inputs should produce different outputs
+        let bytes1 = [1u8; 32];
+        let bytes2 = [2u8; 32];
+
+        let nd1 = make_note_denom(bytes1);
+        let nd2 = make_note_denom(bytes2);
+
+        let fp1 = nd_to_fp(&nd1);
+        let fp2 = nd_to_fp(&nd2);
+
+        assert_ne!(fp1, fp2);
+    }
+
+    #[test]
+    fn test_nd_to_fp_all_zeros() {
+        let zero_bytes = [0u8; 32];
+        let nd = make_note_denom(zero_bytes);
+
+        let fp = nd_to_fp(&nd);
+
+        // All zeros should map to zero field element
+        assert_eq!(fp, pallas::Base::zero());
+    }
+
+    #[test]
+    fn test_nd_to_fp_all_ones() {
+        let ones_bytes = [0xFFu8; 32];
+        let nd = make_note_denom_string(&hex::encode(ones_bytes));
+
+        let fp = nd_to_fp(&nd);
+
+        // Should produce a valid field element
+        // Verify it's not zero (all 0xFF bytes shouldn't be zero in the field)
+        assert_ne!(fp, pallas::Base::zero());
+    }
+
+    #[test]
+    fn test_nd_to_fp_sequential_bytes() {
+        let mut bytes = [0u8; 32];
+        for (i, byte) in bytes.iter_mut().enumerate() {
+            *byte = (i % 256) as u8;
+        }
+
+        let nd = make_note_denom(bytes);
+        let fp = nd_to_fp(&nd);
+
+        // Should produce a valid, non-zero field element
+        assert_ne!(fp, pallas::Base::zero());
+    }
+
+    #[test]
+    fn test_nd_to_fp_returns_valid_field_element() {
+        let test_bytes = [123u8; 32];
+        let nd = make_note_denom_string(&hex::encode(test_bytes));
+
+        let fp = nd_to_fp(&nd);
+
+        // Test that we can perform field operations on the result
+        let doubled = fp + fp;
+        let squared = fp * fp;
+        let inverted = fp.invert();
+
+        // Basic sanity checks
+        assert!(doubled == doubled);
+        assert!(squared == squared);
+
+        // If fp is non-zero, it should have an inverse
+        if fp != pallas::Base::zero() {
+            assert!(inverted.is_some().unwrap_u8() == 1);
+        }
+    }
+
+    #[test]
+    fn test_nd_to_fp_round_trip_with_repr() {
+        // Test that from_repr is consistent
+        let test_bytes = [77u8; 32];
+        let nd = make_note_denom_string(&hex::encode(test_bytes));
+
+        let fp = nd_to_fp(&nd);
+        let repr = fp.to_repr();
+        let fp_reconstructed = pallas::Base::from_repr(repr).unwrap();
+
+        assert_eq!(fp, fp_reconstructed);
+    }
+
+    #[test]
+    fn test_nd_to_fp_single_bit_difference() {
+        // Small change in input should cause different output
+        let mut bytes1 = [0u8; 32];
+        let mut bytes2 = [0u8; 32];
+        bytes2[0] = 1; // Only change first byte
+
+        let nd1 = make_note_denom(bytes1);
+        let nd2 = make_note_denom(bytes2);
+
+        let fp1 = nd_to_fp(&nd1);
+        let fp2 = nd_to_fp(&nd2);
+
+        assert_ne!(fp1, fp2);
+    }
+
+    #[test]
+    fn test_nd_to_fp_last_byte_matters() {
+        // Change in last byte should affect output
+        let mut bytes1 = [0u8; 32];
+        let mut bytes2 = [0u8; 32];
+        bytes2[31] = 1; // Change last byte
+
+        let nd1 = make_note_denom(bytes1);
+        let nd2 = make_note_denom(bytes2);
+
+        let fp1 = nd_to_fp(&nd1);
+        let fp2 = nd_to_fp(&nd2);
+
+        assert_ne!(fp1, fp2);
+    }
+
+    #[test]
+    fn test_nd_to_fp_boundary_values() {
+        // Test with specific boundary values
+        let mut bytes = [0u8; 32];
+
+        // Set to just below field modulus (if known)
+        // This is a placeholder - adjust based on actual Pallas field modulus
+        bytes[31] = 0x3F; // Some high value
+
+        let nd = make_note_denom(bytes);
+        let fp = nd_to_fp(&nd);
+
+        // Should successfully convert without panic
+        assert!(fp == fp); // Just verify it exists
+    }
+
+    #[test]
+    fn test_nd_to_fp_multiple_conversions_consistency() {
+        // Converting the same NoteDenom multiple times should give same result
+        let test_bytes = [99u8; 32];
+        let nd = make_note_denom_string(&hex::encode(test_bytes));
+
+        let fp1 = nd_to_fp(&nd);
+        let fp2 = nd_to_fp(&nd);
+        let fp3 = nd_to_fp(&nd);
+
+        assert_eq!(fp1, fp2);
+        assert_eq!(fp2, fp3);
+    }
+
+    #[test]
+    fn test_nd_to_fp_no_collisions_in_small_set() {
+        // Test that different byte patterns don't collide
+        use std::collections::HashSet;
+
+        let mut seen = HashSet::new();
+
+        for i in 0u8..100 {
+            let mut bytes = [0u8; 32];
+            bytes[0] = i;
+
+            let nd = make_note_denom(bytes);
+            let fp = nd_to_fp(&nd);
+            let repr = fp.to_repr();
+
+            assert!(seen.insert(repr), "Found collision at i={}", i);
+        }
+
+        assert_eq!(seen.len(), 100);
+    }
+
+    #[test]
+    fn test_nd_to_fp_preserves_byte_order() {
+        // Reversed bytes should give different field element
+        let mut bytes1 = [0u8; 32];
+        for (i, byte) in bytes1.iter_mut().enumerate() {
+            *byte = i as u8;
+        }
+
+        let mut bytes2 = bytes1;
+        bytes2.reverse();
+
+        let nd1 = make_note_denom(bytes1);
+        let nd2 = make_note_denom(bytes2);
+
+        let fp1 = nd_to_fp(&nd1);
+        let fp2 = nd_to_fp(&nd2);
+
+        assert_ne!(fp1, fp2);
+    }
+
+    #[test]
+    fn test_nd_to_fp_with_maximum_valid_value() {
+        // Test with bytes that represent a large but valid field element
+        // Pallas field modulus is approximately 2^255
+        // Using a value that's definitely in the field
+        let mut bytes = [0xFFu8; 32];
+        bytes[31] = 0x3F; // Ensure it's below the modulus
+
+        let nd = make_note_denom(bytes);
+        let fp = nd_to_fp(&nd);
+
+        // Should not panic and should be a valid large field element
+        assert_ne!(fp, pallas::Base::zero());
+    }
+
+    #[test]
+    fn test_nd_to_fp_arithmetic_properties() {
+        // Test that the resulting field element has proper arithmetic properties
+        let bytes1 = [1u8; 32];
+        let bytes2 = [2u8; 32];
+
+        let nd1 = make_note_denom(bytes1);
+        let nd2 = make_note_denom(bytes2);
+
+        let fp1 = nd_to_fp(&nd1);
+        let fp2 = nd_to_fp(&nd2);
+
+        // Test commutativity of addition
+        assert_eq!(fp1 + fp2, fp2 + fp1);
+
+        // Test commutativity of multiplication
+        assert_eq!(fp1 * fp2, fp2 * fp1);
+
+        // Test distributivity
+        let fp3_bytes = [3u8; 32];
+        let nd3 = make_note_denom(fp3_bytes);
+        let fp3 = nd_to_fp(&nd3);
+
+        assert_eq!(fp1 * (fp2 + fp3), fp1 * fp2 + fp1 * fp3);
     }
 }

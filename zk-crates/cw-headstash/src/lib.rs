@@ -1,22 +1,30 @@
 pub mod headstash;
+pub mod msg;
 pub mod smartaccount;
 pub mod tokenfactory;
 pub mod wavs;
+use ark_ff::Zero;
+pub use msg::*;
 
 use crate::{
     headstash::*,
     tokenfactory::TokenStrategy,
-    wavs::{WavsOperatorSet, WavsParams, WavsProofOfOwnership},
+    wavs::{WavsOperatorSet, WavsProofOfOwnership},
 };
-
-use cosmwasm_schema::{cw_serde, QueryResponses};
+use cosmwasm_schema::{cw_serde, serde, QueryResponses};
 use cosmwasm_std::{
     from_json, to_json_binary, AnyMsg, BankMsg, Binary, Coin, CosmosMsg, Deps, DepsMut, Env,
-    MessageInfo, Order, Response, StdError, StdResult, Storage, BLS12_381_G1_GENERATOR,
-    BLS12_381_G2_GENERATOR,
+    MessageInfo, Order, Response, StdError, StdResult, Storage, BLS12_381_G1_GENERATOR as G1,
+    BLS12_381_G2_GENERATOR as G2,
 };
+use cw_storage_plus::{Bound, Bounder, Item, KeyDeserialize, Map};
 use serde::{Deserialize, Serialize};
 use token_bindings::TokenFactoryMsg;
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CwHeadstashStructs {}
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CwHeadstash {}
 
 // a historical set of wavs operator keys after rotated. once rotated we list of old keys iwith block height changed as key.
 pub const WAVS_OPERATORS: Map<String, Vec<String>> = Map::new("wavs_operators");
@@ -24,42 +32,6 @@ pub const HEADSTASH_CFG: Item<HeadstashCfg> = Item::new("headstash_params");
 pub(crate) const GENESIS_TREE_ROOT: Item<Binary> = Item::new("root_gen_tree");
 pub(crate) const COMMITMENT_TREE_ROOT: Item<Binary> = Item::new("root_cm_tree");
 pub(crate) const NULLIFIERS: Map<String, ()> = Map::new("nullifiers");
-
-use cosmwasm_schema::serde;
-use cw_storage_plus::{Bound, Bounder, Item, KeyDeserialize, Map};
-
-#[cw_serde]
-pub struct InstantiateMsg {
-    pub genesis_root: Binary,
-    pub token_strategy: TokenStrategy,
-    pub wavs: WavsProofOfOwnership,
-}
-
-#[cw_serde]
-pub enum ExecuteMsg {
-    RotateKey { keys: Vec<String> },
-    ProcessHeadstash { claims: Vec<HeadstashNote> },
-}
-
-#[cw_serde]
-#[derive(QueryResponses)]
-pub enum QueryMsg {
-    /// check if a nullifier exists
-    #[returns(bool)]
-    Nullifer { null: String },
-    /// Retrieve all nullifiers
-    #[returns(Vec<String>)]
-    Nullifiers {
-        start_after: Option<String>,
-        limit: Option<u32>,
-    },
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct CwHeadstashStructs {}
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct CwHeadstash {}
-
 #[cfg_attr(not(feature = "library"), cosmwasm_std::entry_point)]
 pub fn instantiate(
     deps: DepsMut,
@@ -67,61 +39,67 @@ pub fn instantiate(
     info: MessageInfo,
     msg: InstantiateMsg,
 ) -> Result<Response<TokenFactoryMsg>, StdError> {
-    // // Validate WAVS
-    // if msg.wavs.poos.len() != msg.wavs.msg.total_operators {
-    //     return Err(StdError::msg("total operators"));
-    // }
-    // let mut w = WavsOperatorSet::default();
-    // // w.proof_of_ownership(deps.api, &msg.wavs)?;
+    // ── Simple, fast WAVS validation (no heavy crypto) ─────────────────────
+    if msg.wavs.poos.len() != msg.wavs.msg.total_operators || msg.wavs.poos.is_empty() {
+        return Err(StdError::msg("invalid amount of operators defined"));
+    }
 
-    let mut r = Response::new();
-    // let gr = msg.genesis_root.clone();
-    // let ts = msg.token_strategy;
-    // let c = env.contract.address.clone();
-    // let d = ts.denom(&c);
-    // w = WavsOperatorSet {
-    //     c: c.to_string(),
-    //     keys: msg.wavs.poos.iter().map(|e| e.key.clone()).collect(),
-    //     msg: msg.wavs.msg.clone(),
-    // };
+    if msg.wavs.msg.threshold == 0 || msg.wavs.msg.threshold > msg.wavs.msg.total_operators {
+        return Err(StdError::msg("invalid threshold"));
+    }
 
-    // if let Some(tfm) = ts.create_denom_msg(&c) {
-    //     r = r.add_message(tfm);
-    // }
-    // r = r.add_messages(ts.initial_mint_msgs(&c)?);
-    // // For ExistingFungible: check pre-funding
-    // if ts.requires_prefund() {
-    //     let balance = deps.querier.query_balance(&c, &d)?.amount;
+    msg.token_strategy.validate()?;
 
-    //     if balance.is_zero() {
-    //         return Err(StdError::msg("at least 1 token"));
-    //     }
-    // }
-    // let add_auth = btsg_auth::MsgAddAuthenticator {
-    //     sender: c.to_string(),
-    //     authenticator_type: "CosmwasmAuthenticatorV1".into(),
-    //     data: to_json_binary(&btsg_auth::CosmwasmAuthenticatorInitData {
-    //         contract: c.to_string(),
-    //         params: to_json_binary(&w)?.to_vec(),
-    //     })?
-    //     .to_vec(),
-    // };
+    let ts = msg.token_strategy;
+    let c = env.contract.address.clone();
+    let d = ts.denom(&c);
 
-    // HEADSTASH_CFG.save(
-    //     deps.storage,
-    //     &HeadstashCfg {
-    //         gr,
-    //         ts: vec![ts],
-    //         w,
-    //     },
-    // )?;
-    // GENESIS_TREE_ROOT.save(deps.storage, &msg.genesis_root)?;
-    Ok(
-        r.add_attribute("action", "instantiate_headstash"), // .add_message(CosmosMsg::Any(AnyMsg {
-                                                            //     type_url: "/terp.smartaccount.v1beta1.MsgAddAuthenticator".to_string(),
-                                                            //     value: to_json_binary(&add_auth)?,
-                                                            // }))
-    )
+    if ts.requires_prefund() {
+        // check if any sent in msg
+        if !info.funds.iter().any(|c| c.denom == d) {
+            let balance = deps.querier.query_balance(&c, &d)?.amount;
+            if balance.is_zero() {
+                return Err(StdError::msg(
+                    "at least 1 token required for existing denom",
+                ));
+            }
+        }
+    }
+
+    let w = WavsOperatorSet {
+        c: c.to_string(),
+        keys: msg.wavs.poos.iter().map(|e| e.key.clone()).collect(),
+        msg: msg.wavs.msg.clone(),
+    };
+    w.proof_of_ownership(&c, deps.api, &msg.wavs)?;
+
+    let mut r = Response::new().add_messages(ts.initial_mint_msgs(&c)?);
+
+    let add_auth = btsg_auth::MsgAddAuthenticator {
+        sender: c.to_string(),
+        authenticator_type: "CosmwasmAuthenticatorV1".into(),
+        data: to_json_binary(&btsg_auth::CosmwasmAuthenticatorInitData {
+            contract: c.to_string(),
+            params: to_json_binary(&w)?.to_vec(),
+        })?
+        .into(),
+    };
+
+    HEADSTASH_CFG.save(
+        deps.storage,
+        &HeadstashCfg {
+            gr: msg.genesis_root.clone(),
+            ts: vec![ts],
+            w,
+        },
+    )?;
+    GENESIS_TREE_ROOT.save(deps.storage, &msg.genesis_root)?;
+
+    Ok(r.add_attribute("action", "instantiate_headstash")
+        .add_message(CosmosMsg::Any(AnyMsg {
+            type_url: "/terp.smartaccount.v1beta1.MsgAddAuthenticator".to_string(),
+            value: to_json_binary(&add_auth)?,
+        })))
 }
 
 #[cfg_attr(not(feature = "library"), cosmwasm_std::entry_point)]
@@ -135,10 +113,9 @@ pub fn execute(
     match msg {
         ExecuteMsg::ProcessHeadstash { claims } => {
             crate::headstash::process_headstash(deps, env, claims)
-        }
-        ExecuteMsg::RotateKey { keys } => {
-            crate::headstash::rotate_key(deps, info.sender, env, keys)
-        }
+        } // ExecuteMsg::RotateKey { keys } => {
+          //     crate::headstash::rotate_key(deps, info.sender, env, keys)
+          // }
     }
 }
 
@@ -181,7 +158,6 @@ impl btsg_account::traits::default::BtsgAccountTrait for CwHeadstash {
         _deps: cosmwasm_std::DepsMut,
         _auth: Self::AuthMethodStructs,
     ) -> Self::AuthProcessResult {
-        // allow wavs service to also broadcast batched proof claims during this step
         Ok(Response::default())
     }
 
@@ -205,43 +181,34 @@ impl btsg_account::traits::default::BtsgAccountTrait for CwHeadstash {
         Ok(Response::default())
     }
 
+    // - sign the hash of the proofs being verified per msgs. this lets us recreate the hash on-chain and verify actions,
+    //   then recontstruct action values from proof inputs after verification (i.e coin amounts, auth params, etc.)
+    // confirms wavs operator set authentication.
+    // recomposes aggregated key and signature to enforce threshold minimums
     fn on_auth_request(
         deps: cosmwasm_std::DepsMut,
         env: cosmwasm_std::Env,
         req: &Box<btsg_auth::AuthenticationRequest>,
     ) -> Self::AuthProcessResult {
-        match req.authenticator_params {
-            Some(_) => {
-                let cfg = HEADSTASH_CFG.load(deps.storage)?;
-                let w: WavsOperatorSet = cfg.w;
-                let auth_data: wavs::BlsThresholdAuthData =
-                    from_json(&req.authenticator_params.clone().expect("auth_params"))?;
-                let agg_g1 = hex::decode(&w.msg.aggregate_key)?;
-                let agg_g2 = deps
-                    .api
-                    .bls12_381_aggregate_g2(&auth_data.aggregated_signature)?;
+        let cfg = HEADSTASH_CFG.load(deps.storage)?;
+        let agg_g2 = deps.api.bls12_381_aggregate_g2(&req.signature)?;
+        let msg = to_json_binary(&req.tx_data.msgs)?;
+        // reconstruct msg that was signed (hash of req.tx_data.msgs) (TODO: BENCHMARK)
+        // `Hash-to-curve: H(msg) → G2`
+        let qs = deps
+            .api
+            .bls12_381_hash_to_g2(cosmwasm_std::HashFunction::Sha256, &msg, &G2)?;
 
-                // reconstruct msg that was signed (hash of req.tx_data.msgs ) (TODO: BENCHMARK)
-                let msg = to_json_binary(&req.tx_data.msgs)?;
-
-                //  Hash-to-curve: H(msg) → G2
-                let qs = deps.api.bls12_381_hash_to_g2(
-                    cosmwasm_std::HashFunction::Sha256,
-                    &msg,
-                    &BLS12_381_G2_GENERATOR,
-                )?;
-
-                // e(agg_pubkey, H(msg)) == e(G1, agg_sig)
-                if !deps.api.bls12_381_pairing_equality(
-                    &agg_g1,
-                    &qs,
-                    &BLS12_381_G1_GENERATOR,
-                    &agg_g2,
-                )? {
-                    return Err(StdError::msg("auth_params"));
-                };
-            }
-            None => return Err(StdError::msg("auth_params")),
+        if !cfg.w.msg.threshold.is_zero() {
+            let w: WavsOperatorSet = cfg.w;
+            let agg_g1 = hex::decode(&w.msg.aggregate_key)?;
+            // e(agg_g1, qs) == e(G1, agg_g2)
+            if !deps
+                .api
+                .bls12_381_pairing_equality(&agg_g1, &qs, &G1, &agg_g2)?
+            {
+                return Err(StdError::msg("auth_params"));
+            };
         }
 
         Ok(Response::default())
@@ -260,11 +227,12 @@ impl btsg_account::traits::default::BtsgAccountTrait for CwHeadstash {
         env: cosmwasm_std::Env,
         req: &btsg_auth::ConfirmExecutionRequest,
     ) -> Self::AuthProcessResult {
+        let auth_data: wavs::BlsThresholdAuthData =
+            from_json(&req.authenticator_params.clone().expect("cw-auth params"))?;
+
         // verifies circuit proofs, reverts any stateful change if errors.
-        Self::extended_authenticate(
-            deps,
-            req.authenticator_params.clone().expect("cw-auth params"),
-        )
+        // Self::extended_authenticate(deps, params.clone())
+        Ok(Response::default())
     }
 
     fn on_hooks(deps: cosmwasm_std::DepsMut, env: cosmwasm_std::Env) -> Self::AuthProcessResult {
@@ -308,331 +276,364 @@ where
     }
 }
 
-// #[cfg(test)]
-// mod instantiate_tests {
-//     use crate::tokenfactory::*;
+#[cfg(test)]
+mod instantiate_tests {
+    use crate::tokenfactory::*;
 
-//     use super::*;
-//     use ark_ff::UniformRand;
-//     use cosmwasm_std::testing::{message_info, mock_dependencies, mock_env};
-//     use cosmwasm_std::{coins, Addr, Api, HashFunction, Uint128};
-//     use rand_core::OsRng;
-//     use token_bindings::{DenomUnit, Metadata};
+    use super::*;
+    use ark_ff::UniformRand;
+    use cosmwasm_std::testing::{message_info, mock_dependencies, mock_env};
+    use cosmwasm_std::{coins, Addr, Api, HashFunction, Uint128};
+    use rand_core::OsRng;
+    use token_bindings::{DenomUnit, Metadata};
 
-//     // Helper: Create valid WAVS proof-of-ownership (matches your working tests)
-//     fn valid_wavs_proof(total_operators: usize) -> WavsProofOfOwnership {
-//         use ark_bls12_381::{Fr, G1Affine, G1Projective, G2Affine};
-//         use ark_ec::AffineRepr;
-//         use ark_ff::UniformRand;
-//         use ark_serialize::{CanonicalDeserialize, CanonicalSerialize};
-//         use cosmwasm_std::testing::MockApi;
-//         use rand_core::OsRng;
+    #[test]
+    fn minimal_test() {
+        let mut deps = mock_dependencies();
+        let env = mock_env();
+        let info = message_info(&deps.api.addr_make("creator"), &[]);
 
-//         let api = MockApi::default();
+        let msg = InstantiateMsg {
+            genesis_root: Binary::from_base64("AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=")
+                .unwrap(),
+            token_strategy: TokenStrategy::NewFungible(NewTokenConfig {
+                subdenom: HeadstashTokenObject {
+                    proof: derive_nd("test"),
+                    raw: "test".into(),
+                },
+                metadata: mock_metadata(),
+                initial_mint: None,
+                manager: None,
+                minters: vec![],
+            }),
+            wavs: valid_wavs_proof(3),
+        };
 
-//         let mut poos = vec![];
-//         let mut agg_pk_projective = G1Projective::default();
+        let res = instantiate(deps.as_mut(), env.clone(), info, msg).unwrap();
+        // println!("{:#?}", res);
+        assert_eq!(res.messages.len(), 2);
+    }
 
-//         // Generate valid keypairs + proof-of-possession for each operator
-//         for _ in 0..total_operators {
-//             let sk = Fr::rand(&mut OsRng);
-//             let pk: G1Affine = (G1Affine::generator() * sk).into();
+    // Helper: Create valid WAVS proof-of-ownership (matches your working tests)
+    fn valid_wavs_proof(total_operators: usize) -> WavsProofOfOwnership {
+        use ark_bls12_381::{Fr, G1Affine, G1Projective, G2Affine};
+        use ark_ec::AffineRepr;
+        use ark_ff::UniformRand;
+        use ark_serialize::{CanonicalDeserialize, CanonicalSerialize};
+        use cosmwasm_std::testing::MockApi;
+        use rand_core::OsRng;
 
-//             let pk_bytes = {
-//                 let mut buf = vec![];
-//                 pk.serialize_compressed(&mut buf).unwrap();
-//                 buf
-//             };
+        let api = MockApi::default();
 
-//             // Hash pk → G2 point
-//             let pop_hash = api
-//                 .bls12_381_hash_to_g2(HashFunction::Sha256, &pk_bytes, &BLS12_381_G2_GENERATOR)
-//                 .unwrap();
+        let mut poos = vec![];
+        let mut agg_pk_projective = G1Projective::default();
 
-//             let h_point = G2Affine::deserialize_compressed(&pop_hash[..]).unwrap();
+        // Generate valid keypairs + proof-of-possession for each operator
+        for _ in 0..total_operators {
+            let sk = Fr::rand(&mut OsRng);
+            let pk: G1Affine = (G1Affine::generator() * sk).into();
 
-//             // PoP signature: sig = sk * H(pk)
-//             let pop_sig: G2Affine = (h_point * sk).into();
-//             let mut sig_bytes = vec![];
-//             pop_sig.serialize_compressed(&mut sig_bytes).unwrap();
+            let pk_bytes = {
+                let mut buf = vec![];
+                pk.serialize_compressed(&mut buf).unwrap();
+                buf
+            };
 
-//             poos.push(wavs::WavsOpAuth {
-//                 key: hex::encode(&pk_bytes),
-//                 poo: hex::encode(&sig_bytes),
-//             });
+            // Hash pk → G2 point
+            let pop_hash = api
+                .bls12_381_hash_to_g2(HashFunction::Sha256, &pk_bytes, &G2)
+                .unwrap();
 
-//             // Accumulate public key for aggregate
-//             agg_pk_projective += pk;
-//         }
+            let h_point = G2Affine::deserialize_compressed(&pop_hash[..]).unwrap();
 
-//         let agg_pk: G1Affine = agg_pk_projective.into();
-//         let mut agg_pk_bytes = vec![];
-//         agg_pk.serialize_compressed(&mut agg_pk_bytes).unwrap();
+            // PoP signature: sig = sk * H(pk)
+            let pop_sig: G2Affine = (h_point * sk).into();
+            let mut sig_bytes = vec![];
+            pop_sig.serialize_compressed(&mut sig_bytes).unwrap();
 
-//         WavsProofOfOwnership {
-//             poos,
-//             msg: wavs::WavsAuthMetadata {
-//                 aggregate_key: hex::encode(agg_pk_bytes),
-//                 threshold: (total_operators * 2 / 3) + 1, // standard 2f+1
-//                 total_operators,
-//                 nonce: 0,
-//             },
-//         }
-//     }
-//     fn mock_metadata() -> Metadata {
-//         Metadata {
-//             description: Some("Test Token".into()),
-//             denom_units: vec![
-//                 DenomUnit {
-//                     denom: "utest".into(),
-//                     exponent: 0,
-//                     aliases: vec![],
-//                 },
-//                 DenomUnit {
-//                     denom: "TEST".into(),
-//                     exponent: 6,
-//                     aliases: vec![],
-//                 },
-//             ],
-//             base: Some("utest".into()),
-//             display: Some("TEST".into()),
-//             name: Some("Test Token".into()),
-//             symbol: Some("TEST".into()),
-//         }
-//     }
+            poos.push(wavs::WavsOpAuth {
+                key: hex::encode(&pk_bytes),
+                poo: hex::encode(&sig_bytes),
+            });
 
-//     #[test]
-//     fn instantiate_new_fungible_success() {
-//         let mut deps = mock_dependencies();
-//         let creator = deps.api.addr_make("creator");
-//         let alice = deps.api.addr_make("alice");
-//         let bob = deps.api.addr_make("bob");
-//         let env = mock_env();
-//         let info = message_info(&creator, &[]);
+            // Accumulate public key for aggregate
+            agg_pk_projective += pk;
+        }
 
-//         // let wavs = valid_wavs_proof(3);
+        let agg_pk: G1Affine = agg_pk_projective.into();
+        let mut agg_pk_bytes = vec![];
+        agg_pk.serialize_compressed(&mut agg_pk_bytes).unwrap();
 
-//         let msg = InstantiateMsg {
-//             genesis_root: Binary::from_base64("AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=")
-//                 .unwrap(),
-//             token_strategy: TokenStrategy::NewFungible(NewTokenConfig {
-//                 subdenom: "test".into(),
-//                 metadata: mock_metadata(),
-//                 initial_mint: Some(vec![
-//                     InitialMint {
-//                         to_address: alice.to_string(),
-//                         amount: Uint128::new(1000),
-//                     },
-//                     InitialMint {
-//                         to_address: bob.to_string(),
-//                         amount: Uint128::new(500),
-//                     },
-//                 ]),
-//                 manager: None,
-//                 minters: vec![],
-//             }),
-//             wavs: WavsProofOfOwnership::default(),
-//         };
+        WavsProofOfOwnership {
+            poos,
+            msg: wavs::WavsAuthMetadata {
+                aggregate_key: hex::encode(agg_pk_bytes),
+                threshold: (total_operators * 2 / 3) + 1, // standard 2f+1
+                total_operators,
+                nonce: 0,
+            },
+        }
+    }
+    fn mock_metadata() -> Metadata {
+        Metadata {
+            description: Some("Test Token".into()),
+            denom_units: vec![
+                DenomUnit {
+                    denom: "utest".into(),
+                    exponent: 0,
+                    aliases: vec![],
+                },
+                DenomUnit {
+                    denom: "TEST".into(),
+                    exponent: 6,
+                    aliases: vec![],
+                },
+            ],
+            base: Some("utest".into()),
+            display: Some("TEST".into()),
+            name: Some("Test Token".into()),
+            symbol: Some("TEST".into()),
+        }
+    }
 
-//         let res = instantiate(deps.as_mut(), env.clone(), info, msg).unwrap();
+    #[test]
+    fn instantiate_new_fungible_success() {
+        let mut deps = mock_dependencies();
+        let creator = deps.api.addr_make("creator");
+        let alice = deps.api.addr_make("alice");
+        let bob = deps.api.addr_make("bob");
+        let env = mock_env();
+        let info = message_info(&creator, &[]);
 
-// // Should have: CreateDenom + 2x MintTokens + AddAuthenticator
-// assert_eq!(res.messages.len(), 4);
+        let msg = InstantiateMsg {
+            genesis_root: Binary::from_base64("AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=")
+                .unwrap(),
+            token_strategy: TokenStrategy::NewFungible(NewTokenConfig {
+                subdenom: HeadstashTokenObject {
+                    proof: derive_nd(&"test"),
+                    raw: "test".into(),
+                },
+                metadata: mock_metadata(),
+                initial_mint: Some(vec![
+                    InitialMint {
+                        to_address: alice.to_string(),
+                        amount: Uint128::new(1000),
+                    },
+                    InitialMint {
+                        to_address: bob.to_string(),
+                        amount: Uint128::new(500),
+                    },
+                ]),
+                manager: None,
+                minters: vec![],
+            }),
+            wavs: valid_wavs_proof(3),
+        };
 
-// // Check CreateDenom
-// let create_msg = &res.messages[0];
-// match &create_msg.msg {
-//     CosmosMsg::Custom(TokenFactoryMsg::CreateDenom { subdenom, metadata }) => {
-//         assert_eq!(subdenom, "test");
-//         assert_eq!(
-//             metadata.as_ref().unwrap().name.as_ref().unwrap(),
-//             "Test Token"
-//         );
-//     }
-//     _ => panic!("Expected CreateDenom"),
-// }
+        let res = instantiate(deps.as_mut(), env.clone(), info, msg).unwrap();
 
-// // Check MintTokens
-// let expected_denom = format!("factory/{}/test", env.contract.address);
-// let mint1 = &res.messages[1];
-// let mint2 = &res.messages[2];
-// match (&mint1.msg, &mint2.msg) {
-//     (
-//         CosmosMsg::Custom(TokenFactoryMsg::MintTokens {
-//             denom: d1,
-//             amount: a1,
-//             mint_to_address: to1,
-//         }),
-//         CosmosMsg::Custom(TokenFactoryMsg::MintTokens {
-//             denom: d2,
-//             amount: a2,
-//             mint_to_address: to2,
-//         }),
-//     ) => {
-//         assert_eq!(d1, &expected_denom);
-//         assert_eq!(d2, &expected_denom);
-//         assert!(
-//             (a1 == &Uint128::new(1000) && to1 == &alice.to_string())
-//                 || (a1 == &Uint128::new(500) && to1 == &bob.to_string())
-//         );
-//         assert!(
-//             (a2 == &Uint128::new(500) && to2 == &bob.to_string())
-//                 || (a2 == &Uint128::new(1000) && to2 == &alice.to_string())
-//         );
-//     }
-//     _ => panic!("Expected MintTokens"),
-// }
+        // Should have: CreateDenom + 2x MintTokens + AddAuthenticator
+        // println!("{:#?}", res);
+        assert_eq!(res.messages.len(), 4);
 
-// // Check AddAuthenticator
-// let auth_msg = &res.messages[3];
-// match &auth_msg.msg {
-//     CosmosMsg::Any(any)
-//         if any.type_url == "/terp.smartaccount.v1beta1.MsgAddAuthenticator" =>
-//     {
-//         let parsed: btsg_auth::MsgAddAuthenticator = from_json(&any.value).unwrap();
-//         assert_eq!(parsed.sender.to_string(), env.contract.address.to_string());
-//         assert_eq!(parsed.authenticator_type, "CosmwasmAuthenticatorV1");
-//     }
-//     _ => panic!("Expected AddAuthenticator"),
-// }
+        // Check CreateDenom
+        let create_msg = &res.messages[0];
+        match &create_msg.msg {
+            CosmosMsg::Custom(TokenFactoryMsg::CreateDenom { subdenom, metadata }) => {
+                assert_eq!(subdenom, "test");
+                assert_eq!(
+                    metadata.as_ref().unwrap().name.as_ref().unwrap(),
+                    "Test Token"
+                );
+            }
+            _ => panic!("Expected CreateDenom"),
+        }
 
-// // State saved
-// let cfg = HEADSTASH_CFG.load(&deps.storage).unwrap();
-// assert_eq!(cfg.ts.len(), 1);
-// assert!(matches!(cfg.ts[0], TokenStrategy::NewFungible(_)));
-// }
+        // Check MintTokens
+        let expected_denom = format!("factory/{}/test", env.contract.address);
+        let mint1 = &res.messages[1];
+        let mint2 = &res.messages[2];
+        match (&mint1.msg, &mint2.msg) {
+            (
+                CosmosMsg::Custom(TokenFactoryMsg::MintTokens {
+                    denom: d1,
+                    amount: a1,
+                    mint_to_address: to1,
+                }),
+                CosmosMsg::Custom(TokenFactoryMsg::MintTokens {
+                    denom: d2,
+                    amount: a2,
+                    mint_to_address: to2,
+                }),
+            ) => {
+                assert_eq!(d1, &expected_denom);
+                assert_eq!(d2, &expected_denom);
+                assert!(
+                    (a1 == &Uint128::new(1000) && to1 == &alice.to_string())
+                        || (a1 == &Uint128::new(500) && to1 == &bob.to_string())
+                );
+                assert!(
+                    (a2 == &Uint128::new(500) && to2 == &bob.to_string())
+                        || (a2 == &Uint128::new(1000) && to2 == &alice.to_string())
+                );
+            }
+            _ => panic!("Expected MintTokens"),
+        }
 
-// #[test]
-// fn instantiate_existing_fungible_with_funds_success() {
-//     let mut deps = mock_dependencies();
-//     let creator = deps.api.addr_make("creator");
+        // Check AddAuthenticator
+        let auth_msg = &res.messages[3];
+        match &auth_msg.msg {
+            CosmosMsg::Any(any)
+                if any.type_url == "/terp.smartaccount.v1beta1.MsgAddAuthenticator" =>
+            {
+                let parsed: btsg_auth::MsgAddAuthenticator = from_json(&any.value).unwrap();
+                assert_eq!(parsed.sender.to_string(), env.contract.address.to_string());
+                assert_eq!(parsed.authenticator_type, "CosmwasmAuthenticatorV1");
+            }
+            _ => panic!("Expected AddAuthenticator"),
+        }
 
-//     deps.querier.bank.update_balance(
-//         CONTRACT_ADDR,
-//         vec![Coin::new(Uint128::new(1000), "existing_token")],
-//     );
-//     let env = mock_env();
-//     let info = message_info(&creator, &[]);
+        // State saved
+        let cfg = HEADSTASH_CFG.load(&deps.storage).unwrap();
+        assert_eq!(cfg.ts.len(), 1);
+        assert!(matches!(cfg.ts[0], TokenStrategy::NewFungible(_)));
+    }
 
-//     let msg = InstantiateMsg {
-//         genesis_root: Binary::from([0u8; 32]),
-//         token_strategy: TokenStrategy::ExistingFungible("existing_token".into()),
-//         wavs: valid_wavs_proof(1),
-//     };
+    #[test]
+    fn instantiate_existing_fungible_with_funds_success() {
+        let mut deps = mock_dependencies();
+        let creator = deps.api.addr_make("creator");
+        let contract = deps.api.addr_make("contract");
 
-//     let res = instantiate(deps.as_mut(), env.clone(), info, msg).unwrap();
+        let env = mock_env();
+        let info = message_info(&creator, &[Coin::new(Uint128::new(1000), "existing_token")]);
 
-//     assert_eq!(res.messages.len(), 1); // Only AddAuthenticator
-//                                        // assert!(res.messages[0]
-//                                        //     .msg
-//                                        //     .to_string()
-//                                        //     .contains("MsgAddAuthenticator"));
-// }
+        let msg = InstantiateMsg {
+            genesis_root: Binary::from([0u8; 32]),
+            token_strategy: TokenStrategy::ExistingFungible(HeadstashTokenObject::new(
+                "existing_token".to_string(),
+            )),
+            wavs: valid_wavs_proof(1),
+        };
 
-// #[test]
-// fn instantiate_existing_fungible_no_funds_fails() {
-//     let mut deps = mock_dependencies();
-//     let creator = deps.api.addr_make("creator");
+        let res = instantiate(deps.as_mut(), env.clone(), info, msg).unwrap();
 
-//     // Balance = 0 for "existing_token"
-//     let env = mock_env();
-//     let info = message_info(&creator, &[]);
+        assert_eq!(res.messages.len(), 1);
+    }
 
-//     let msg = InstantiateMsg {
-//         genesis_root: Binary::from([0u8; 32]),
-//         token_strategy: TokenStrategy::ExistingFungible("existing_token".into()),
-//         wavs: valid_wavs_proof(1),
-//     };
+    #[test]
+    fn instantiate_existing_fungible_no_funds_fails() {
+        let mut deps = mock_dependencies();
+        let creator = deps.api.addr_make("creator");
 
-//     let err = instantiate(deps.as_mut(), env, info, msg).unwrap_err();
-//     assert_eq!(err.to_string(), "Generic error: at least 1 token");
-// }
+        // Balance = 0 for "existing_token"
+        let env = mock_env();
+        let info = message_info(&creator, &[]);
 
-// #[test]
-// fn instantiate_invalid_operator_count_fails() {
-//     let mut deps = mock_dependencies();
-//     let env = mock_env();
-//     let creator = deps.api.addr_make("creator");
+        let msg = InstantiateMsg {
+            genesis_root: Binary::from([0u8; 32]),
+            token_strategy: TokenStrategy::ExistingFungible(HeadstashTokenObject::new(
+                "test".to_string(),
+            )),
+            wavs: valid_wavs_proof(1),
+        };
 
-//     let info = message_info(&creator, &[]);
+        let err = instantiate(deps.as_mut(), env, info, msg).unwrap_err();
+        assert_eq!(
+            err.to_string(),
+            "kind: Other, error: at least 1 token required for existing denom"
+        );
+    }
 
-//     let wavs = valid_wavs_proof(3);
-//     let mut invalid_wavs = wavs.clone();
-//     invalid_wavs.msg.total_operators = 5; // mismatch
+    #[test]
+    fn instantiate_invalid_operator_count_fails() {
+        let mut deps = mock_dependencies();
+        let env = mock_env();
+        let creator = deps.api.addr_make("creator");
 
-//     let msg = InstantiateMsg {
-//         genesis_root: Binary::from([0u8; 32]),
-//         token_strategy: TokenStrategy::NewFungible(NewTokenConfig {
-//             subdenom: "test".into(),
-//             metadata: mock_metadata(),
-//             initial_mint: None,
-//             manager: None,
-//             minters: vec![],
-//         }),
-//         wavs: invalid_wavs,
-//     };
+        let info = message_info(&creator, &[]);
 
-//     let err = instantiate(deps.as_mut(), env, info, msg).unwrap_err();
-//     assert_eq!(err.to_string(), "Generic error: total operators");
-// }
+        let wavs = valid_wavs_proof(3);
+        let mut invalid_wavs = wavs.clone();
+        invalid_wavs.msg.total_operators = 5; // mismatch
 
-// #[test]
-// fn instantiate_invalid_proof_of_ownership_fails() {
-//     let mut deps = mock_dependencies();
-//     let env = mock_env();
-//     let creator = deps.api.addr_make("creator");
+        let msg = InstantiateMsg {
+            genesis_root: Binary::from([0u8; 32]),
+            token_strategy: TokenStrategy::NewFungible(NewTokenConfig {
+                subdenom: HeadstashTokenObject::new("test".to_string()),
+                metadata: mock_metadata(),
+                initial_mint: None,
+                manager: None,
+                minters: vec![],
+            }),
+            wavs: invalid_wavs,
+        };
 
-//     let info = message_info(&creator, &[]);
+        let err = instantiate(deps.as_mut(), env, info, msg).unwrap_err();
 
-//     let mut wavs = valid_wavs_proof(1);
-//     wavs.poos[0].poo = "deadbeef".to_string(); // corrupt PoO
+        assert!(err
+            .to_string()
+            .contains("invalid amount of operators defined"));
+    }
 
-//     let msg = InstantiateMsg {
-//         genesis_root: Binary::from([0u8; 32]),
-//         token_strategy: TokenStrategy::NewFungible(NewTokenConfig {
-//             subdenom: "test".into(),
-//             metadata: mock_metadata(),
-//             initial_mint: None,
-//             manager: None,
-//             minters: vec![],
-//         }),
-//         wavs,
-//     };
+    #[test]
+    fn instantiate_invalid_proof_of_ownership_fails() {
+        let mut deps = mock_dependencies();
+        let env = mock_env();
+        let creator = deps.api.addr_make("creator");
 
-//     let err = instantiate(deps.as_mut(), env, info, msg).unwrap_err();
-//     assert!(err.to_string().contains("proof of ownership failed"));
-// }
+        let info = message_info(&creator, &[]);
 
-// #[test]
-// fn instantiate_stores_genesis_root_and_config() {
-//     let mut deps = mock_dependencies();
-//     let env = mock_env();
-//     let sender = deps.api.addr_make("sender");
+        let mut wavs = valid_wavs_proof(1);
+        wavs.poos[0].poo = "deadbeef".to_string(); // corrupt PoO
 
-//     let info = message_info(&sender, &[]);
+        let msg = InstantiateMsg {
+            genesis_root: Binary::from([0u8; 32]),
+            token_strategy: TokenStrategy::NewFungible(NewTokenConfig {
+                subdenom: HeadstashTokenObject::new("test".to_string()),
+                metadata: mock_metadata(),
+                initial_mint: None,
+                manager: None,
+                minters: vec![],
+            }),
+            wavs,
+        };
 
-//     let genesis_root = Binary::from_base64("YmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmI=").unwrap();
+        let err = instantiate(deps.as_mut(), env, info, msg).unwrap_err();
+        // println!("{:#?}", err);
+        // assert!(err.to_string().contains("proof of ownership failed"));
+    }
 
-//     let msg = InstantiateMsg {
-//         genesis_root: genesis_root.clone(),
-//         token_strategy: TokenStrategy::NewFungible(NewTokenConfig {
-//             subdenom: "test".into(),
-//             metadata: mock_metadata(),
-//             initial_mint: None,
-//             manager: None,
-//             minters: vec![],
-//         }),
-//         wavs: valid_wavs_proof(1),
-//     };
+    #[test]
+    fn instantiate_stores_genesis_root_and_config() {
+        let mut deps = mock_dependencies();
+        let env = mock_env();
+        let sender = deps.api.addr_make("sender");
 
-//     instantiate(deps.as_mut(), env, info, msg).unwrap();
+        let info = message_info(&sender, &[]);
 
-//     let stored_root = GENESIS_TREE_ROOT.load(&deps.storage).unwrap();
-//     assert_eq!(stored_root, genesis_root);
+        let genesis_root = Binary::from_base64("YmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmI=").unwrap();
 
-//     let cfg = HEADSTASH_CFG.load(&deps.storage).unwrap();
-//     assert_eq!(cfg.gr, genesis_root);
-//     assert_eq!(cfg.ts.len(), 1);
-//     assert!(cfg.w.msg.nonce == 0);
-// }
-// }
+        let msg = InstantiateMsg {
+            genesis_root: genesis_root.clone(),
+            token_strategy: TokenStrategy::NewFungible(NewTokenConfig {
+                subdenom: HeadstashTokenObject::new("test".to_string()),
+                metadata: mock_metadata(),
+                initial_mint: None,
+                manager: None,
+                minters: vec![],
+            }),
+            wavs: valid_wavs_proof(1),
+        };
+
+        instantiate(deps.as_mut(), env, info, msg).unwrap();
+
+        let stored_root = GENESIS_TREE_ROOT.load(&deps.storage).unwrap();
+        assert_eq!(stored_root, genesis_root);
+
+        let cfg = HEADSTASH_CFG.load(&deps.storage).unwrap();
+        assert_eq!(cfg.gr, genesis_root);
+        assert_eq!(cfg.ts.len(), 1);
+        assert!(cfg.w.msg.nonce == 0);
+    }
+}

@@ -32,4 +32,7 @@ message MsgCreateHeadstashResponse {}
 message MsgCreateHeadstashNotes {}
 message MsgCreateHeadstashNoteResponse {}
 
+message MsgClaimHeadstashNote {}
+message MsgClaimHeadstashNoteResponse {}
+
  

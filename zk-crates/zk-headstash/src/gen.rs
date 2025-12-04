@@ -63,6 +63,11 @@ pub mod headstash {
             include!("gen/headstash.types.v1.rs");
         }
     }
+    pub mod extendo {
+        pub mod v1 {
+            include!("gen/headstash.extendo.v1.rs");
+        }
+    }
 
     // pub mod asset {
     //     pub mod v1 {
