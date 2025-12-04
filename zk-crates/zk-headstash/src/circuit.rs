@@ -5,7 +5,7 @@ use halo2_base::halo2_proofs::halo2curves::secp256k1::{Fp as Secp256k1Fp, Fq as 
 use halo2_gadgets::{
     ecc::{
         chip::{EccChip, EccConfig},
-        Point,
+        Point, ScalarFixed,
     },
     poseidon::{primitives as poseidon, Pow5Chip as PoseidonChip, Pow5Config as PoseidonConfig},
     sinsemilla::{
@@ -38,8 +38,11 @@ use crate::{
         MERKLE_DEPTH_HEADSTASH,
     },
     keys::NullifierDerivingKey,
-    note::{ExtractedNoteCommitment, NoteCommitment, Nullifier, Rho},
+    note::{
+        commitment::NoteCommitTrapdoor, ExtractedNoteCommitment, NoteCommitment, Nullifier, Rho,
+    },
     tree::{Anchor, MerkleHashHeadstash},
+    value::NoteValue,
 };
 
 // Public input configuration
@@ -77,9 +80,10 @@ pub struct HeadstashCircuit {
     pub(crate) epky: Value<Secp256k1Fp>,
     pub(crate) nk: Value<NullifierDerivingKey>,
     pub(crate) fdi: Value<pallas::Base>,
-    pub(crate) v: Value<pallas::Base>,
+    pub(crate) v: Value<NoteValue>,
     pub(crate) nd: Value<pallas::Base>,
     pub(crate) recp: Value<pallas::Base>,
+    pub(crate) rcm: Value<NoteCommitTrapdoor>,
 }
 
 impl plonk::Circuit<pallas::Base> for HeadstashCircuit {
@@ -230,7 +234,7 @@ impl plonk::Circuit<pallas::Base> for HeadstashCircuit {
         let ecc_chip = config.ecc_chip();
         // 1. --------------- Eligible Key Pairing Constraint -------------------------
         let secp256k1_chip = Secp256k1Chip::construct(config.secp256k1.clone());
-        let (e_sk_crt, (_e_pk_x_crt, _e_pk_y_crt)) = secp256k1_chip.prove_key_pairing(
+        let (esk_crt, (_e_pk_x_crt, _e_pk_y_crt)) = secp256k1_chip.prove_key_pairing(
             layouter.namespace(|| "secp256k1 key pairing: epk = esk * G"),
             self.esk,
             self.epkx,
@@ -324,20 +328,28 @@ impl plonk::Circuit<pallas::Base> for HeadstashCircuit {
         };
 
         // 4. ------------- Nullifier Authenticity Constraint --------------------------------------------------
-        // g★_d || pk★_d || i2lebsp_{64}(v) || i2lebsp_{255}(rho) || i2lebsp_{255}(psi)
-        let cm_new = gadgets::note_commit(
+        let rcp = ScalarFixed::new(
+            ecc_chip.clone(),
+            layouter.namespace(|| "rcm_old"),
+            self.rcm.as_ref().map(|rc| rc.inner()),
+        )?;
+
+        // // g★_d || pk★_d || i2lebsp_{64}(v) || i2lebsp_{255}(rho) || i2lebsp_{255}(psi)
+        let cm = gadgets::note_commit(
             layouter.namespace(|| {
                 "g★_d || pk★_d || i2lebsp_{64}(v) || i2lebsp_{255}(rho) || i2lebsp_{255}(psi)"
             }),
             config.sinsemilla_chip(),
             config.ecc_chip(),
             config.note_commit_chip(),
-            // g_d_new.inner(),
-            // pk_d_new.inner(),
-            // v_new.clone(),
-            // rho_new,
-            // psi_new,
-            // rcm_new,
+            recp,
+            fdi,
+            nd,
+            esk_crt.native,
+            v,
+            rho.clone(),
+            psi.clone(),
+            rcp,
         )?;
 
         // 5. ------------- OPTIMIZATION: Hash all public inputs into one using Poseidon --------------------------------------------------
@@ -520,9 +532,10 @@ mod tests {
             epky: Value::known(epky),
             nk: Value::known(nk),
             fdi: Value::known(pallas::Base::from(fdi)),
-            v: Value::known(v.to_fp_pallas()),
+            v: Value::known(v),
             nd: Value::known(crate::spec::nd_to_fp(&nd)),
             recp: Value::known(note.recp().to_pallas()),
+            rcm: Value::known(note.rseed().rcm(&rho)),
         }
     }
 

@@ -273,9 +273,6 @@ impl Note {
 
     /// Derives the commitment to this note.
     fn commitment_inner(&self) -> CtOption<NoteCommitment> {
-        // derive note commitment via: self.fdi,
-
-        // self.esk.epk(),
         NoteCommitment::derive(
             self.recp.to_bytes(),
             self.v,
