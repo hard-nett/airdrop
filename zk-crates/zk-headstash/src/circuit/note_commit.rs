@@ -281,7 +281,8 @@ impl DecomposeC {
             0..4,
         )?;
 
-        // Full message piece c: bits 188..254 of nd || all 64 bits of v || bits 0..123 of rho
+        // Full message piece c: bits 182-253 of nd || bits 0-63 of v || bits 0-113 of rho (250 bits)
+        // Split into subpieces < 64 bits each: 63 + 9 + 63 + 1 + 63 + 51 = 250 bits
         let c = MessagePiece::from_subpieces(
             chip,
             layouter.namespace(|| "c"),
@@ -614,31 +615,33 @@ impl DecomposeF {
         ),
         Error,
     > {
-        // Piece e = bits 110-253 of esk || bits 0-105 of psi (144 + 106 = 250 bits)
-        // Constrain e_0 to be 6 bits from esk
-        let e_0 = RangeConstrained::witness_short(
+        // Piece f = bits 106-253 of psi (148 bits)
+        // For the gate, we extract small boundary pieces f_0 and f_1
+        // f_0 constrained to 6 bits (bits 106-111 of psi)
+        let f_0 = RangeConstrained::witness_short(
             lookup_config,
-            layouter.namespace(|| "e_0"),
+            layouter.namespace(|| "f_0"),
             psi.value(),
-            110..116,
+            106..112,
         )?;
 
-        // Constrain e_1 to be 4 bits from psi
-        let e_1 = RangeConstrained::witness_short(
+        // f_1 constrained to 4 bits (bits 112-115 of psi)
+        let f_1 = RangeConstrained::witness_short(
             lookup_config,
-            layouter.namespace(|| "e_1"),
+            layouter.namespace(|| "f_1"),
             psi.value(),
-            0..4,
+            112..116,
         )?;
 
-        // Build full piece e: 144 bits from esk + 106 bits from psi
-        let e = MessagePiece::from_subpieces(
+        // Build full piece f: bits 106-253 of psi (148 bits)
+        // Split into subpieces < 64 bits each: 63 + 63 + 22 = 148 bits
+        let f = MessagePiece::from_subpieces(
             chip,
             layouter.namespace(|| "e"),
-            [e_0.value(), e_1.value()],
+            [f_0.value(), f_1.value()],
         )?;
 
-        Ok((e, e_0, e_1))
+        Ok((f, f_0, f_1))
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -1491,10 +1494,10 @@ pub(in crate::circuit) mod gadgets {
         // the outputs that we will need for canonicity checks.
         // With 6 pieces (a=0, b=1, c=2, d=3, e=4, f=5):
         let z13_a = zs[0][13].clone(); // recp canonicity (piece a)
-        let z13_c = zs[2][13].clone(); // nd canonicity (piece c contains nd bits 182-253)
-        let z1_d = zs[3][1].clone(); // rho/esk boundary (piece d)
-        let z13_e = zs[4][13].clone(); // esk canonicity (piece e contains esk bits 110-253)
-        let z13_f = zs[5][13].clone(); // psi canonicity (piece f contains psi bits 106-253)
+        let z13_c = zs[2][0].clone(); // nd canonicity (piece c contains nd bits 182-253)
+        let z1_d = zs[3][0].clone(); // rho/esk boundary (piece d)
+        let z13_e = zs[4][0].clone(); // esk canonicity (piece e contains esk bits 110-253)
+        let z13_f = zs[5][0].clone(); // psi canonicity (piece f contains psi bits 106-253)
 
         // Witness and constrain the bounds we need to ensure canonicity.
         // recp canonicity (spans pieces a and b)
