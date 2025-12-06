@@ -1,1 +1,0 @@
-// proove that private inputs [] compute the private hash H

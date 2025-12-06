@@ -1,6 +1,6 @@
 //! Unit tests for WebWallet wasm-bindgen integration
 //!
-//! These tests verify that nullifier generation works correctly
+//! These tests verify that nul generation works correctly
 //! through the wasm-bindgen bridge and matches the expected
 //! cryptographic outputs from zk-headstash.
 
@@ -10,14 +10,14 @@ use zk_headstash::gen::headstash::snp::v1::SerializedNoteData;
 
 wasm_bindgen_test_configure!(run_in_browser);
 
-/// Test nullifier generation with known inputs
+/// Test nul generation with known inputs
 ///
 /// This verifies that:
 /// 1. The wasm-bindgen bridge correctly passes data
 /// 2. Nullifier derivation matches HeadstashSuite spec
 /// 3. Note commitment is computed correctly
 #[wasm_bindgen_test]
-async fn test_nullifier_generation_basic() {
+async fn test_nul_generation_basic() {
     // Known test inputs
     let esk_hex = "0000000000000000000000000000000000000000000000000000000000000001";
     let rho_hex = "0000000000000000000000000000000000000000000000000000000000000002";
@@ -53,29 +53,13 @@ async fn test_nullifier_generation_basic() {
 
     // Verify outputs are non-zero
     assert_ne!(note_data.nk.len(), 0, "Nullifier key should not be empty");
-    assert_ne!(
-        note_data.nullifier.len(),
-        0,
-        "Nullifier should not be empty"
-    );
-    assert_ne!(
-        note_data.commitment.len(),
-        0,
-        "Commitment should not be empty"
-    );
+    assert_ne!(note_data.nul.len(), 0, "Nullifier should not be empty");
+    assert_ne!(note_data.cm.len(), 0, "Commitment should not be empty");
 
     // Verify expected lengths (32 bytes each)
     assert_eq!(note_data.nk.len(), 32, "NK should be 32 bytes");
-    assert_eq!(
-        note_data.nullifier.len(),
-        32,
-        "Nullifier should be 32 bytes"
-    );
-    assert_eq!(
-        note_data.commitment.len(),
-        32,
-        "Commitment should be 32 bytes"
-    );
+    assert_eq!(note_data.nul.len(), 32, "Nullifier should be 32 bytes");
+    assert_eq!(note_data.cm.len(), 32, "Commitment should be 32 bytes");
 
     // Verify value fields
     assert_eq!(note_data.v, v);
@@ -84,9 +68,9 @@ async fn test_nullifier_generation_basic() {
     assert!(!note_data.spent);
 }
 
-/// Test that different secret keys produce different nullifiers
+/// Test that different secret keys produce different nuls
 #[wasm_bindgen_test]
-async fn test_nullifier_uniqueness_by_esk() {
+async fn test_nul_uniqueness_by_esk() {
     let rho_hex = "0000000000000000000000000000000000000000000000000000000000000002";
     let recp_hex = "0000000000000000000000000000000000000000000000000000000000000003";
     let rseed_hex = "0000000000000000000000000000000000000000000000000000000000000004";
@@ -135,20 +119,20 @@ async fn test_nullifier_uniqueness_by_esk() {
 
     // Nullifiers should be different
     assert_ne!(
-        note1.nullifier, note2.nullifier,
-        "Different ESKs should produce different nullifiers"
+        note1.nul, note2.nul,
+        "Different ESKs should produce different nuls"
     );
 
     // NKs should be different
     assert_ne!(
         note1.nk, note2.nk,
-        "Different ESKs should produce different nullifier keys"
+        "Different ESKs should produce different nul keys"
     );
 }
 
-/// Test that different rho values produce different nullifiers
+/// Test that different rho values produce different nuls
 #[wasm_bindgen_test]
-async fn test_nullifier_uniqueness_by_rho() {
+async fn test_nul_uniqueness_by_rho() {
     let esk_hex = "0000000000000000000000000000000000000000000000000000000000000001";
     let recp_hex = "0000000000000000000000000000000000000000000000000000000000000003";
     let rseed_hex = "0000000000000000000000000000000000000000000000000000000000000004";
@@ -195,22 +179,22 @@ async fn test_nullifier_uniqueness_by_rho() {
     let note1: SerializedNoteData = serde_json::from_str(&note1_json).unwrap();
     let note2: SerializedNoteData = serde_json::from_str(&note2_json).unwrap();
 
-    // Nullifiers should be different (rho affects both NK and nullifier)
+    // Nullifiers should be different (rho affects both NK and nul)
     assert_ne!(
-        note1.nullifier, note2.nullifier,
-        "Different rho values should produce different nullifiers"
+        note1.nul, note2.nul,
+        "Different rho values should produce different nul"
     );
 
     // NKs should be different (NK = HKDF(esk, rho))
     assert_ne!(
         note1.nk, note2.nk,
-        "Different rho values should produce different nullifier keys"
+        "Different rho values should produce different nul keys"
     );
 }
 
-/// Test that nullifier derivation is deterministic
+/// Test that nul derivation is deterministic
 #[wasm_bindgen_test]
-async fn test_nullifier_determinism() {
+async fn test_nul_determinism() {
     let esk_hex = "0000000000000000000000000000000000000000000000000000000000000001";
     let rho_hex = "0000000000000000000000000000000000000000000000000000000000000002";
     let recp_hex = "0000000000000000000000000000000000000000000000000000000000000003";
@@ -256,23 +240,20 @@ async fn test_nullifier_determinism() {
     let note2: SerializedNoteData = serde_json::from_str(&note2_json).unwrap();
 
     // Should produce identical outputs
-    assert_eq!(
-        note1.nullifier, note2.nullifier,
-        "Same inputs should produce same nullifier"
-    );
+    assert_eq!(note1.nul, note2.nul, "Same inputs should produce same nul");
     assert_eq!(
         note1.nk, note2.nk,
-        "Same inputs should produce same nullifier key"
+        "Same inputs should produce same nul key"
     );
     assert_eq!(
-        note1.commitment, note2.commitment,
+        note1.cm, note2.cm,
         "Same inputs should produce same commitment"
     );
 }
 
-/// Test different FDI values produce different commitments but same nullifier
+/// Test different FDI values produce different commitments but same nul
 #[wasm_bindgen_test]
-async fn test_fdi_affects_commitment_not_nullifier() {
+async fn test_fdi_affects_commitment_not_nul() {
     let esk_hex = "0000000000000000000000000000000000000000000000000000000000000001";
     let rho_hex = "0000000000000000000000000000000000000000000000000000000000000002";
     let recp_hex = "0000000000000000000000000000000000000000000000000000000000000003";
@@ -317,18 +298,18 @@ async fn test_fdi_affects_commitment_not_nullifier() {
     let note1: SerializedNoteData = serde_json::from_str(&note1_json).unwrap();
     let note2: SerializedNoteData = serde_json::from_str(&note2_json).unwrap();
 
-    // Nullifiers should be same (nullifier only depends on NK and rho, not fdi)
+    // Nullifiers should be same (nul only depends on NK and rho, not fdi)
     assert_eq!(
-        note1.nullifier, note2.nullifier,
-        "FDI should not affect nullifier (only NK + rho matter)"
+        note1.nul, note2.nul,
+        "FDI should not affect nul (only NK + rho matter)"
     );
 
     // NKs should be same (NK only depends on esk and rho)
-    assert_eq!(note1.nk, note2.nk, "FDI should not affect nullifier key");
+    assert_eq!(note1.nk, note2.nk, "FDI should not affect nul key");
 
     // Commitments should be different (commitment includes fdi)
     assert_ne!(
-        note1.commitment, note2.commitment,
+        note1.cm, note2.cm,
         "Different FDI should produce different commitments"
     );
 }

@@ -38,27 +38,35 @@ message ListUnspentNotesResponse {
 
 // Requests the list of all transactions that occurred within a given block.
 message GetNoteByNullifierRequest {
+    // nullifier
     string nul = 1;
 }
 
 // A transaction that appeared within a given block.
 message GetNoteByNullifierResponse {
+         // id 
  string id =1;
 
 }
 // A transaction that appeared within a given block.
 message DownloadNullifierStateResponse {
+    // data
     bytes data = 1;
 }
 // A transaction that appeared within a given block.
 message DownloadNullifierStateRequest {
+    // id
   string id = 1;
+    // id
   bytes pk = 2;
 }
 // A transaction that appeared within a given block.
 message UploadNullifierStateRequest {
+      // id of claim
   string id = 1;
+      // data
   bytes data = 2;
+      // sig
   bytes sig = 3;
  
 }
@@ -72,26 +80,41 @@ message ClaimHeadstashRequest {
 }
 // A transaction that appeared within a given block.
 message ClaimHeadstashResponse {
+    // id of claim
     string id = 1;
+    // msg of claim
     bytes msg = 2;
+    // signature of claim
     bytes signature = 3;
 }
 
 // Encrypted payload for nullifier state sync
 message EncryptedNullifierState {
+    // eligible public key
     bytes epk = 1;
+    // ciphertext
     bytes ciphertext = 2;
+    // mac
     bytes mac = 3;
+    // signature
     bytes signature = 4;
 }
  
+ // serialized note data 
 message SerializedNoteData {
+    // nullifier key
     bytes nk = 1;
-    bytes nullifier = 2;
-    bytes commitment = 3;
+    // nullifier 
+    bytes nul = 2;
+    // note-commitment
+    bytes cm = 3;
+    // value
     string v = 4;
+    // note-denom
     string nd = 5;
+    // fixed index
     uint64 fdi = 6;
+    // spent 
     bool spent = 7;
 }
 

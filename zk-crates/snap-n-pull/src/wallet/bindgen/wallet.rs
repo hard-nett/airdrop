@@ -226,19 +226,18 @@ impl WebWallet {
             .map_err(|_| Error::KeyDecoding("Invalid rseed length".into()))?;
 
         // Generate note data
-        let (nk, nullifier, commitment) =
+        let (nk, nullifier, cm) =
             self.inner
                 .generate_note_data(esk, rho, fdi, &recp_bytes, hv.clone(), rseed)?;
 
         // Serialize as JSON
         use zk_headstash::note::ExtractedNoteCommitment;
-        let commitment_bytes: [u8; 32] =
-            ExtractedNoteCommitment::from(commitment.clone()).to_bytes();
+        let commitment_bytes: [u8; 32] = ExtractedNoteCommitment::from(cm.clone()).to_bytes();
 
         let note_data = SerializedNoteData {
             nk: nk.to_bytes().to_vec(),
-            nullifier: nullifier.to_bytes().to_vec(),
-            commitment: commitment_bytes.to_vec(),
+            nul: nullifier.to_bytes().to_vec(),
+            cm: commitment_bytes.to_vec(),
             v,
             nd,
             fdi,

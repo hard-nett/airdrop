@@ -2930,7 +2930,7 @@ pub fn generator() -> pallas::Affine {
 
 #[cfg(test)]
 mod tests {
-    use super::super::{super::DST_CM, NUM_WINDOWS};
+    use super::super::{NOTE_COMMITMENT_PERSONALIZATION, NUM_WINDOWS};
     use super::*;
     use halo2_gadgets::{
         ecc::chip::constants::{test_lagrange_coeffs, test_zs_and_us},
@@ -2942,7 +2942,7 @@ mod tests {
 
     #[test]
     fn generator() {
-        let domain = CommitDomain::new(DST_CM);
+        let domain = CommitDomain::new(NOTE_COMMITMENT_PERSONALIZATION);
         let point = domain.R();
         let coords = point.to_affine().coordinates().unwrap();
 

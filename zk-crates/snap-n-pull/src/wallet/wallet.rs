@@ -9,9 +9,9 @@ use std::num::NonZeroU32;
 // };
 
 // use crate::BlockRange;
-
 use crate::Error;
 use crate::Network;
+use group::ff::PrimeField;
 
 // use pczt::roles::combiner::Combiner;
 // use pczt::roles::prover::Prover;
@@ -25,6 +25,8 @@ use serde::Serialize;
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
+use zk_headstash::keys::FullViewingKey;
+use zk_headstash::keys::SpendingKey;
 
 use zk_headstash::keys::{EligiblePk, EligibleSk, NullifierDerivingKey};
 use zk_headstash::note::{NoteCommitment, Nullifier, Rho};
@@ -205,15 +207,22 @@ impl HeadstashWallet {
             .map_err(|e| Error::KeyDecoding(format!("Invalid address: {:?}", e)))?;
 
         let rseed = RandomSeed::from_bytes(rseed, &rho).expect("rseed input");
-
+        let fvk = FullViewingKey::from(
+            &SpendingKey::from_bytes(esk.derive_pallas().to_repr()).expect("esk spending key"),
+        );
         // Create note
         let (v, nd) = hv.into_parts();
-        let note = Note::from_parts(recp, v, nd, fdi, esk, rho, rseed)
-            .into_option()
-            .ok_or_else(|| Error::KeyDecoding("Failed to create valid note".into()))?;
+        let note = Note::from_parts(
+            fvk.address_at(0u32, zk_headstash::keys::Scope::External),
+            v,
+            rho,
+            rseed,
+        ) // nd, fdi, esk,
+        .into_option()
+        .ok_or_else(|| Error::KeyDecoding("Failed to create valid note".into()))?;
 
         // Derive nullifier and commitment
-        let nullifier = note.nullifier();
+        let nullifier = note.nullifier(&fvk);
         let commitment = note.commitment();
 
         Ok((nk, nullifier, commitment))

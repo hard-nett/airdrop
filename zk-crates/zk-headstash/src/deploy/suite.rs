@@ -1,10 +1,12 @@
-use std::error::Error;
-use std::path::{Path, PathBuf};
-use std::sync::Mutex;
-use std::{env, fs};
-
+//! main suite for headstash
 use cosmwasm_std::CanonicalAddr;
 use pasta_curves::pallas::Base;
+use std::error::Error;
+use std::path::{Path, PathBuf};
+use std::string::{String, ToString};
+use std::sync::Mutex;
+use std::vec::Vec;
+use std::{env, eprintln, fs, println};
 
 use rayon::prelude::*;
 use secp256k1::SecretKey;
@@ -17,6 +19,7 @@ use crate::note::{Note, Rho};
 use crate::spec;
 use crate::value::NoteDenom;
 
+use alloc::boxed::Box;
 use base64::{engine::general_purpose, Engine as _};
 use ff::{Field, FromUniformBytes, PrimeField, PrimeFieldBits};
 use hex::decode;
@@ -24,8 +27,9 @@ use pasta_curves::{arithmetic::CurveAffine, group::Curve, pallas, Fp};
 use serde_json::{json, Value};
 use sinsemilla::HashDomain;
 
+/// BoxError
 pub type BoxError = Box<dyn Error + Send + Sync>;
-
+/// get_cli_args
 pub fn get_cli_args() -> Result<(String, String), Box<dyn std::error::Error>> {
     let args: Vec<String> = env::args().collect();
     if args.len() != 3 {
@@ -34,8 +38,12 @@ pub fn get_cli_args() -> Result<(String, String), Box<dyn std::error::Error>> {
     }
     Ok((args[1].clone(), args[2].clone()))
 }
+/// TerpHeadstashConfig
+#[derive(Debug)]
 pub struct TerpHeadstashConfig {}
 
+/// HeadstashSuite
+#[derive(Debug, Default)]
 pub struct HeadstashSuite {}
 impl HeadstashBitwiseInstance for HeadstashSuite {}
 impl HeadstashLaunchpadInstance for HeadstashSuite {}
@@ -44,6 +52,7 @@ impl HeadstashLaunchpadInstance for HeadstashSuite {}
 //     type HsErr = BoxError;
 // }
 impl HeadstashSuite {
+    /// create new headsatsh suite
     pub fn new() -> Self {
         Self {}
     }
@@ -99,7 +108,9 @@ impl HeadstashSuite {
 //     }
 // }
 
+/// HeadstashBitwiseInstance
 pub trait HeadstashBitwiseInstance {
+    /// derive_m
     fn derive_m(
         &self,
         esk: &[u8; 32],
@@ -115,6 +126,8 @@ pub trait HeadstashBitwiseInstance {
         );
         Ok(crate::spec::prf_pallas_m(fdi, esk, v, nd))
     }
+
+    /// derive_esk
     fn derive_esk(&self, sk: [u8; 32]) -> [Fp; 3] {
         let skfq =
             halo2_base::halo2_proofs::halo2curves::secq256k1::Fp::from_repr(sk).expect("valid Fq");
@@ -123,7 +136,7 @@ pub trait HeadstashBitwiseInstance {
             .try_into()
             .unwrap()
     }
-
+    /// derive_epk
     fn derive_epk(&self, pk: [u8; 32]) -> [Fp; 3] {
         let pkfq =
             halo2_base::halo2_proofs::halo2curves::secq256k1::Fp::from_repr(pk).expect("valid Fq");
@@ -132,13 +145,15 @@ pub trait HeadstashBitwiseInstance {
             .try_into()
             .unwrap()
     }
+    /// derive_v
     fn derive_v(&self, v: u64) -> [u8; 8] {
         v.to_le_bytes()
     }
-
+    /// derive_fdi
     fn derive_fdi(&self, fdi: u64) -> [u8; 8] {
         fdi.to_le_bytes()
     }
+    /// derive_nk
     fn derive_nk(&self, esk: &[u8; 32], rho: Rho) -> NullifierDerivingKey {
         NullifierDerivingKey::derive_from(
             EligibleSk::from(SecretKey::from_byte_array(*esk).unwrap()),
@@ -171,6 +186,7 @@ pub trait HeadstashBitwiseInstance {
         spec::recp_to_fp(&RecpAddr::try_from(addr).unwrap())
     }
 
+    /// extend_with_base_field_bits
     fn extend_with_base_field_bits(bits: &mut Vec<bool>, a: pallas::Base) {
         let bit_slice = a.to_le_bits();
         bits.extend(bit_slice.iter().take(250).map(|b| *b));
@@ -182,6 +198,7 @@ pub trait HeadstashBitwiseInstance {
 /// TODO: feature flag parallelization in tree generation
 /// TODO: add default documentation to each member
 pub trait HeadstashLaunchpadInstance: HeadstashBitwiseInstance {
+    /// create_new_headstash
     fn create_new_headstash() -> Result<(), BoxError> {
         // TODO:
         // prompt to determine communities to include in headstash airdrop
@@ -193,6 +210,7 @@ pub trait HeadstashLaunchpadInstance: HeadstashBitwiseInstance {
         // deploy new headstash aggregator
         todo!()
     }
+    /// get_input_path
     fn get_input_path(&self) -> Result<String, BoxError> {
         let args: Vec<String> = env::args().collect();
         if args.len() != 2 {
@@ -201,9 +219,7 @@ pub trait HeadstashLaunchpadInstance: HeadstashBitwiseInstance {
         }
         Ok(args[1].clone())
     }
-
-    // -----------------------------------------------------------------------------
-    // Helper that generates all leaves for a single token (parallelised)
+    /// Helper that generates all leaves for a single token (parallelised)
     fn derive_leaf(
         &self,
         addr: &str,
@@ -267,7 +283,7 @@ pub trait HeadstashLaunchpadInstance: HeadstashBitwiseInstance {
             raw_leaves.into_inner().unwrap(),
         ))
     }
-
+    /// gen_headstash_tree
     fn gen_headstash_tree(&self, output_path: PathBuf) -> Result<String, BoxError>
     where
         Self: Sync,
@@ -354,7 +370,7 @@ pub trait HeadstashLaunchpadInstance: HeadstashBitwiseInstance {
         Ok(root_hex)
     }
 
-    // Build Merkle tree from list of leaves
+    /// Build Merkle tree from list of leaves
     fn tree_root_from_leaves(&self, leaves: Vec<pallas::Base>) -> Vec<pallas::Base> {
         let mut c = leaves;
         let mut n = Vec::new();
@@ -380,7 +396,7 @@ pub trait HeadstashLaunchpadInstance: HeadstashBitwiseInstance {
         }
     }
 
-    // Calculate MerkleCRH: H(layer || left || right)
+    /// Calculate MerkleCRH: H(layer || left || right)
     fn merkle_crh(layer: u32, left: pallas::Base, right: pallas::Base) -> pallas::Base {
         let domain = HashDomain::new(MERKLE_CRH_PERSONALIZATION);
         // bit string: 10 + 250 + 250 = 510 bits
@@ -427,6 +443,7 @@ pub trait HeadstashLaunchpadInstance: HeadstashBitwiseInstance {
             .clone())
     }
 
+    /// create_headstash_notes
     fn create_headstash_notes(&self) -> Result<(), BoxError> {
         let (input_path, addr_target) = get_cli_args().unwrap();
         let input_data: Value = serde_json::from_str(&fs::read_to_string(&input_path)?)?;
@@ -517,6 +534,7 @@ pub trait HeadstashLaunchpadInstance: HeadstashBitwiseInstance {
         todo!()
     }
 
+    /// Find the first note matching token & amount, return its fdi
     fn print_tree(
         &self,
         input: &mut Value,
@@ -534,8 +552,7 @@ pub trait HeadstashLaunchpadInstance: HeadstashBitwiseInstance {
         Ok(())
     }
 
-    // ------------------------------------------------
-    // Find the first note matching token & amount, return its fdi
+    /// Find the first note matching token & amount, return its fdi
     fn find_fdi(input_path: &str, token: &str, amount: &str) -> Result<u64, BoxError> {
         let json: Value =
             serde_json::from_str(&fs::read_to_string(std::path::Path::new(input_path))?)?;
@@ -567,6 +584,7 @@ pub trait HeadstashLaunchpadInstance: HeadstashBitwiseInstance {
         .into())
     }
 
+    /// # get_note_path
     fn get_note_path() -> Result<(String, String, String), BoxError> {
         let args: Vec<String> = env::args().collect();
         if args.len() != 4 {
@@ -599,7 +617,7 @@ pub trait HeadstashLaunchpadInstance: HeadstashBitwiseInstance {
         // let note = Note::new(recp, v, nd, fdi, esk, rho, rseed)
         Ok(())
     }
-
+    /// rho_from_secure_random
     fn rho_from_secure_random() -> Rho {
         let mut randomness_64 = [0; 64];
         blake3::Hasher::new()
@@ -624,6 +642,7 @@ pub trait HeadstashLaunchpadInstance: HeadstashBitwiseInstance {
 #[cfg(test)]
 mod test {
     use super::*;
+    use std::boxed::Box;
     use std::collections::HashMap;
 
     #[test]
@@ -757,5 +776,3 @@ mod test {
     //     Ok(())
     // }
 }
-
-

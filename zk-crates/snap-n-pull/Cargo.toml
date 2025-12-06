@@ -23,6 +23,7 @@ crate-type = ["cdylib", "rlib"]
 [dependencies]
 zk-headstash = { path = "../zk-headstash", features = ["rpc"] }
 cosmos-sdk-proto  = { workspace = true }
+group  = { workspace = true }
 
 thiserror = { version = "1.0"  }
 tokio = { version = "1.0", features = ["rt", "macros"] }

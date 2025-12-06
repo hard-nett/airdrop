@@ -32,8 +32,8 @@ impl From<&NoteData> for SerializedNoteData {
     fn from(note: &NoteData) -> Self {
         Self {
             nk: note.nk.to_bytes().to_vec(),
-            nullifier: note.nullifier.to_bytes().to_vec(),
-            commitment: ExtractedNoteCommitment::from(note.commitment.clone())
+            nul: note.nullifier.to_bytes().to_vec(),
+            cm: ExtractedNoteCommitment::from(note.commitment.clone())
                 .to_bytes()
                 .to_vec(),
             v: note.hv.raw_amount().to_string(),

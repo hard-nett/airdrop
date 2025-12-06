@@ -8,13 +8,14 @@ import "google/protobuf/struct.proto";
 service HeadstashService {
       // retrieve token holder distribution
       rpc CreateHeadstashNotes(MsgCreateHeadstashNotes) returns (MsgCreateHeadstashNoteResponse);
+      // Creates a new headstash instance
       rpc CreateNewHeadstash(MsgCreateHeadstash) returns (MsgCreateHeadstashResponse);
+      // creates a note nullifier given private inputs
       rpc PrepareNoteNullifier(MsgPrepareNoteNullifier) returns (MsgPrepareNoteNullifierResponse);
       // generate headstash instance tree
       rpc CreateHeadstashTree(MsgCreateHeadstashTree) returns (MsgCreateHeadstashTreeResponse);
       // determine piecewise distribution
       // prepare headstash config
-      // create new headstash 
 }
 
 service HeadstashActionsService {
@@ -23,16 +24,26 @@ service HeadstashActionsService {
       // perform headstash action
 }
 
+// response of creating the tree 
 message MsgCreateHeadstashTreeResponse {}
+// Create a distribution headstash tree for a given distribution param
 message MsgCreateHeadstashTree {}
-message MsgPrepareNoteNullifierResponse {}
+// Create a note nullifier for a given note input
 message MsgPrepareNoteNullifier {}
+// Return the resonse for a spefici note input
+message MsgPrepareNoteNullifierResponse {}
+// Create a Headstash instance
 message MsgCreateHeadstash {}
+// All relevant information created during successful headstash creation
 message MsgCreateHeadstashResponse {}
+// Create a list of the notes for a given address and headstash instance
 message MsgCreateHeadstashNotes {}
+// output of note instance location
 message MsgCreateHeadstashNoteResponse {}
 
+//  claim a headstash note and broadcast claim 
 message MsgClaimHeadstashNote {}
+// response of claiming a headhstash note
 message MsgClaimHeadstashNoteResponse {}
 
  

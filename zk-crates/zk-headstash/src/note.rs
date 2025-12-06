@@ -1,17 +1,24 @@
+//! Data structures used for note construction.
+use core::fmt;
 use cosmwasm_std::CanonicalAddr;
-use ff::PrimeField;
+use memuse::DynamicUsage;
 
-use pasta_curves::{pallas, Fp};
+use ff::PrimeField;
+use group::GroupEncoding;
+use pasta_curves::pallas;
 use rand::RngCore;
 use subtle::CtOption;
+
+use crate::{
+    address::RecpAddr,
+    keys::{EligibleSk, EphemeralSecretKey, FullViewingKey, Scope, SpendingKey},
+    spec::{to_base, to_scalar, NonZeroPallasScalar, PrfExpand},
+    value::{NoteDenom, NoteValue},
+    Address,
+};
+
 pub(crate) mod commitment;
-pub mod scripts;
 pub use self::commitment::{ExtractedNoteCommitment, NoteCommitment};
-use crate::address::RecpAddr;
-use crate::keys::{EligibleSk, NullifierDerivingKey, SpendingKey};
-use crate::prf_expand::PrfExpand;
-use crate::spec::{prf_nf, to_base, to_scalar, NonZeroPallasScalar};
-use crate::value::{NoteDenom, NoteValue};
 
 pub(crate) mod nullifier;
 pub use self::nullifier::Nullifier;
@@ -19,6 +26,9 @@ pub use self::nullifier::Nullifier;
 /// The randomness used to construct a note.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Rho(pallas::Base);
+
+// We know that `pallas::Base` doesn't allocate internally.
+memuse::impl_no_dynamic_usage!(Rho);
 
 impl Rho {
     /// Deserialize the rho value from a byte array.
@@ -32,10 +42,12 @@ impl Rho {
     pub fn from_bytes(bytes: &[u8; 32]) -> CtOption<Self> {
         pallas::Base::from_repr(*bytes).map(Rho)
     }
+
     /// Serialize the rho value to its canonical byte representation.
     pub fn to_bytes(self) -> [u8; 32] {
         self.0.to_repr()
     }
+
     /// Constructs the [`Rho`] value to be used to construct a new note from the revealed nullifier
     /// of the note being spent in the [`Action`] under construction.
     ///
@@ -44,14 +56,8 @@ impl Rho {
         Rho(nf.0)
     }
 
-    pub fn into_inner(self) -> pallas::Base {
+    pub(crate) fn into_inner(self) -> pallas::Base {
         self.0
-    }
-    /// Constructs the [`Rho`] value to be used to construct the first note claimed by an eligible headstash address.
-    /// Creates H(elig_addr||nonce) to be used as bytes
-    pub fn from_genesis(elig_addr: &str, nonce: u64) -> CtOption<Self> {
-        let hash = blake3::hash(elig_addr.as_bytes());
-        pallas::Base::from_repr(*hash.as_bytes()).map(Rho)
     }
 }
 
@@ -60,7 +66,7 @@ impl Rho {
 pub struct RandomSeed([u8; 32]);
 
 impl RandomSeed {
-    pub fn random(rng: &mut impl RngCore, rho: &Rho) -> Self {
+    pub(crate) fn random(rng: &mut impl RngCore, rho: &Rho) -> Self {
         loop {
             let mut bytes = [0; 32];
             rng.fill_bytes(&mut bytes);
@@ -88,7 +94,7 @@ impl RandomSeed {
     /// Defined in [Zcash Protocol Spec § 4.7.3: Sending Notes (Orchard)][orchardsend].
     ///
     /// [orchardsend]: https://zips.z.cash/protocol/nu5.pdf#orchardsend
-    pub fn psi(&self, rho: &Rho) -> pallas::Base {
+    pub(crate) fn psi(&self, rho: &Rho) -> pallas::Base {
         to_base(PrfExpand::PSI.with(&self.0, &rho.to_bytes()))
     }
 
@@ -112,7 +118,7 @@ impl RandomSeed {
     /// Defined in [Zcash Protocol Spec § 4.7.3: Sending Notes (Orchard)][orchardsend].
     ///
     /// [orchardsend]: https://zips.z.cash/protocol/nu5.pdf#orchardsend
-    pub fn rcm(&self, rho: &Rho) -> commitment::NoteCommitTrapdoor {
+    pub(crate) fn rcm(&self, rho: &Rho) -> commitment::NoteCommitTrapdoor {
         commitment::NoteCommitTrapdoor(to_scalar(
             PrfExpand::ORCHARD_RCM.with(&self.0, &rho.to_bytes()),
         ))
@@ -123,18 +129,24 @@ impl RandomSeed {
 #[derive(Debug, Copy, Clone)]
 pub struct Note {
     /// The recp of the funds. is a raw CanonicalAddr
-    recp: RecpAddr,
+    recipient: RecpAddr,
     /// The value of this note.
     v: NoteValue,
     /// The token denomination of this note
     nd: NoteDenom,
-    /// A unique creation ID for this note.
-    rho: Rho,
-    /// The seed randomness for various note components.
-    rseed: RandomSeed,
+    /// The token denomination of this note
     esk: EligibleSk,
     /// fixed_denomination_index of a genesis note (exists for genesis leaf uniqueness)
     fdi: u64,
+    /// A unique creation ID for this note.
+    ///
+    /// This is produced from the nullifier of the note that will be spent in the [`Action`] that
+    /// creates this note.
+    ///
+    /// [`Action`]: crate::action::Action
+    rho: Rho,
+    /// The seed randomness for various note components.
+    rseed: RandomSeed,
 }
 
 impl PartialEq for Note {
@@ -163,23 +175,22 @@ impl Note {
     ///
     /// [Section 4.19]: https://zips.z.cash/protocol/protocol.pdf#saplingandorchardinband
     pub fn from_parts(
-        recp: RecpAddr,
-        v: NoteValue,
         nd: NoteDenom,
+        v: NoteValue,
         fdi: u64,
+        recipient: RecpAddr,
         esk: EligibleSk,
         rho: Rho,
         rseed: RandomSeed,
     ) -> CtOption<Self> {
         let note = Note {
-            recp,
+            nd,
             v,
+            fdi,
+            recipient,
+            esk,
             rho,
             rseed,
-            nd,
-            esk,
-            fdi,
-            // m: todo!(),
         };
         CtOption::new(note, note.commitment_inner().is_some())
     }
@@ -190,20 +201,20 @@ impl Note {
     ///
     /// [orchardsend]: https://zips.z.cash/protocol/nu5.pdf#orchardsend
     pub(crate) fn new(
-        recp: RecpAddr,
-        value: NoteValue,
         nd: NoteDenom,
+        v: NoteValue,
         fdi: u64,
+        recipient: RecpAddr,
         esk: EligibleSk,
         rho: Rho,
         mut rng: impl RngCore,
     ) -> Self {
         loop {
             let note = Note::from_parts(
-                recp,
-                value,
                 nd,
+                v,
                 fdi,
+                recipient,
                 esk,
                 rho,
                 RandomSeed::random(&mut rng, &rho),
@@ -219,31 +230,44 @@ impl Note {
     /// Defined in [Zcash Protocol Spec § 4.8.3: Dummy Notes (Orchard)][orcharddummynotes].
     ///
     /// [orcharddummynotes]: https://zips.z.cash/protocol/nu5.pdf#orcharddummynotes
-    pub(crate) fn dummy(rng: &mut impl RngCore, rho: Option<Rho>) -> (EligibleSk, Self) {
-        let sk = EligibleSk::random(rng);
-        // let fvk: FullViewingKey = (&sk).into();
+    pub(crate) fn dummy(
+        rng: &mut impl RngCore,
+        rho: Option<Rho>,
+    ) -> (SpendingKey, FullViewingKey, EligibleSk, Self) {
+        let esk = EligibleSk::random(rng);
+        let sk = SpendingKey::random(rng);
+        let fvk: FullViewingKey = (&sk).into();
+        let recipient = fvk.address_at(0u32, Scope::External);
 
         let note = Note::new(
-            RecpAddr::try_from(CanonicalAddr::from([43;32])).expect("dang"),
+              NoteDenom::new_for_proof("I hope you got the necessary doguments and fucking permutations to suck on my shaved balls"),
             NoteValue::zero(),
-            NoteDenom::new_for_proof("I hope you got the necessary doguments and fucking permutations to suck on my shaved balls"),
             0,
-            sk,
+            RecpAddr::try_from(CanonicalAddr::from([43; 32])).expect("dang"),
+            esk,
             rho.unwrap_or_else(|| Rho::from_nf_old(Nullifier::dummy(rng))),
-              rng,
+            rng,
         );
 
-        (sk, note)
+        (sk, fvk, esk, note)
     }
 
-    /// Returns the recp of this note.
-    pub fn recp(&self) -> RecpAddr {
-        self.recp
+    /// Returns the recipient of this note.
+    pub fn recipient(&self) -> RecpAddr {
+        self.recipient
     }
 
     /// Returns the value of this note.
     pub fn value(&self) -> NoteValue {
         self.v
+    }
+    /// Returns the fdi of this note.
+    pub fn fdi(&self) -> u64 {
+        self.fdi
+    }
+    /// Returns the fdi of this note.
+    pub fn nd(&self) -> NoteDenom {
+        self.nd
     }
 
     /// Returns the rseed value of this note.
@@ -251,10 +275,10 @@ impl Note {
         &self.rseed
     }
 
-    // / Derives the ephemeral secret key for this note.
-    // pub(crate) fn esk(&self) -> EphemeralSecretKey {
-    //     EphemeralSecretKey(self.rseed.esk(&self.rho))
-    // }
+    /// Derives the ephemeral secret key for this note.
+    pub(crate) fn esk(&self) -> EphemeralSecretKey {
+        EphemeralSecretKey(self.rseed.esk(&self.rho))
+    }
 
     /// Returns rho of this note.
     pub fn rho(&self) -> Rho {
@@ -272,12 +296,22 @@ impl Note {
     }
 
     /// Derives the commitment to this note.
+    ///
+    /// This is the internal fallible API, used to check at construction time that the
+    /// note has a commitment. Once you have a [`Note`] object, use `note.commitment()`
+    /// instead.
+    ///
+    /// Defined in [Zcash Protocol Spec § 3.2: Notes][notes].
+    ///
+    /// [notes]: https://zips.z.cash/protocol/nu5.pdf#notes
+
     fn commitment_inner(&self) -> CtOption<NoteCommitment> {
         NoteCommitment::derive(
-            self.recp.to_bytes(),
+            pallas::Base::from_repr(self.nd.as_bytes().try_into().unwrap())
+                .expect("nd noteCommitment Fp"),
             self.v,
-            Fp::from_repr(self.nd.as_bytes().try_into().unwrap()).expect("nd noteCommitment Fp"),
-            Fp::from_u128(self.fdi.into()),
+            pallas::Base::from_u128(self.fdi.into()),
+            self.recipient.to_bytes(),
             self.esk,
             self.rho.0,
             self.rseed.psi(&self.rho),
@@ -285,26 +319,73 @@ impl Note {
         )
     }
 
-    /// Derives the nullifier key for this note.
-    pub fn nk(&self, rho: Rho) -> NullifierDerivingKey {
-        NullifierDerivingKey::derive_from(self.esk, rho)
-    }
     /// Derives the nullifier for this note.
-    pub fn nullifier(&self) -> Nullifier {
-        // fvk: &FullViewingKey
+    pub fn nullifier(&self, fvk: &FullViewingKey) -> Nullifier {
         Nullifier::derive(
-            self.nk(self.rho()),
+            fvk.nk(),
             self.rho.0,
             self.rseed.psi(&self.rho),
             self.commitment(),
         )
     }
+}
 
-    /// Derives the input to the hkdf function for the nullifier. Uses the posiedon hashing function
-    pub fn message(&self) {}
+/// An encrypted note.
+#[derive(Clone)]
+pub struct TransmittedNoteCiphertext {
+    /// The serialization of the ephemeral public key
+    pub epk_bytes: [u8; 32],
+    /// The encrypted note ciphertext
+    pub enc_ciphertext: [u8; 580],
+    /// An encrypted value that allows the holder of the outgoing cipher
+    /// key for the note to recover the note plaintext.
+    pub out_ciphertext: [u8; 80],
+}
 
-    /// Derives m. Uses the posiedon hashing function
-    pub fn derive_m(&self) -> pallas::Base {
-        pallas::Base::one()
+impl fmt::Debug for TransmittedNoteCiphertext {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("TransmittedNoteCiphertext")
+            .field("epk_bytes", &self.epk_bytes)
+            .field("enc_ciphertext", &hex::encode(self.enc_ciphertext))
+            .field("out_ciphertext", &hex::encode(self.out_ciphertext))
+            .finish()
+    }
+}
+
+/// Generators for property testing.
+#[cfg(any(test, feature = "test-dependencies"))]
+#[cfg_attr(docsrs, doc(cfg(feature = "test-dependencies")))]
+pub mod testing {
+    use proptest::prelude::*;
+
+    use crate::address::testing::arb_recp;
+    use crate::keys::testing::{arb_elig_sk, arb_esk};
+    use crate::value::testing::{arb_fdi, arb_note_denom, arb_note_value};
+    use crate::{
+        address::testing::arb_address, note::nullifier::testing::arb_nullifier, value::NoteValue,
+    };
+
+    use super::{Note, RandomSeed, Rho};
+
+    prop_compose! {
+        /// Generate an arbitrary random seed
+        pub(crate) fn arb_rseed()(elems in prop::array::uniform32(prop::num::u8::ANY)) -> RandomSeed {
+            RandomSeed(elems)
+        }
+
+    }
+
+    prop_compose! {
+        /// Generate an action without authorization data.
+        pub fn arb_note(v: NoteValue)(
+            recipient in arb_recp(),
+            rho in arb_nullifier().prop_map(Rho::from_nf_old),
+            rseed in arb_rseed(),
+            nd in arb_note_denom(),
+            esk in arb_elig_sk(),
+            fdi in arb_fdi(),
+        ) -> Note {
+            Note {v,rho,rseed,nd,esk,fdi, recipient  }
+        }
     }
 }

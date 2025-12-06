@@ -2930,7 +2930,7 @@ pub fn generator() -> pallas::Affine {
 
 #[cfg(test)]
 mod tests {
-    use super::super::{super::HEADSTASH_PERSONALIZATION, NUM_WINDOWS};
+    use super::super::{NUM_WINDOWS, ORCHARD_PERSONALIZATION};
     use super::*;
     use group::Curve;
     use halo2_gadgets::ecc::chip::constants::{test_lagrange_coeffs, test_zs_and_us};
@@ -2938,7 +2938,7 @@ mod tests {
 
     #[test]
     fn generator() {
-        let hasher = pallas::Point::hash_to_curve(HEADSTASH_PERSONALIZATION);
+        let hasher = pallas::Point::hash_to_curve(ORCHARD_PERSONALIZATION);
         let point = hasher(b"K");
         let coords = point.to_affine().coordinates().unwrap();
 

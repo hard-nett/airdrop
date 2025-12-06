@@ -8,6 +8,9 @@ members = [
     "zk-crates/zk-headstash",
 ]
 
+exclude = [
+    "zk-crates/submodules/*"
+]
 [workspace.package]
 edition = "2021"
 version = "0.0.1"
@@ -33,3 +36,4 @@ secp256k1 = "0.31.1"
 prost = { version = "0.14.1", default-features = false, features = ["derive"] }
 tonic = "0.14.1"
 tonic-prost = "0.14.1"
+group = "0.13"

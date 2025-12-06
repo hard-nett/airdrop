@@ -1,14 +1,68 @@
-use bitvec::array::BitArray;
-use bitvec::order::Lsb0;
+//! Monetary values within the Orchard shielded pool.
+//!
+//! Values are represented in three places within the Orchard protocol:
+//! - [`NoteValue`], the value of an individual note. It is an unsigned 64-bit integer
+//!   (with maximum value [`MAX_NOTE_VALUE`]), and is serialized in a note plaintext.
+//! - [`ValueSum`], the sum of note values within an Orchard [`Action`] or [`Bundle`].
+//!   It is a signed 64-bit integer (with range [`VALUE_SUM_RANGE`]).
+//! - `valueBalanceOrchard`, which is a signed 63-bit integer. This is represented
+//!    by a user-defined type parameter on [`Bundle`], returned by
+//!    [`Bundle::value_balance`] and [`Builder::value_balance`].
+//!
+//! If your specific instantiation of the Orchard protocol requires a smaller bound on
+//! valid note values (for example, Zcash's `MAX_MONEY` fits into a 51-bit integer), you
+//! should enforce this in two ways:
+//!
+//! - Define your `valueBalanceOrchard` type to enforce your valid value range. This can
+//!   be checked in its `TryFrom<i64>` implementation.
+//! - Define your own "amount" type for note values, and convert it to `NoteValue` prior
+//!   to calling [`Builder::add_output`].
+//!
+//! Inside the circuit, note values are constrained to be unsigned 64-bit integers.
+//!
+//! # Caution!
+//!
+//! An `i64` is _not_ a signed 64-bit integer! The [Rust documentation] calls `i64` the
+//! 64-bit signed integer type, which is true in the sense that its encoding in memory
+//! takes up 64 bits. Numerically, however, `i64` is a signed 63-bit integer.
+//!
+//! Fortunately, users of this crate should never need to construct [`ValueSum`] directly;
+//! you should only need to interact with [`NoteValue`] (which can be safely constructed
+//! from a `u64`) and `valueBalanceOrchard` (which can be represented as an `i64`).
+//!
+//! [`Action`]: crate::action::Action
+//! [`Bundle`]: crate::bundle::Bundle
+//! [`Bundle::value_balance`]: crate::bundle::Bundle::value_balance
+//! [`Builder::value_balance`]: crate::builder::Builder::value_balance
+//! [`Builder::add_output`]: crate::builder::Builder::add_output
+//! [Rust documentation]: https://doc.rust-lang.org/stable/std/primitive.i64.html
+
 use core::fmt::{self, Debug};
 use core::iter::Sum;
 use core::ops::{Add, RangeInclusive, Sub};
+use std::string::{String, ToString};
+
+use bitvec::{array::BitArray, order::Lsb0};
+use ff::{Field, PrimeField};
+use group::{Curve, Group, GroupEncoding};
+//  #[cfg(feature = "circuit")]
 use halo2_proofs::plonk::Assigned;
-use pasta_curves::pallas;
+use pasta_curves::{
+    arithmetic::{CurveAffine, CurveExt},
+    pallas,
+};
+use rand::RngCore;
+use subtle::CtOption;
+
+use crate::{
+    constants::fixed_bases::{
+        VALUE_COMMITMENT_PERSONALIZATION, VALUE_COMMITMENT_R_BYTES, VALUE_COMMITMENT_V_BYTES,
+    },
+    primitives::redpallas::{self, Binding},
+};
 
 /// Maximum note value.
 pub const MAX_NOTE_VALUE: u64 = u64::MAX;
-pub const MAX_DENOM_LEN: usize = 32;
 
 /// The valid range of the scalar multiplication used in ValueCommit^Orchard.
 ///
@@ -31,9 +85,10 @@ impl fmt::Display for OverflowError {
 #[cfg(feature = "std")]
 impl std::error::Error for OverflowError {}
 
+/// NoteDenom
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct NoteDenom {
-    bytes: [u8; MAX_DENOM_LEN],
+    bytes: [u8; 32],
 }
 
 /// Return the padded value used in proof generation (blake3 hash with bit-trim)
@@ -49,7 +104,7 @@ impl NoteDenom {
         // Convert to NoteDenom type (assuming NoteDenom wraps [u8; 32])
         NoteDenom { bytes }
     }
-
+    /// hash via blake3
     pub fn hash(denom: &str) -> blake3::Hash {
         // Hash the denomination string with Blake3
         let mut hasher = blake3::Hasher::new();
@@ -69,7 +124,7 @@ impl NoteDenom {
     }
     /// Return the raw bytes (including unused trailing zeros).
     pub fn max_len() -> usize {
-        MAX_DENOM_LEN
+        32
     }
 }
 
@@ -81,9 +136,7 @@ impl From<[u8; 32]> for NoteDenom {
 
 impl Default for NoteDenom {
     fn default() -> Self {
-        Self {
-            bytes: [0u8; MAX_DENOM_LEN],
-        }
+        Self { bytes: [0u8; 32] }
     }
 }
 
@@ -120,11 +173,6 @@ impl NoteValue {
         self.0
     }
 
-    /// represents `v` as its pallas curve point equivalent.
-    pub(crate) fn to_fp_pallas(self) -> pallas::Base {
-        pallas::Base::from(self.0)
-    }
-
     /// Creates a note value from its raw numeric value.
     ///
     /// This only enforces that the value is an unsigned 64-bit integer. Callers should
@@ -146,7 +194,7 @@ impl NoteValue {
     }
 }
 
-// #[cfg(feature = "circuit")]
+//  #[cfg(feature = "circuit")]
 impl From<&NoteValue> for Assigned<pallas::Base> {
     fn from(v: &NoteValue) -> Self {
         pallas::Base::from(v.inner()).into()
@@ -257,6 +305,165 @@ impl TryFrom<ValueSum> for i64 {
 
     fn try_from(v: ValueSum) -> Result<i64, Self::Error> {
         i64::try_from(v.0).map_err(|_| OverflowError)
+    }
+}
+
+/// The blinding factor for a [`ValueCommitment`].
+#[derive(Clone, Debug)]
+pub struct ValueCommitTrapdoor(pallas::Scalar);
+
+impl ValueCommitTrapdoor {
+    pub(crate) fn inner(&self) -> pallas::Scalar {
+        self.0
+    }
+
+    /// Constructs `ValueCommitTrapdoor` from the byte representation of a scalar.
+    /// Returns a `None` [`CtOption`] if `bytes` is not a canonical representation
+    /// of a Pallas scalar.
+    ///
+    /// This is a low-level API, requiring a detailed understanding of the
+    /// [use of value commitment trapdoors][orchardbalance] in the Zcash protocol
+    /// to use correctly and securely. It is intended to be used in combination
+    /// with [`ValueCommitment::derive`].
+    ///
+    /// [orchardbalance]: https://zips.z.cash/protocol/protocol.pdf#orchardbalance
+    pub fn from_bytes(bytes: [u8; 32]) -> CtOption<Self> {
+        pallas::Scalar::from_repr(bytes).map(ValueCommitTrapdoor)
+    }
+
+    /// Returns the byte encoding of a `ValueCommitTrapdoor`.
+    ///
+    /// This is a low-level API, requiring a detailed understanding of the
+    /// [use of value commitment trapdoors][orchardbalance] in the Zcash protocol
+    /// to use correctly and securely. It is intended to be used in combination
+    /// with the [`crate::pczt`] module.
+    ///
+    /// [orchardbalance]: https://zips.z.cash/protocol/protocol.pdf#orchardbalance
+    pub fn to_bytes(&self) -> [u8; 32] {
+        self.0.to_repr()
+    }
+}
+
+impl Add<&ValueCommitTrapdoor> for ValueCommitTrapdoor {
+    type Output = ValueCommitTrapdoor;
+
+    fn add(self, rhs: &Self) -> Self::Output {
+        ValueCommitTrapdoor(self.0 + rhs.0)
+    }
+}
+
+impl<'a> Sum<&'a ValueCommitTrapdoor> for ValueCommitTrapdoor {
+    fn sum<I: Iterator<Item = &'a ValueCommitTrapdoor>>(iter: I) -> Self {
+        iter.fold(ValueCommitTrapdoor::zero(), |acc, cv| acc + cv)
+    }
+}
+
+impl ValueCommitTrapdoor {
+    /// Generates a new value commitment trapdoor.
+    pub(crate) fn random(rng: impl RngCore) -> Self {
+        ValueCommitTrapdoor(pallas::Scalar::random(rng))
+    }
+
+    /// Returns the zero trapdoor, which provides no blinding.
+    pub(crate) fn zero() -> Self {
+        ValueCommitTrapdoor(pallas::Scalar::zero())
+    }
+
+    pub(crate) fn into_bsk(self) -> redpallas::SigningKey<Binding> {
+        // TODO: impl From<pallas::Scalar> for redpallas::SigningKey.
+        self.0.to_repr().try_into().unwrap()
+    }
+}
+
+/// A commitment to a [`ValueSum`].
+#[derive(Clone, Debug)]
+pub struct ValueCommitment(pallas::Point);
+
+impl Add<&ValueCommitment> for ValueCommitment {
+    type Output = ValueCommitment;
+
+    fn add(self, rhs: &Self) -> Self::Output {
+        ValueCommitment(self.0 + rhs.0)
+    }
+}
+
+impl Sub for ValueCommitment {
+    type Output = ValueCommitment;
+
+    fn sub(self, rhs: Self) -> Self::Output {
+        ValueCommitment(self.0 - rhs.0)
+    }
+}
+
+impl Sum for ValueCommitment {
+    fn sum<I: Iterator<Item = Self>>(iter: I) -> Self {
+        iter.fold(ValueCommitment(pallas::Point::identity()), |acc, cv| {
+            acc + &cv
+        })
+    }
+}
+
+impl<'a> Sum<&'a ValueCommitment> for ValueCommitment {
+    fn sum<I: Iterator<Item = &'a ValueCommitment>>(iter: I) -> Self {
+        iter.fold(ValueCommitment(pallas::Point::identity()), |acc, cv| {
+            acc + cv
+        })
+    }
+}
+
+impl ValueCommitment {
+    /// Derives a `ValueCommitment` by $\mathsf{ValueCommit^{Orchard}}$.
+    ///
+    /// Defined in [Zcash Protocol Spec § 5.4.8.3: Homomorphic Pedersen commitments (Sapling and Orchard)][concretehomomorphiccommit].
+    ///
+    /// [concretehomomorphiccommit]: https://zips.z.cash/protocol/nu5.pdf#concretehomomorphiccommit
+    #[allow(non_snake_case)]
+    pub fn derive(value: ValueSum, rcv: ValueCommitTrapdoor) -> Self {
+        let hasher = pallas::Point::hash_to_curve(VALUE_COMMITMENT_PERSONALIZATION);
+        let V = hasher(&VALUE_COMMITMENT_V_BYTES);
+        let R = hasher(&VALUE_COMMITMENT_R_BYTES);
+        let abs_value = u64::try_from(value.0.abs()).expect("value must be in valid range");
+
+        let value = if value.0.is_negative() {
+            -pallas::Scalar::from(abs_value)
+        } else {
+            pallas::Scalar::from(abs_value)
+        };
+
+        ValueCommitment(V * value + R * rcv.0)
+    }
+
+    pub(crate) fn into_bvk(self) -> redpallas::VerificationKey<Binding> {
+        // TODO: impl From<pallas::Point> for redpallas::VerificationKey.
+        self.0.to_bytes().try_into().unwrap()
+    }
+
+    /// Deserialize a value commitment from its byte representation
+    pub fn from_bytes(bytes: &[u8; 32]) -> CtOption<ValueCommitment> {
+        pallas::Point::from_bytes(bytes).map(ValueCommitment)
+    }
+
+    /// Serialize this value commitment to its canonical byte representation.
+    pub fn to_bytes(&self) -> [u8; 32] {
+        self.0.to_bytes()
+    }
+
+    /// x-coordinate of this value commitment.
+    pub(crate) fn x(&self) -> pallas::Base {
+        if self.0 == pallas::Point::identity() {
+            pallas::Base::zero()
+        } else {
+            *self.0.to_affine().coordinates().unwrap().x()
+        }
+    }
+
+    /// y-coordinate of this value commitment.
+    pub(crate) fn y(&self) -> pallas::Base {
+        if self.0 == pallas::Point::identity() {
+            pallas::Base::zero()
+        } else {
+            *self.0.to_affine().coordinates().unwrap().y()
+        }
     }
 }
 
@@ -385,14 +592,133 @@ impl fmt::Display for HeadstashValue {
     }
 }
 
+/// Generators for property testing.
+#[cfg(any(test, feature = "test-dependencies"))]
+#[cfg_attr(docsrs, doc(cfg(feature = "test-dependencies")))]
+pub mod testing {
+    use group::ff::FromUniformBytes;
+    use pasta_curves::pallas;
+    use proptest::prelude::*;
+
+    use crate::value::NoteDenom;
+
+    use super::{NoteValue, ValueCommitTrapdoor, ValueSum, MAX_NOTE_VALUE, VALUE_SUM_RANGE};
+
+    prop_compose! {
+        /// Generate an arbitrary Pallas scalar.
+        pub fn arb_scalar()(bytes in prop::array::uniform32(0u8..)) -> pallas::Scalar {
+            // Instead of rejecting out-of-range bytes, let's reduce them.
+            let mut buf = [0; 64];
+            buf[..32].copy_from_slice(&bytes);
+            pallas::Scalar::from_uniform_bytes(&buf)
+        }
+    }
+
+    prop_compose! {
+        /// Generate an arbitrary [`ValueSum`] in the range of valid Zcash values.
+        pub fn arb_value_sum()(value in VALUE_SUM_RANGE) -> ValueSum {
+            ValueSum(value)
+        }
+    }
+
+    prop_compose! {
+        /// Generate an arbitrary [`ValueSum`] in the range of valid Zcash values.
+        pub fn arb_value_sum_bounded(bound: NoteValue)(value in -(bound.0 as i128)..=(bound.0 as i128)) -> ValueSum {
+            ValueSum(value)
+        }
+    }
+
+    prop_compose! {
+        /// Generate an arbitrary ValueCommitTrapdoor
+        pub fn arb_trapdoor()(rcv in arb_scalar()) -> ValueCommitTrapdoor {
+            ValueCommitTrapdoor(rcv)
+        }
+    }
+
+    prop_compose! {
+        /// Generate an arbitrary value in the range of valid nonnegative Zcash amounts.
+        pub fn arb_note_denom()(bytes in prop::array::uniform32(0u8..)) -> NoteDenom {
+            NoteDenom{ bytes }
+        }
+    }
+    prop_compose! {
+        /// Generate an arbitrary value in the range of valid nonnegative Zcash amounts.
+        pub fn arb_note_value()(value in 0u64..MAX_NOTE_VALUE) -> NoteValue {
+            NoteValue(value)
+        }
+    }
+    prop_compose! {
+        /// Generate an arbitrary value in the range of valid nonnegative Zcash amounts.
+        pub fn arb_fdi()(value in 0u64..MAX_NOTE_VALUE) -> u64 {
+           value
+        }
+    }
+
+    prop_compose! {
+        /// Generate an arbitrary value in the range of valid positive Zcash amounts
+        /// less than a specified value.
+        pub fn arb_note_value_bounded(max: u64)(value in 0u64..max) -> NoteValue {
+            NoteValue(value)
+        }
+    }
+
+    prop_compose! {
+        /// Generate an arbitrary value in the range of valid positive Zcash amounts
+        /// less than a specified value.
+        pub fn arb_positive_note_value(max: u64)(value in 1u64..max) -> NoteValue {
+            NoteValue(value)
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
+    use proptest::prelude::*;
+
     use super::*;
     use crate::spec::nd_to_fp;
     use ff::Field;
 
+    use super::{
+        testing::{arb_note_value_bounded, arb_trapdoor, arb_value_sum_bounded},
+        OverflowError, ValueCommitTrapdoor, ValueCommitment, ValueSum, MAX_NOTE_VALUE,
+    };
+    use crate::primitives::redpallas;
     use pasta_curves::group::ff::PrimeField;
     use pasta_curves::pallas;
+
+    proptest! {
+        #[test]
+        fn bsk_consistent_with_bvk(
+            values in (1usize..10).prop_flat_map(|n_values|
+                arb_note_value_bounded(MAX_NOTE_VALUE / n_values as u64).prop_flat_map(move |bound|
+                    prop::collection::vec((arb_value_sum_bounded(bound), arb_trapdoor()), n_values)
+                )
+            )
+        ) {
+            let value_balance = values
+                .iter()
+                .map(|(value, _)| value)
+                .sum::<Result<ValueSum, OverflowError>>()
+                .expect("we generate values that won't overflow");
+
+            let bsk = values
+                .iter()
+                .map(|(_, rcv)| rcv)
+                .sum::<ValueCommitTrapdoor>()
+                .into_bsk();
+
+            let bvk = (values
+                .into_iter()
+                .map(|(value, rcv)| ValueCommitment::derive(value, rcv))
+                .sum::<ValueCommitment>()
+                - ValueCommitment::derive(value_balance, ValueCommitTrapdoor::zero()))
+            .into_bvk();
+
+            assert_eq!(redpallas::VerificationKey::from(&bsk), bvk);
+        }
+    }
+
     #[test]
     fn test_headstash_value_creation() {
         // Test creating HeadstashValue from raw components

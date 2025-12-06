@@ -1,11 +1,52 @@
-use self::gadget::add_chip::{AddChip, AddConfig};
-use group::Curve;
+//! The Orchard Action circuit implementation.
 
-use halo2_base::halo2_proofs::halo2curves::secp256k1::{Fp as Secp256k1Fp, Fq as Secp256k1Fq};
+use alloc::vec::Vec;
+
+use group::{Curve, GroupEncoding};
+use halo2_proofs::{
+    circuit::{floor_planner, Layouter, Value},
+    plonk::{
+        self, Advice, Column, Constraints, Expression, Instance as InstanceColumn, Selector,
+        SingleVerifier,
+    },
+    poly::Rotation,
+    transcript::{Blake2bRead, Blake2bWrite},
+};
+use pasta_curves::{arithmetic::CurveAffine, pallas, vesta};
+use rand::RngCore;
+
+use self::{
+    commit_ivk::{CommitIvkChip, CommitIvkConfig},
+    gadget::{
+        add_chip::{AddChip, AddConfig},
+        assign_free_advice,
+    },
+    note_commit::{NoteCommitChip, NoteCommitConfig},
+};
+use crate::{
+    // builder::SpendInfo,
+    circuit::gadget::secp256k1_chip::{Secp256k1Chip, Secp256k1Config, Secp256k1Fp, Secp256k1Fq},
+    constants::{
+        OrchardCommitDomains, OrchardFixedBases, OrchardFixedBasesFull, OrchardHashDomains,
+        MERKLE_DEPTH_ORCHARD,
+    },
+    keys::{
+        CommitIvkRandomness, DiversifiedTransmissionKey, NullifierDerivingKey, SpendValidatingKey,
+    },
+    note::{
+        commitment::{NoteCommitTrapdoor, NoteCommitment},
+        nullifier::Nullifier,
+        ExtractedNoteCommitment, Note, Rho,
+    },
+    primitives::redpallas::{SpendAuth, VerificationKey},
+    spec::NonIdentityPallasPoint,
+    tree::{Anchor, MerkleHashOrchard},
+    value::{NoteDenom, NoteValue, ValueCommitTrapdoor, ValueCommitment},
+};
 use halo2_gadgets::{
     ecc::{
         chip::{EccChip, EccConfig},
-        Point, ScalarFixed,
+        FixedPoint, NonIdentityPoint, Point, ScalarFixed, ScalarFixedShort, ScalarVar,
     },
     poseidon::{primitives as poseidon, Pow5Chip as PoseidonChip, Pow5Config as PoseidonConfig},
     sinsemilla::{
@@ -18,63 +59,52 @@ use halo2_gadgets::{
     utilities::lookup_range_check::{LookupRangeCheck, LookupRangeCheckConfig},
 };
 
-use halo2_proofs::{
-    circuit::{floor_planner, Layouter, Value},
-    plonk::{self, Advice, Column, Instance as InstanceColumn},
-};
-use pasta_curves::pallas;
-
-use crate::{
-    circuit::{
-        gadget::{
-            assign_free_advice,
-            secp256k1_chip::{Secp256k1Chip, Secp256k1Config},
-        },
-        note_commit::{gadgets, NoteCommitChip, NoteCommitConfig},
-    },
-    constants::{
-        fixed_bases::HeadstashFixedBases as HFixedBases,
-        sinsemilla::HeadstashCommitDomains as HCommitDomains, HeadstashHashDomains as HashDomains,
-        MERKLE_DEPTH_HEADSTASH,
-    },
-    keys::NullifierDerivingKey,
-    note::{
-        commitment::NoteCommitTrapdoor, ExtractedNoteCommitment, NoteCommitment, Nullifier, Rho,
-    },
-    tree::{Anchor, MerkleHashHeadstash},
-    value::NoteValue,
-};
-
-// Public input configuration
-// BEFORE OPTIMIZATION: We had 7 separate public inputs (anchor, cv_net_x, cv_net_y, nf, rk_x, rk_y, cmx)
-// AFTER OPTIMIZATION: We hash all public inputs into ONE using Poseidon
-// This reduces on-chain verification gas cost by ~75% (700k → 150k gas)
-const PUBLIC_INPUT_HASH: usize = 0; // Single public input - hash of all values
-
+mod commit_ivk;
 pub mod gadget;
 mod note_commit;
 
+pub use crate::Proof;
+
+/// Size of the Orchard circuit.
+const K: u32 = 11;
+
+// Absolute offsets for public inputs.
+const ANCHOR: usize = 0;
+const CV_NET_X: usize = 1;
+const CV_NET_Y: usize = 2;
+const NF_OLD: usize = 3;
+const RK_X: usize = 4;
+const RK_Y: usize = 5;
+const CMX: usize = 6;
+const ENABLE_SPEND: usize = 7;
+const ENABLE_OUTPUT: usize = 8;
+
+/// Configuration needed to use the Orchard Action circuit.
 #[derive(Clone, Debug)]
-pub struct HeadstashConfig {
+pub struct Config {
     primary: Column<InstanceColumn>,
+    q_orchard: Selector,
     advices: [Column<Advice>; 10],
     add_config: AddConfig,
-    ecc_config: EccConfig<HFixedBases>,
+    ecc_config: EccConfig<OrchardFixedBases>,
     secp256k1: Secp256k1Config,
-    poseidon_cfg: PoseidonConfig<pallas::Base, 3, 2>,
-    merkle_cfg: MerkleConfig<HashDomains, HCommitDomains, HFixedBases>,
-    sinsemilla_cfg: SinsemillaConfig<HashDomains, HCommitDomains, HFixedBases>,
-    nc_cfg: NoteCommitConfig,
+    poseidon_config: PoseidonConfig<pallas::Base, 3, 2>,
+    merkle_config_1: MerkleConfig<OrchardHashDomains, OrchardCommitDomains, OrchardFixedBases>,
+    merkle_config_2: MerkleConfig<OrchardHashDomains, OrchardCommitDomains, OrchardFixedBases>,
+    sinsemilla_config_1:
+        SinsemillaConfig<OrchardHashDomains, OrchardCommitDomains, OrchardFixedBases>,
+    sinsemilla_config_2:
+        SinsemillaConfig<OrchardHashDomains, OrchardCommitDomains, OrchardFixedBases>,
+    commit_ivk_config: CommitIvkConfig,
+    old_note_commit_config: NoteCommitConfig,
+    new_note_commit_config: NoteCommitConfig,
 }
 
-/// The Headstash Circuit Array
+/// The Orchard Action circuit.
 #[derive(Clone, Debug, Default)]
-pub struct HeadstashCircuit {
-    pub(crate) path: Value<[MerkleHashHeadstash; MERKLE_DEPTH_HEADSTASH]>,
+pub struct Circuit {
+    pub(crate) path: Value<[MerkleHashOrchard; MERKLE_DEPTH_ORCHARD]>,
     pub(crate) pos: Value<u32>,
-    pub(crate) psi: Value<pallas::Base>,
-    pub(crate) rho: Value<Rho>,
-    pub(crate) cm: Value<NoteCommitment>,
     pub(crate) esk: Value<Secp256k1Fq>,
     pub(crate) epkx: Value<Secp256k1Fp>,
     pub(crate) epky: Value<Secp256k1Fp>,
@@ -83,11 +113,80 @@ pub struct HeadstashCircuit {
     pub(crate) v: Value<NoteValue>,
     pub(crate) nd: Value<pallas::Base>,
     pub(crate) recp: Value<pallas::Base>,
-    pub(crate) rcm: Value<NoteCommitTrapdoor>,
+    pub(crate) rho_old: Value<Rho>,
+    pub(crate) psi_old: Value<pallas::Base>,
+    pub(crate) rcm_old: Value<NoteCommitTrapdoor>,
+    pub(crate) cm_old: Value<NoteCommitment>,
+    // pub(crate) alpha: Value<pallas::Scalar>,
+    // pub(crate) ak: Value<SpendValidatingKey>
+    // pub(crate) rivk: Value<CommitIvkRandomness>,
+    pub(crate) rcv: Value<ValueCommitTrapdoor>,
 }
 
-impl plonk::Circuit<pallas::Base> for HeadstashCircuit {
-    type Config = HeadstashConfig;
+// impl Circuit {
+//     /// This constructor is public to enable creation of custom builders.
+//     /// If you are not creating a custom builder, use [`Builder`] to compose
+//     /// and authorize a transaction.
+//     ///
+//     /// Constructs a `Circuit` from the following components:
+//     /// - `spend`: [`SpendInfo`] of the note spent in scope of the action
+//     /// - `output_note`: a note created in scope of the action
+//     /// - `alpha`: a scalar used for randomization of the action spend validating key
+//     /// - `rcv`: trapdoor for the action value commitment
+//     ///
+//     /// Returns `None` if the `rho` of the `output_note` is not equal
+//     /// to the nullifier of the spent note.
+//     ///
+//     /// [`SpendInfo`]: crate::builder::SpendInfo
+//     /// [`Builder`]: crate::builder::Builder
+//     // pub fn from_action_context(
+//     //     spend: SpendInfo,
+//     //     output_note: Note,
+//     //     alpha: pallas::Scalar,
+//     //     rcv: ValueCommitTrapdoor,
+//     // ) -> Option<Circuit> {
+//     //     (Rho::from_nf_old(spend.note.nullifier(&spend.fvk)) == output_note.rho())
+//     //         .then(|| Self::from_action_context_unchecked(spend, output_note, alpha, rcv))
+//     // }
+
+//     // pub(crate) fn from_action_context_unchecked(
+//     //     spend: SpendInfo,
+//     //     output_note: Note,
+//     //     alpha: pallas::Scalar,
+//     //     rcv: ValueCommitTrapdoor,
+//     // ) -> Circuit {
+//     //     let sender_address = spend.note.recipient();
+//     //     let rho_old = spend.note.rho();
+//     //     let psi_old = spend.note.rseed().psi(&rho_old);
+//     //     let rcm_old = spend.note.rseed().rcm(&rho_old);
+
+//     //     let rho_new = output_note.rho();
+//     //     let psi_new = output_note.rseed().psi(&rho_new);
+//     //     let rcm_new = output_note.rseed().rcm(&rho_new);
+
+//     //     Circuit {
+//     //         path: Value::known(spend.merkle_path.auth_path()),
+//     //         pos: Value::known(spend.merkle_path.position()),
+
+//     //         v: Value::known(spend.note.value()),
+//     //         rho_old: Value::known(rho_old),
+//     //         psi_old: Value::known(psi_old),
+//     //         rcm_old: Value::known(rcm_old),
+//     //         cm_old: Value::known(spend.note.commitment()),
+//     //         nk: Value::known(*spend.fvk.nk()),
+//     //         rcv: Value::known(rcv),
+//     //         esk: todo!(),
+//     //         epkx: todo!(),
+//     //         epky: todo!(),
+//     //         fdi: todo!(),
+//     //         nd: todo!(),
+//     //         recp: todo!(),
+//     //     }
+//     // }
+// }
+
+impl plonk::Circuit<pallas::Base> for Circuit {
+    type Config = Config;
     type FloorPlanner = floor_planner::V1;
 
     fn without_witnesses(&self) -> Self {
@@ -95,17 +194,7 @@ impl plonk::Circuit<pallas::Base> for HeadstashCircuit {
     }
 
     fn configure(meta: &mut plonk::ConstraintSystem<pallas::Base>) -> Self::Config {
-        // Current allocation (from circuit.rs:93-104):
-        // advices[0-9] = 10 columns total
-        // advices[5] = Poseidon partial_sbox
-        // advices[6-8] = Poseidon state
-        // advices[0-4] = Sinsemilla (5 columns)
-        // advices[6] = Sinsemilla message
-        // advices[9] = Range check column
-
-        // Proposed allocation for Secp256k1:
-        // fp_advices = [advices[0], advices[1], advices[2]]
-        // fq_advices = [advices[3], advices[4], advices[5]]
+        // Advice columns used in the Orchard circuit.
         let advices = [
             meta.advice_column(),
             meta.advice_column(),
@@ -119,7 +208,48 @@ impl plonk::Circuit<pallas::Base> for HeadstashCircuit {
             meta.advice_column(),
         ];
 
+        // Constrain v_old - v_new = magnitude * sign    (https://p.z.cash/ZKS:action-cv-net-integrity?partial).
+        // Either v_old = 0, or calculated root = anchor (https://p.z.cash/ZKS:action-merkle-path-validity?partial).
+        // Constrain v_old = 0 or enable_spends = 1      (https://p.z.cash/ZKS:action-enable-spend).
+        // Constrain v_new = 0 or enable_outputs = 1     (https://p.z.cash/ZKS:action-enable-output).
         let q_orchard = meta.selector();
+        meta.create_gate("Orchard circuit checks", |meta| {
+            let q_orchard = meta.query_selector(q_orchard);
+            let v_old = meta.query_advice(advices[0], Rotation::cur());
+            let v_new = meta.query_advice(advices[1], Rotation::cur());
+            let magnitude = meta.query_advice(advices[2], Rotation::cur());
+            let sign = meta.query_advice(advices[3], Rotation::cur());
+
+            let root = meta.query_advice(advices[4], Rotation::cur());
+            let anchor = meta.query_advice(advices[5], Rotation::cur());
+
+            let enable_spends = meta.query_advice(advices[6], Rotation::cur());
+            let enable_outputs = meta.query_advice(advices[7], Rotation::cur());
+
+            let one = Expression::Constant(pallas::Base::one());
+
+            Constraints::with_selector(
+                q_orchard,
+                [
+                    (
+                        "v_old - v_new = magnitude * sign",
+                        v_old.clone() - v_new.clone() - magnitude * sign,
+                    ),
+                    (
+                        "Either v_old = 0, or root = anchor",
+                        v_old.clone() * (root - anchor),
+                    ),
+                    (
+                        "v_old = 0 or enable_spends = 1",
+                        v_old * (one.clone() - enable_spends),
+                    ),
+                    (
+                        "v_new = 0 or enable_outputs = 1",
+                        v_new * (one - enable_outputs),
+                    ),
+                ],
+            )
+        });
 
         // Addition of two field elements.
         let add_config = AddChip::configure(meta, advices[7], advices[8], advices[6]);
@@ -142,8 +272,8 @@ impl plonk::Circuit<pallas::Base> for HeadstashCircuit {
         }
 
         // Poseidon requires four advice columns, while ECC incomplete addition requires
-        // six, so we could choose to configure them in parallel. However, we use two
-        // Poseidon invocation, one  and we have the rows to accommodate it serially.
+        // six, so we could choose to configure them in parallel. However, we only use a
+        // single Poseidon invocation, and we have the rows to accommodate it serially.
         // Instead, we reduce the proof size by sharing fixed columns between the ECC and
         // Poseidon chips.
         let lagrange_coeffs = [
@@ -165,14 +295,15 @@ impl plonk::Circuit<pallas::Base> for HeadstashCircuit {
 
         // We have a lot of free space in the right-most advice columns; use one of them
         // for all of our range checks.
-        let rcfg10 = LookupRangeCheckConfig::configure(meta, advices[9], table_idx);
+        let range_check = LookupRangeCheckConfig::configure(meta, advices[9], table_idx);
+
         // Configuration for curve point operations.
         // This uses 10 advice columns and spans the whole circuit.
         let ecc_config =
-            EccChip::<HFixedBases>::configure(meta, advices, lagrange_coeffs, rcfg10.clone());
+            EccChip::<OrchardFixedBases>::configure(meta, advices, lagrange_coeffs, range_check);
 
         // Configuration for the Poseidon hash.
-        let poseidon_cfg = PoseidonChip::configure::<poseidon::P128Pow5T3>(
+        let poseidon_config = PoseidonChip::configure::<poseidon::P128Pow5T3>(
             meta,
             // We place the state columns after the partial_sbox column so that the
             // pad-and-add region can be laid out more efficiently.
@@ -182,56 +313,96 @@ impl plonk::Circuit<pallas::Base> for HeadstashCircuit {
             rc_b,
         );
 
-        // Configuration for a Sinsemilla hash instantiation and a
-        // Merkle hash instantiation using this Sinsemilla instance.
-        // Since the Sinsemilla config uses only 5 advice columns,
-        // we can fit two instances side-by-side.
-        let (sinsemilla_cfg, merkle_cfg) = {
-            let sinsemilla_cfg = SinsemillaChip::configure(
-                meta,
-                advices[..5].try_into().unwrap(),
-                advices[6],
-                lagrange_coeffs[0],
-                lookup,
-                rcfg10,
-                false,
-            );
-            let merkle_cfg = MerkleChip::configure(meta, sinsemilla_cfg.clone());
-
-            (sinsemilla_cfg, merkle_cfg)
-        };
-
-        // Configuration to handle decomposition and canonicity checking
-        // for NoteCommit_new.
-        let nc_cfg = NoteCommitChip::configure(meta, advices, sinsemilla_cfg.clone());
-
         // Secp256k1 curve paring config.TODO: ensure we define advice colums available to these accurately and document (3 each)
         let secp256k1 = Secp256k1Config::configure(
             meta,
             [advices[0], advices[1], advices[2]],
             [advices[3], advices[4], advices[5]],
-            rcfg10.clone(),
+            range_check.clone(),
         );
-        HeadstashConfig {
+
+        // Configuration for a Sinsemilla hash instantiation and a
+        // Merkle hash instantiation using this Sinsemilla instance.
+        // Since the Sinsemilla config uses only 5 advice columns,
+        // we can fit two instances side-by-side.
+        let (sinsemilla_config_1, merkle_config_1) = {
+            let sinsemilla_config_1 = SinsemillaChip::configure(
+                meta,
+                advices[..5].try_into().unwrap(),
+                advices[6],
+                lagrange_coeffs[0],
+                lookup,
+                range_check,
+                false,
+            );
+            let merkle_config_1 = MerkleChip::configure(meta, sinsemilla_config_1.clone());
+
+            (sinsemilla_config_1, merkle_config_1)
+        };
+
+        // Configuration for a Sinsemilla hash instantiation and a
+        // Merkle hash instantiation using this Sinsemilla instance.
+        // Since the Sinsemilla config uses only 5 advice columns,
+        // we can fit two instances side-by-side.
+        let (sinsemilla_config_2, merkle_config_2) = {
+            let sinsemilla_config_2 = SinsemillaChip::configure(
+                meta,
+                advices[5..].try_into().unwrap(),
+                advices[7],
+                lagrange_coeffs[1],
+                lookup,
+                range_check,
+                false,
+            );
+            let merkle_config_2 = MerkleChip::configure(meta, sinsemilla_config_2.clone());
+
+            (sinsemilla_config_2, merkle_config_2)
+        };
+
+        // Configuration to handle decomposition and canonicity checking
+        // for CommitIvk.
+        let commit_ivk_config = CommitIvkChip::configure(meta, advices);
+
+        // Configuration to handle decomposition and canonicity checking
+        // for NoteCommit_old.
+        let old_note_commit_config =
+            NoteCommitChip::configure(meta, advices, sinsemilla_config_1.clone());
+
+        // Configuration to handle decomposition and canonicity checking
+        // for NoteCommit_new.
+        let new_note_commit_config =
+            NoteCommitChip::configure(meta, advices, sinsemilla_config_2.clone());
+
+        Config {
             primary,
+            q_orchard,
             advices,
             add_config,
-            secp256k1,
             ecc_config,
-            poseidon_cfg,
-            merkle_cfg,
-            sinsemilla_cfg,
-            nc_cfg,
+            secp256k1,
+            poseidon_config,
+            merkle_config_1,
+            merkle_config_2,
+            sinsemilla_config_1,
+            sinsemilla_config_2,
+            commit_ivk_config,
+            old_note_commit_config,
+            new_note_commit_config,
         }
     }
 
+    #[allow(non_snake_case)]
     fn synthesize(
         &self,
         config: Self::Config,
         mut layouter: impl Layouter<pallas::Base>,
     ) -> Result<(), plonk::Error> {
-        SinsemillaChip::load(config.sinsemilla_cfg.clone(), &mut layouter)?;
+        // Load the Sinsemilla generator lookup table used by the whole circuit.
+        SinsemillaChip::load(config.sinsemilla_config_1.clone(), &mut layouter)?;
+
+        // Construct the ECC chip.
         let ecc_chip = config.ecc_chip();
+
         // 1. --------------- Eligible Key Pairing Constraint -------------------------
         let secp256k1_chip = Secp256k1Chip::construct(config.secp256k1.clone());
         let (esk_crt, (_e_pk_x_crt, _e_pk_y_crt)) = secp256k1_chip.prove_key_pairing(
@@ -242,31 +413,19 @@ impl plonk::Circuit<pallas::Base> for HeadstashCircuit {
         )?;
 
         // Witness private inputs that are used across multiple checks.
-        let (psi, rho, nk, cm, fdi, v, nd, recp) = {
-            // Witness psi
-            let psi = assign_free_advice(
-                layouter.namespace(|| "witness psi"),
+        let (nd, v, fdi, recp, psi_old, rho_old, cm_old, nk) = {
+            // Witness nd.
+            let nd = assign_free_advice(
+                layouter.namespace(|| "witness nd"),
                 config.advices[0],
-                self.psi,
-            )?;
-            // Witness rho
-            let rho = assign_free_advice(
-                layouter.namespace(|| "witness rho"),
-                config.advices[0],
-                self.rho.map(|rho| rho.into_inner()),
-            )?;
-            // Witness nk.
-            let nk = assign_free_advice(
-                layouter.namespace(|| "witness nk"),
-                config.advices[0],
-                self.nk.map(|nk| nk.inner()),
+                self.nd,
             )?;
 
-            // Witness cm
-            let cm = Point::new(
-                ecc_chip.clone(),
-                layouter.namespace(|| "witness cm"),
-                self.cm.as_ref().map(|cm| cm.inner().to_affine()),
+            // Witness v.
+            let v = assign_free_advice(
+                layouter.namespace(|| "witness v"),
+                config.advices[0],
+                self.v,
             )?;
 
             // Witness fdi.
@@ -275,355 +434,811 @@ impl plonk::Circuit<pallas::Base> for HeadstashCircuit {
                 config.advices[0],
                 self.fdi,
             )?;
-            // Witness v.
-            let v = assign_free_advice(
-                layouter.namespace(|| "witness v"),
-                config.advices[0],
-                self.v,
-            )?;
-            // Witness nd.
-            let nd = assign_free_advice(
-                layouter.namespace(|| "witness nd"),
-                config.advices[0],
-                self.nd,
-            )?;
+
             // Witness recp.
             let recp = assign_free_advice(
                 layouter.namespace(|| "witness recp"),
                 config.advices[0],
                 self.recp,
             )?;
+            // Witness psi_old
+            let psi_old = assign_free_advice(
+                layouter.namespace(|| "witness psi_old"),
+                config.advices[0],
+                self.psi_old,
+            )?;
 
-            (psi, rho, nk, cm, fdi, v, nd, recp)
+            // Witness rho_old
+            let rho_old = assign_free_advice(
+                layouter.namespace(|| "witness rho_old"),
+                config.advices[0],
+                self.rho_old.map(|rho| rho.into_inner()),
+            )?;
+
+            // Witness cm_old
+            let cm_old = Point::new(
+                ecc_chip.clone(),
+                layouter.namespace(|| "cm_old"),
+                self.cm_old.as_ref().map(|cm| cm.inner().to_affine()),
+            )?;
+
+            // // Witness g_d_old
+            // let g_d_old = NonIdentityPoint::new(
+            //     ecc_chip.clone(),
+            //     layouter.namespace(|| "gd_old"),
+            //     self.g_d_old.as_ref().map(|gd| gd.to_affine()),
+            // )?;
+
+            // // Witness ak_P.
+            // let ak_P: Value<pallas::Point> = self.ak.as_ref().map(|ak| ak.into());
+            // let ak_P = NonIdentityPoint::new(
+            //     ecc_chip.clone(),
+            //     layouter.namespace(|| "witness ak_P"),
+            //     ak_P.map(|ak_P| ak_P.to_affine()),
+            // )?;
+
+            // Witness nk.
+            let nk = assign_free_advice(
+                layouter.namespace(|| "witness nk"),
+                config.advices[0],
+                self.nk.map(|nk| nk.inner()),
+            )?;
+
+            // Witness v_old.
+            let v = assign_free_advice(
+                layouter.namespace(|| "witness v_old"),
+                config.advices[0],
+                self.v,
+            )?;
+
+            // // Witness v_new.
+            // let v_new = assign_free_advice(
+            //     layouter.namespace(|| "witness v_new"),
+            //     config.advices[0],
+            //     self.v_new,
+            // )?;
+
+            (nd, v, fdi, recp, psi_old, rho_old, cm_old, nk)
         };
 
-        // 2. --------------- Headstash Distribution Inclusion Contraint (Sinsemilla HashDomain Merkle Tree) -------------------------
+        // Merkle path validity check (https://p.z.cash/ZKS:action-merkle-path-validity?partial).
         let root = {
             let path = self
                 .path
                 .map(|typed_path| typed_path.map(|node| node.inner()));
             let merkle_inputs = MerklePath::construct(
-                [config.merkle_chip()],
-                HashDomains::MerkleCrh,
+                [config.merkle_chip_1(), config.merkle_chip_2()],
+                OrchardHashDomains::MerkleCrh,
                 self.pos,
                 path,
             );
-            let leaf = cm.extract_p().inner().clone();
+            let leaf = cm_old.extract_p().inner().clone();
             merkle_inputs.calculate_root(layouter.namespace(|| "Merkle path"), leaf)?
         };
 
-        // 3. ------------- Nullifier Authenticity Constraint --------------------------------------------------
-        let nf = {
+        // Value commitment integrity (https://p.z.cash/ZKS:action-cv-net-integrity?partial).
+        // let v_net_magnitude_sign = {
+        //     // Witness the magnitude and sign of v_net = v_old - v_new
+        //     let v_net_magnitude_sign = {
+        //         let v_net = self.v - self.v_new;
+        //         let magnitude_sign = v_net.map(|v_net| {
+        //             let (magnitude, sign) = v_net.magnitude_sign();
+
+        //             (
+        //                 // magnitude is guaranteed to be an unsigned 64-bit value.
+        //                 // Therefore, we can move it into the base field.
+        //                 pallas::Base::from(magnitude),
+        //                 match sign {
+        //                     crate::value::Sign::Positive => pallas::Base::one(),
+        //                     crate::value::Sign::Negative => -pallas::Base::one(),
+        //                 },
+        //             )
+        //         });
+
+        //         let magnitude = assign_free_advice(
+        //             layouter.namespace(|| "v_net magnitude"),
+        //             config.advices[9],
+        //             magnitude_sign.map(|m_s| m_s.0),
+        //         )?;
+        //         let sign = assign_free_advice(
+        //             layouter.namespace(|| "v_net sign"),
+        //             config.advices[9],
+        //             magnitude_sign.map(|m_s| m_s.1),
+        //         )?;
+        //         (magnitude, sign)
+        //     };
+
+        //     let v_net = ScalarFixedShort::new(
+        //         ecc_chip.clone(),
+        //         layouter.namespace(|| "v_net"),
+        //         v_net_magnitude_sign.clone(),
+        //     )?;
+        //     let rcv = ScalarFixed::new(
+        //         ecc_chip.clone(),
+        //         layouter.namespace(|| "rcv"),
+        //         self.rcv.as_ref().map(|rcv| rcv.inner()),
+        //     )?;
+
+        //     let cv_net = gadget::value_commit_orchard(
+        //         layouter.namespace(|| "cv_net = ValueCommit^Orchard_rcv(v_net)"),
+        //         ecc_chip.clone(),
+        //         v_net,
+        //         rcv,
+        //     )?;
+
+        //     // Constrain cv_net to equal public input
+        //     layouter.constrain_instance(cv_net.inner().x().cell(), config.primary, CV_NET_X)?;
+        //     layouter.constrain_instance(cv_net.inner().y().cell(), config.primary, CV_NET_Y)?;
+
+        //     // Return the magnitude and sign so we can use them in the Orchard gate.
+        //     v_net_magnitude_sign
+        // };
+
+        // Nullifier integrity (https://p.z.cash/ZKS:action-nullifier-integrity).
+        let nf_old = {
             let nf_old = gadget::derive_nullifier(
-                layouter.namespace(|| "nf = DeriveNullifier_nk(rho,psi,m)"),
+                layouter.namespace(|| "nf_old = DeriveNullifier_nk(rho_old, psi_old, cm_old)"),
                 config.poseidon_chip(),
                 config.add_chip(),
                 ecc_chip.clone(),
-                rho.clone(),
-                &psi,
-                &cm,
-                nk,
+                rho_old.clone(),
+                &psi_old,
+                &cm_old,
+                nk.clone(),
             )?;
+
+            // Constrain nf_old to equal public input
+            layouter.constrain_instance(nf_old.inner().cell(), config.primary, NF_OLD)?;
+
             nf_old
         };
 
-        // 4. ------------- Nullifier Authenticity Constraint --------------------------------------------------
-        let rcp = ScalarFixed::new(
-            ecc_chip.clone(),
-            layouter.namespace(|| "rcm_old"),
-            self.rcm.as_ref().map(|rc| rc.inner()),
-        )?;
+        // // Spend authority (https://p.z.cash/ZKS:action-spend-authority)
+        // {
+        //     let alpha =
+        //         ScalarFixed::new(ecc_chip.clone(), layouter.namespace(|| "alpha"), self.alpha)?;
 
-        // // g★_d || pk★_d || i2lebsp_{64}(v) || i2lebsp_{255}(rho) || i2lebsp_{255}(psi)
-        let cm = gadgets::note_commit(
-            layouter.namespace(|| {
-                "g★_d || pk★_d || i2lebsp_{64}(v) || i2lebsp_{255}(rho) || i2lebsp_{255}(psi)"
-            }),
-            config.sinsemilla_chip(),
-            config.ecc_chip(),
-            config.note_commit_chip(),
-            recp,
-            fdi,
-            nd,
-            esk_crt.native,
-            v,
-            rho.clone(),
-            psi.clone(),
-            rcp,
-        )?;
+        //     // alpha_commitment = [alpha] SpendAuthG
+        //     let (alpha_commitment, _) = {
+        //         let spend_auth_g = OrchardFixedBasesFull::SpendAuthG;
+        //         let spend_auth_g = FixedPoint::from_inner(ecc_chip.clone(), spend_auth_g);
+        //         spend_auth_g.mul(layouter.namespace(|| "[alpha] SpendAuthG"), alpha)?
+        //     };
 
-        // 5. ------------- OPTIMIZATION: Hash all public inputs into one using Poseidon --------------------------------------------------
-        // This reduces on-chain verification gas cost by ~75% (700k → 150k gas)
-        // Instead of exposing (root, nf, cmx) as 3 separate public inputs,
-        // we hash them together: H(root, nf, cmx)
-        let public_input_hash = {
-            // Extract x-coordinate from note commitment point
-            let cmx = cm.extract_p().inner().clone();
-            // Use the gadget function to hash public inputs
-            gadget::hash_public_inputs(
-                layouter.namespace(|| "hash public inputs"),
-                config.poseidon_chip(),
-                root.clone(),
-                nf.inner().clone(),
-                cmx,
-            )?
-        };
+        //     // [alpha] SpendAuthG + ak_P
+        //     let rk = alpha_commitment.add(layouter.namespace(|| "rk"), &ak_P)?;
 
-        // Constrain the hash as the ONLY public input
-        layouter.constrain_instance(public_input_hash.cell(), config.primary, PUBLIC_INPUT_HASH)?;
+        //     // Constrain rk to equal public input
+        //     layouter.constrain_instance(rk.inner().x().cell(), config.primary, RK_X)?;
+        //     layouter.constrain_instance(rk.inner().y().cell(), config.primary, RK_Y)?;
+        // }
+
+        // Diversified address integrity (https://p.z.cash/ZKS:action-addr-integrity?partial).
+        // let pk_d_old = {
+        //     let ivk = {
+        //         let ak = ak_P.extract_p().inner().clone();
+        //         let rivk = ScalarFixed::new(
+        //             ecc_chip.clone(),
+        //             layouter.namespace(|| "rivk"),
+        //             self.rivk.map(|rivk| rivk.inner()),
+        //         )?;
+
+        //         gadget::commit_ivk(
+        //             config.sinsemilla_chip_1(),
+        //             ecc_chip.clone(),
+        //             config.commit_ivk_chip(),
+        //             layouter.namespace(|| "CommitIvk"),
+        //             ak,
+        //             nk,
+        //             rivk,
+        //         )?
+        //     };
+        //     let ivk =
+        //         ScalarVar::from_base(ecc_chip.clone(), layouter.namespace(|| "ivk"), ivk.inner())?;
+
+        //     // [ivk] g_d_old
+        //     // The scalar value is passed through and discarded.
+        //     let (derived_pk_d_old, _ivk) =
+        //         g_d_old.mul(layouter.namespace(|| "[ivk] g_d_old"), ivk)?;
+
+        //     // Constrain derived pk_d_old to equal witnessed pk_d_old
+        //     //
+        //     // This equality constraint is technically superfluous, because the assigned
+        //     // value of `derived_pk_d_old` is an equivalent witness. But it's nice to see
+        //     // an explicit connection between circuit-synthesized values, and explicit
+        //     // prover witnesses. We could get the best of both worlds with a write-on-copy
+        //     // abstraction (https://github.com/zcash/halo2/issues/334).
+        //     let pk_d_old = NonIdentityPoint::new(
+        //         ecc_chip.clone(),
+        //         layouter.namespace(|| "witness pk_d_old"),
+        //         self.pk_d_old.map(|pk_d_old| pk_d_old.inner().to_affine()),
+        //     )?;
+        //     derived_pk_d_old
+        //         .constrain_equal(layouter.namespace(|| "pk_d_old equality"), &pk_d_old)?;
+
+        //     pk_d_old
+        // };
+
+        // Old note commitment integrity (https://p.z.cash/ZKS:action-cm-old-integrity?partial).
+        {
+            let rcm_old = ScalarFixed::new(
+                ecc_chip.clone(),
+                layouter.namespace(|| "rcm_old"),
+                self.rcm_old.as_ref().map(|rcm_old| rcm_old.inner()),
+            )?;
+
+            // g★_d || pk★_d || i2lebsp_{64}(v) || i2lebsp_{255}(rho) || i2lebsp_{255}(psi)
+
+            // // g★_d || pk★_d || i2lebsp_{64}(v) || i2lebsp_{255}(rho) || i2lebsp_{255}(psi)
+            let derived_cm_old = gadget::note_commit(
+                layouter.namespace(|| {
+                    "g★_d || pk★_d || i2lebsp_{64}(v) || i2lebsp_{255}(rho) || i2lebsp_{255}(psi)"
+                }),
+                config.sinsemilla_chip_1(),
+                config.ecc_chip(),
+                config.note_commit_chip_old(),
+                nd,
+                v,
+                fdi,
+                recp,
+                esk_crt.native,
+                rho_old.clone(),
+                psi_old.clone(),
+                rcm_old,
+            )?;
+
+            // Constrain derived cm_old to equal witnessed cm_old
+            derived_cm_old.constrain_equal(layouter.namespace(|| "cm_old equality"), &cm_old)?;
+        }
+
+        // // New note commitment integrity (https://p.z.cash/ZKS:action-cmx-new-integrity?partial).
+        // {
+        //     // Witness g_d_new
+        //     let g_d_new = {
+        //         let g_d_new = self.g_d_new.map(|g_d_new| g_d_new.to_affine());
+        //         NonIdentityPoint::new(
+        //             ecc_chip.clone(),
+        //             layouter.namespace(|| "witness g_d_new_star"),
+        //             g_d_new,
+        //         )?
+        //     };
+
+        //     // Witness pk_d_new
+        //     let pk_d_new = {
+        //         let pk_d_new = self.pk_d_new.map(|pk_d_new| pk_d_new.inner().to_affine());
+        //         NonIdentityPoint::new(
+        //             ecc_chip.clone(),
+        //             layouter.namespace(|| "witness pk_d_new"),
+        //             pk_d_new,
+        //         )?
+        //     };
+
+        //     // ρ^new = nf^old
+        //     let rho_new = nf_old.inner().clone();
+
+        //     // Witness psi_new
+        //     let psi_new = assign_free_advice(
+        //         layouter.namespace(|| "witness psi_new"),
+        //         config.advices[0],
+        //         self.psi_new,
+        //     )?;
+
+        //     let rcm_new = ScalarFixed::new(
+        //         ecc_chip,
+        //         layouter.namespace(|| "rcm_new"),
+        //         self.rcm_new.as_ref().map(|rcm_new| rcm_new.inner()),
+        //     )?;
+
+        //     // g★_d || pk★_d || i2lebsp_{64}(v) || i2lebsp_{255}(rho) || i2lebsp_{255}(psi)
+        //     let cm_new = gadget::note_commit(
+        //         layouter.namespace(|| {
+        //             "g★_d || pk★_d || i2lebsp_{64}(v) || i2lebsp_{255}(rho) || i2lebsp_{255}(psi)"
+        //         }),
+        //         config.sinsemilla_chip_2(),
+        //         config.ecc_chip(),
+        //         config.note_commit_chip_new(),
+        //         g_d_new.inner(),
+        //         pk_d_new.inner(),
+        //         v_new.clone(),
+        //         rho_new,
+        //         psi_new,
+        //         rcm_new,
+        //     )?;
+
+        //     let cmx = cm_new.extract_p();
+
+        //     // Constrain cmx to equal public input
+        //     layouter.constrain_instance(cmx.inner().cell(), config.primary, CMX)?;
+        // }
+
+        // // Constrain the remaining Orchard circuit checks.
+        // layouter.assign_region(
+        //     || "Orchard circuit checks",
+        //     |mut region| {
+        //         v_old.copy_advice(|| "v_old", &mut region, config.advices[0], 0)?;
+        //         v_new.copy_advice(|| "v_new", &mut region, config.advices[1], 0)?;
+        //         v_net_magnitude_sign.0.copy_advice(
+        //             || "v_net magnitude",
+        //             &mut region,
+        //             config.advices[2],
+        //             0,
+        //         )?;
+        //         v_net_magnitude_sign.1.copy_advice(
+        //             || "v_net sign",
+        //             &mut region,
+        //             config.advices[3],
+        //             0,
+        //         )?;
+
+        //         root.copy_advice(|| "calculated root", &mut region, config.advices[4], 0)?;
+        //         region.assign_advice_from_instance(
+        //             || "pub input anchor",
+        //             config.primary,
+        //             ANCHOR,
+        //             config.advices[5],
+        //             0,
+        //         )?;
+
+        //         region.assign_advice_from_instance(
+        //             || "enable spends",
+        //             config.primary,
+        //             ENABLE_SPEND,
+        //             config.advices[6],
+        //             0,
+        //         )?;
+
+        //         region.assign_advice_from_instance(
+        //             || "enable outputs",
+        //             config.primary,
+        //             ENABLE_OUTPUT,
+        //             config.advices[7],
+        //             0,
+        //         )?;
+
+        //         config.q_orchard.enable(&mut region, 0)
+        //     },
+        // )?;
 
         Ok(())
+    }
+}
+
+/// The verifying key for the Orchard Action circuit.
+#[derive(Debug)]
+pub struct VerifyingKey {
+    pub(crate) params: halo2_proofs::poly::commitment::Params<vesta::Affine>,
+    pub(crate) vk: plonk::VerifyingKey<vesta::Affine>,
+}
+
+impl VerifyingKey {
+    /// Builds the verifying key.
+    pub fn build() -> Self {
+        let params = halo2_proofs::poly::commitment::Params::new(K);
+        let circuit: Circuit = Default::default();
+
+        let vk = plonk::keygen_vk(&params, &circuit).unwrap();
+
+        VerifyingKey { params, vk }
+    }
+}
+
+/// The proving key for the Orchard Action circuit.
+#[derive(Debug)]
+pub struct ProvingKey {
+    params: halo2_proofs::poly::commitment::Params<vesta::Affine>,
+    pk: plonk::ProvingKey<vesta::Affine>,
+}
+
+impl ProvingKey {
+    /// Builds the proving key.
+    pub fn build() -> Self {
+        let params = halo2_proofs::poly::commitment::Params::new(K);
+        let circuit: Circuit = Default::default();
+
+        let vk = plonk::keygen_vk(&params, &circuit).unwrap();
+        let pk = plonk::keygen_pk(&params, vk, &circuit).unwrap();
+
+        ProvingKey { params, pk }
     }
 }
 
 /// Public inputs to the Orchard Action circuit.
 #[derive(Clone, Debug)]
 pub struct Instance {
-    // pub(crate) cv_net: ValueCommitment,
     pub(crate) anchor: Anchor,
+    pub(crate) cv_net: ValueCommitment,
     pub(crate) nf_old: Nullifier,
+    pub(crate) rk: VerificationKey<SpendAuth>,
     pub(crate) cmx: ExtractedNoteCommitment,
+    pub(crate) enable_spend: bool,
+    pub(crate) enable_output: bool,
 }
 
 impl Instance {
-    /// Compute the public input hash outside the circuit.
+    /// Constructs an [`Instance`] from its constituent parts.
     ///
-    /// This must match the computation inside the circuit exactly.
-    /// The verifier will check that the proof's public input matches this hash.
-    pub fn compute_public_input_hash(&self) -> pallas::Base {
-        // Use the same Poseidon parameters as the circuit: P128Pow5T3, ConstantLength<3>
-        let hash_inputs = [self.anchor.inner(), self.nf_old.0, self.cmx.inner()];
-
-        // Compute Poseidon hash with the same spec as in circuit
-        poseidon::Hash::<_, poseidon::P128Pow5T3, poseidon::ConstantLength<3>, 3, 2>::init()
-            .hash(hash_inputs)
-    }
-
-    /// Create a new Instance with automatic hash computation
-    pub fn new(anchor: Anchor, nf_old: Nullifier, cmx: ExtractedNoteCommitment) -> Self {
-        let instance = Self {
+    /// This API can be used in combination with [`Proof::verify`] to build verification
+    /// pipelines for many proofs, where you don't want to pass around the full bundle.
+    /// Use [`Bundle::verify_proof`] instead if you have the full bundle.
+    ///
+    /// [`Bundle::verify_proof`]: crate::Bundle::verify_proof
+    pub fn from_parts(
+        anchor: Anchor,
+        cv_net: ValueCommitment,
+        nf_old: Nullifier,
+        rk: VerificationKey<SpendAuth>,
+        cmx: ExtractedNoteCommitment,
+        enable_spend: bool,
+        enable_output: bool,
+    ) -> Self {
+        Instance {
             anchor,
+            cv_net,
             nf_old,
+            rk,
             cmx,
-        };
-        instance
+            enable_spend,
+            enable_output,
+        }
     }
 
-    /// Get the instance column value for the verifier.
-    ///
-    /// This returns a single-element vector containing only the hash.
-    pub fn to_instance_column(&self) -> Vec<pallas::Base> {
-        vec![self.compute_public_input_hash()]
+    fn to_halo2_instance(&self) -> [[vesta::Scalar; 9]; 1] {
+        let mut instance = [vesta::Scalar::zero(); 9];
+
+        instance[ANCHOR] = self.anchor.inner();
+        instance[CV_NET_X] = self.cv_net.x();
+        instance[CV_NET_Y] = self.cv_net.y();
+        instance[NF_OLD] = self.nf_old.0;
+
+        let rk = pallas::Point::from_bytes(&self.rk.clone().into())
+            .unwrap()
+            .to_affine()
+            .coordinates()
+            .unwrap();
+
+        instance[RK_X] = *rk.x();
+        instance[RK_Y] = *rk.y();
+        instance[CMX] = self.cmx.inner();
+        instance[ENABLE_SPEND] = vesta::Scalar::from(u64::from(self.enable_spend));
+        instance[ENABLE_OUTPUT] = vesta::Scalar::from(u64::from(self.enable_output));
+
+        [instance]
     }
+}
+
+impl Proof {
+    /// Creates a proof for the given circuits and instances.
+    pub fn create(
+        pk: &ProvingKey,
+        circuits: &[Circuit],
+        instances: &[Instance],
+        mut rng: impl RngCore,
+    ) -> Result<Self, plonk::Error> {
+        let instances: Vec<_> = instances.iter().map(|i| i.to_halo2_instance()).collect();
+        let instances: Vec<Vec<_>> = instances
+            .iter()
+            .map(|i| i.iter().map(|c| &c[..]).collect())
+            .collect();
+        let instances: Vec<_> = instances.iter().map(|i| &i[..]).collect();
+
+        let mut transcript = Blake2bWrite::<_, vesta::Affine, _>::init(vec![]);
+        plonk::create_proof(
+            &pk.params,
+            &pk.pk,
+            circuits,
+            &instances,
+            &mut rng,
+            &mut transcript,
+        )?;
+        Ok(Proof(transcript.finalize()))
+    }
+
+    /// Verifies this proof with the given instances.
+    pub fn verify(&self, vk: &VerifyingKey, instances: &[Instance]) -> Result<(), plonk::Error> {
+        let instances: Vec<_> = instances.iter().map(|i| i.to_halo2_instance()).collect();
+        let instances: Vec<Vec<_>> = instances
+            .iter()
+            .map(|i| i.iter().map(|c| &c[..]).collect())
+            .collect();
+        let instances: Vec<_> = instances.iter().map(|i| &i[..]).collect();
+
+        let strategy = SingleVerifier::new(&vk.params);
+        let mut transcript = Blake2bRead::init(&self.0[..]);
+        plonk::verify_proof(&vk.params, &vk.vk, strategy, &instances, &mut transcript)
+    }
+
+    // /// Adds this proof to the given batch for verification with the given instances.
+    // ///
+    // /// Use this API if you want more control over how proof batches are processed. If you
+    // /// just want to batch-validate Orchard bundles, use [`bundle::BatchValidator`].
+    // ///
+    // /// [`bundle::BatchValidator`]: crate::bundle::BatchValidator
+    // pub fn add_to_batch(&self, batch: &mut BatchVerifier<vesta::Affine>, instances: Vec<Instance>) {
+    //     let instances = instances
+    //         .iter()
+    //         .map(|i| {
+    //             i.to_halo2_instance()
+    //                 .into_iter()
+    //                 .map(|c| c.into_iter().collect())
+    //                 .collect()
+    //         })
+    //         .collect();
+
+    //     batch.add_proof(instances, self.0.clone());
+    // }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use ff::{Field, PrimeField};
-    use halo2_base::halo2_proofs::halo2curves::secp256k1::{Fp as Secp256k1Fp, Fq as Secp256k1Fq};
-    use halo2_proofs::{dev::MockProver, plonk::Circuit};
-    use pasta_curves::pallas;
-    use rand::rngs::OsRng;
+    use alloc::vec::Vec;
+    use core::iter;
     use secp256k1::{PublicKey, Secp256k1, SecretKey};
 
+    use ff::Field;
+    use halo2_proofs::{circuit::Value, dev::MockProver};
+    use pasta_curves::pallas;
+    use rand::{rngs::OsRng, RngCore};
+
+    use super::{Circuit, Instance, Proof, ProvingKey, VerifyingKey, K};
     use crate::{
-        keys::{EligibleSk, NullifierDerivingKey},
-        note::{NoteCommitment, Rho},
-        tree::MerkleHashHeadstash,
-        value::{NoteDenom, NoteValue},
+        circuit::gadget::secp256k1_chip::{Secp256k1Fp, Secp256k1Fq},
+        keys::{EligibleSk, SpendValidatingKey},
+        note::{Note, Rho},
+        tree::MerklePath,
+        value::{NoteDenom, NoteValue, ValueCommitTrapdoor, ValueCommitment},
     };
 
-    /// Degree for testing (2^18 = 262,144 rows for foreign field ops)
-    const K: u32 = 17;
-
-    /// Helper to generate a valid circuit instance using Note template
-    fn generate_valid_circuit() -> HeadstashCircuit {
-        use crate::{
-            address::RecpAddr,
-            keys::{EligiblePk, EligibleSk},
-            note::{Note, RandomSeed},
-        };
-        use cosmwasm_std::{testing::mock_dependencies, Api};
-        use ff::FromUniformBytes;
-
+    fn generate_circuit_instance<R: RngCore>(mut rng: R) -> (Circuit, Instance) {
+        let (_, fvk, esk, spent_note) = Note::dummy(&mut rng, None);
         // 1. Generate secp256k1 key pair (esk, epk)
-        let e_sk_bytes = [
-            0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e,
-            0x0f, 0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18, 0x19, 0x1a, 0x1b, 0x1c,
-            0x1d, 0x1e, 0x1f, 0x20,
-        ];
 
-        let e_sk_secp = SecretKey::from_slice(&e_sk_bytes).expect("valid secret key");
-        let esk = EligibleSk::from(e_sk_secp);
-
-        // 2. Generate randomness (rho, rseed, psi)
-        let mut randomness_64 = [0; 64];
-        blake3::Hasher::new()
-            .update(&[0u8; 32]) // deterministic for testing
-            .finalize_xof()
-            .fill(&mut randomness_64);
-
-        let rho =
-            Rho::from_bytes(&pallas::Base::from_uniform_bytes(&randomness_64).to_repr()).unwrap();
-        let rseed = RandomSeed::from_bytes([1u8; 32], &rho).unwrap();
-
-        // 3. Note parameters
-        let v = NoteValue::from_raw(100);
-        let nd = NoteDenom::new_for_proof("TEST_DENOM");
-        let fdi = 0u64;
-
-        // 4. Create recp address
-        let mock_deps = mock_dependencies();
-        let recp = RecpAddr::try_from(
-            mock_deps
-                .api
-                .addr_canonicalize(
-                    &mock_deps
-                        .api
-                        .addr_make(&format!("test{}", hex::encode(rho.into_inner().to_repr())))
-                        .to_string(),
-                )
-                .unwrap(),
-        )
-        .unwrap();
-
-        // 5. Create Note - this derives nk, cm, nullifier automatically
-        let note = Note::from_parts(recp, v, nd, fdi, esk, rho, rseed).unwrap();
-
+        let epk = esk.epk().0;
         // 6. Extract secp256k1 coordinates for circuit
-        let secp = Secp256k1::new();
-        let e_pk_secp = PublicKey::from_secret_key(&secp, &e_sk_secp);
-        let e_pk_bytes = e_pk_secp.serialize_uncompressed();
+        // let secp = Secp256k1::new();
+        // let e_pk_secp = PublicKey::from_secret_key(&secp, &esk);
+        let e_pk_bytes = epk.serialize_uncompressed();
         let e_pk_x_bytes: [u8; 32] = e_pk_bytes[1..33].try_into().unwrap();
         let e_pk_y_bytes: [u8; 32] = e_pk_bytes[33..65].try_into().unwrap();
+        let e_sk_fq = Secp256k1Fq::from_bytes(&esk.0.secret_bytes()).expect("valid Fq");
+        let epkx = Secp256k1Fp::from_bytes(&e_pk_x_bytes).expect("valid Fp");
+        let epky = Secp256k1Fp::from_bytes(&e_pk_y_bytes).expect("valid Fp");
 
-        let e_sk_fq = Secp256k1Fq::from_repr(e_sk_bytes).expect("valid Fq");
-        let epkx = Secp256k1Fp::from_repr(e_pk_x_bytes).expect("valid Fp");
-        let epky = Secp256k1Fp::from_repr(e_pk_y_bytes).expect("valid Fp");
+        let sender_address = spent_note.recipient();
+        let nk = *fvk.nk();
+        // let rivk = fvk.rivk(fvk.scope_for_address(&spent_note.recipient()).unwrap());
+        let nf_old = spent_note.nullifier(&fvk);
+        let rho = Rho::from_nf_old(nf_old);
+        let (_, _, esk, output_note) = Note::dummy(&mut rng, Some(rho));
+        let ak: SpendValidatingKey = fvk.into();
+        let alpha = pallas::Scalar::random(&mut rng);
+        let rk = ak.randomize(&alpha);
 
-        // 7. Derive nk using HKDF
-        let nk = NullifierDerivingKey::derive_from(esk, rho);
+        let cmx = output_note.commitment().into();
 
-        let mut sin_root = pallas::Base::from_repr(
-            hex::decode("8638de243d78472519d9d163872694dcc7343658a0199e3a67b390c1bdbc7300")
-                .unwrap()
-                .try_into()
-                .unwrap(),
+        let value = spent_note.value() - output_note.value();
+        let rcv = ValueCommitTrapdoor::random(&mut rng);
+        let cv_net = ValueCommitment::derive(value, rcv.clone());
+
+        let path = MerklePath::dummy(&mut rng);
+        let anchor = path.root(spent_note.commitment().into());
+
+        (
+            Circuit {
+                path: Value::known(path.auth_path()),
+                pos: Value::known(path.position()),
+                nk: Value::known(nk),
+                nd: Value::known(crate::spec::nd_to_fp(&spent_note.nd())),
+                v: Value::known(spent_note.value()),
+                fdi: Value::known(pallas::Base::from(spent_note.fdi())),
+                recp: Value::known(spent_note.recipient().to_pallas()),
+                esk: Value::known(e_sk_fq),
+                epkx: Value::known(epkx),
+                epky: Value::known(epky),
+                rho_old: Value::known(spent_note.rho()),
+                psi_old: Value::known(spent_note.rseed().psi(&spent_note.rho())),
+                rcm_old: Value::known(spent_note.rseed().rcm(&spent_note.rho())),
+                cm_old: Value::known(spent_note.commitment()),
+                // alpha: Value::known(alpha),
+                // ak: Value::known(ak),
+                // nk: Value::known(nk),
+                // rivk: Value::known(rivk),
+                // g_d_new: Value::known(output_note.recipient().g_d()),
+                // pk_d_new: Value::known(*output_note.recipient().pk_d()),
+                // v_new: Value::known(output_note.value()),
+                // psi_new: Value::known(output_note.rseed().psi(&output_note.rho())),
+                // rcm_new: Value::known(output_note.rseed().rcm(&output_note.rho())),
+                rcv: Value::known(rcv),
+            },
+            Instance {
+                anchor,
+                cv_net,
+                nf_old,
+                rk,
+                cmx,
+                enable_spend: true,
+                enable_output: true,
+            },
         )
-        .expect("field conversion error");
+    }
 
-        // let path = MerkleHashHeadstash::from(crate::tree::MerkleHashHeadstash(sin_root));
-        // 8. Create dummy Merkle path (for testing)
-        let path = [MerkleHashHeadstash::from_cmx(
-            &ExtractedNoteCommitment::from_bytes(&sin_root.to_repr())
-                .expect("sinsemilla headstash tree root derivation error"),
-        ); MERKLE_DEPTH_HEADSTASH];
-        let pos = 0u32;
+    // TODO: recast as a proptest
+    #[test]
+    fn round_trip() {
+        let mut rng = OsRng;
 
-        HeadstashCircuit {
-            path: Value::known(path),
-            pos: Value::known(pos),
-            psi: Value::known(note.rseed().psi(&rho)),
-            rho: Value::known(rho),
-            cm: Value::known(note.commitment()),
-            esk: Value::known(e_sk_fq),
-            epkx: Value::known(epkx),
-            epky: Value::known(epky),
-            nk: Value::known(nk),
-            fdi: Value::known(pallas::Base::from(fdi)),
-            v: Value::known(v),
-            nd: Value::known(crate::spec::nd_to_fp(&nd)),
-            recp: Value::known(note.recp().to_pallas()),
-            rcm: Value::known(note.rseed().rcm(&rho)),
+        let (circuits, instances): (Vec<_>, Vec<_>) = iter::once(())
+            .map(|()| generate_circuit_instance(&mut rng))
+            .unzip();
+
+        let vk = VerifyingKey::build();
+
+        // Test that the pinned verification key (representing the circuit)
+        // is as expected.
+        {
+            // panic!("{:#?}", vk.vk.pinned());
+            assert_eq!(
+                format!("{:#?}\n", vk.vk.pinned()),
+                include_str!("circuit_description").replace("\r\n", "\n")
+            );
         }
+
+        // Test that the proof size is as expected.
+        let expected_proof_size = {
+            let circuit_cost =
+                halo2_proofs::dev::CircuitCost::<pasta_curves::vesta::Point, _>::measure(
+                    K,
+                    &circuits[0],
+                );
+            assert_eq!(usize::from(circuit_cost.proof_size(1)), 4992);
+            assert_eq!(usize::from(circuit_cost.proof_size(2)), 7264);
+            usize::from(circuit_cost.proof_size(instances.len()))
+        };
+
+        for (circuit, instance) in circuits.iter().zip(instances.iter()) {
+            assert_eq!(
+                MockProver::run(
+                    K,
+                    circuit,
+                    instance
+                        .to_halo2_instance()
+                        .iter()
+                        .map(|p| p.to_vec())
+                        .collect()
+                )
+                .unwrap()
+                .verify(),
+                Ok(())
+            );
+        }
+
+        let pk = ProvingKey::build();
+        let proof = Proof::create(&pk, &circuits, &instances, &mut rng).unwrap();
+        assert!(proof.verify(&vk, &instances).is_ok());
+        assert_eq!(proof.0.len(), expected_proof_size);
     }
 
     #[test]
-    fn test_valid_headstash_circuit() {
-        let circuit = generate_valid_circuit();
-        println!("✓ Generated HeadstashCircuit, running MockProver...");
-        // Run MockProver
-        let prover = MockProver::run(K, &circuit, vec![vec![]]).expect("prover should run");
+    fn serialized_proof_test_case() {
+        use std::io::{Read, Write};
 
-        // Verify
-        match prover.verify() {
-            Ok(()) => println!("✓ Valid Headstash circuit verified successfully"),
-            Err(e) => {
-                eprintln!("✗ Circuit verification failed:");
-                for err in e.iter() {
-                    eprintln!("  - {:1?}", err);
+        let vk = VerifyingKey::build();
+
+        fn write_test_case<W: Write>(
+            mut w: W,
+            instance: &Instance,
+            proof: &Proof,
+        ) -> std::io::Result<()> {
+            w.write_all(&instance.anchor.to_bytes())?;
+            w.write_all(&instance.cv_net.to_bytes())?;
+            w.write_all(&instance.nf_old.to_bytes())?;
+            w.write_all(&<[u8; 32]>::from(instance.rk.clone()))?;
+            w.write_all(&instance.cmx.to_bytes())?;
+            w.write_all(&[
+                u8::from(instance.enable_spend),
+                u8::from(instance.enable_output),
+            ])?;
+
+            w.write_all(proof.as_ref())?;
+            Ok(())
+        }
+
+        fn read_test_case<R: Read>(mut r: R) -> std::io::Result<(Instance, Proof)> {
+            let read_32_bytes = |r: &mut R| {
+                let mut ret = [0u8; 32];
+                r.read_exact(&mut ret).unwrap();
+                ret
+            };
+            let read_bool = |r: &mut R| {
+                let mut byte = [0u8; 1];
+                r.read_exact(&mut byte).unwrap();
+                match byte {
+                    [0] => false,
+                    [1] => true,
+                    _ => panic!("Unexpected non-boolean byte"),
                 }
-                panic!("Valid circuit should verify");
-            }
+            };
+
+            let anchor = crate::Anchor::from_bytes(read_32_bytes(&mut r)).unwrap();
+            let cv_net = ValueCommitment::from_bytes(&read_32_bytes(&mut r)).unwrap();
+            let nf_old = crate::note::Nullifier::from_bytes(&read_32_bytes(&mut r)).unwrap();
+            let rk = read_32_bytes(&mut r).try_into().unwrap();
+            let cmx =
+                crate::note::ExtractedNoteCommitment::from_bytes(&read_32_bytes(&mut r)).unwrap();
+            let enable_spend = read_bool(&mut r);
+            let enable_output = read_bool(&mut r);
+            let instance =
+                Instance::from_parts(anchor, cv_net, nf_old, rk, cmx, enable_spend, enable_output);
+
+            let mut proof_bytes = vec![];
+            r.read_to_end(&mut proof_bytes)?;
+            let proof = Proof::new(proof_bytes);
+
+            Ok((instance, proof))
         }
+
+        if std::env::var_os("ORCHARD_CIRCUIT_TEST_GENERATE_NEW_PROOF").is_some() {
+            let create_proof = || -> std::io::Result<()> {
+                let mut rng = OsRng;
+
+                let (circuit, instance) = generate_circuit_instance(OsRng);
+                let instances = &[instance.clone()];
+
+                let pk = ProvingKey::build();
+                let proof = Proof::create(&pk, &[circuit], instances, &mut rng).unwrap();
+                assert!(proof.verify(&vk, instances).is_ok());
+
+                let file = std::fs::File::create("circuit_proof_test_case.bin")?;
+                write_test_case(file, &instance, &proof)
+            };
+            create_proof().expect("should be able to write new proof");
+        }
+
+        // Parse the hardcoded proof test case.
+        let (instance, proof) = {
+            let test_case_bytes = include_bytes!("circuit_proof_test_case.bin");
+            read_test_case(&test_case_bytes[..]).expect("proof must be valid")
+        };
+        assert_eq!(proof.0.len(), 4992);
+
+        assert!(proof.verify(&vk, &[instance]).is_ok());
     }
 
+    #[cfg(feature = "dev-graph")]
     #[test]
-    #[should_panic(expected = "should verify")]
-    fn test_invalid_key_pairing_fails() {
-        let mut circuit = generate_valid_circuit();
+    fn print_action_circuit() {
+        use plotters::prelude::*;
 
-        // Tamper with public key
-        let secp = Secp256k1::new();
-        let wrong_sk = SecretKey::from_byte_array([42u8; 32]).unwrap();
-        let wrong_pk = PublicKey::from_secret_key(&secp, &wrong_sk);
+        let root = BitMapBackend::new("action-circuit-layout.png", (1024, 768)).into_drawing_area();
+        root.fill(&WHITE).unwrap();
+        let root = root
+            .titled("Orchard Action Circuit", ("sans-serif", 60))
+            .unwrap();
 
-        let wrong_pk_bytes = wrong_pk.serialize_uncompressed();
-        let wrong_pk_x_bytes: [u8; 32] = wrong_pk_bytes[1..33].try_into().unwrap();
-        let wrong_pk_y_bytes: [u8; 32] = wrong_pk_bytes[33..65].try_into().unwrap();
-
-        circuit.epkx = Value::known(Secp256k1Fp::from_repr(wrong_pk_x_bytes).unwrap());
-        circuit.epky = Value::known(Secp256k1Fp::from_repr(wrong_pk_y_bytes).unwrap());
-
-        let prover = MockProver::run(K, &circuit, vec![vec![]]).expect("prover should run");
-        prover.verify().expect("should verify");
-    }
-
-    #[test]
-    fn test_circuit_without_witnesses() {
-        let circuit = generate_valid_circuit();
-        let circuit_no_witnesses = circuit.without_witnesses();
-
-        let prover = MockProver::run(K, &circuit_no_witnesses, vec![vec![]]);
-        assert!(
-            prover.is_ok(),
-            "Circuit without witnesses should be constructable"
-        );
-    }
-
-    #[test]
-    fn test_circuit_configuration() {
-        use halo2_proofs::plonk::ConstraintSystem;
-        let mut cs = ConstraintSystem::<pallas::Base>::default();
-        let config = HeadstashCircuit::configure(&mut cs);
-
-        println!("Circuit configuration:");
-        println!("  - Advice columns: {}", config.advices.len());
-        assert_eq!(config.advices.len(), 10, "Should have 10 advice columns");
-    }
-
-    #[test]
-    fn test_circuit_cost() {
-        //  Circuit cost:
-        //  Degree: 2^18 = 262144 rows
-        //  proof_size: 5152
-        //  test circuit::tests::test_circuit_cost ... ok
-        use halo2_proofs::dev::CircuitCost;
-        use pasta_curves::vesta;
-
-        let circuit = generate_valid_circuit();
-        println!(" circuit: {:#?}", circuit);
-        let cost = CircuitCost::<vesta::Point, _>::measure(K, &circuit);
-
-        println!("\nCircuit cost:");
-        println!("  Degree: 2^{} = {} rows", K, 1 << K);
-        // println!("  Proof size (1 instance): {} bytes", cost.proof_size(1));
-
-        let proof_size = usize::from(cost.proof_size(1));
-        assert!(proof_size > 0, "Proof size should be non-zero");
-
-        println!(" proof_size: {}", proof_size);
-        println!(" cost: {:#?}", cost);
+        let circuit = Circuit {
+            path: Value::unknown(),
+            pos: Value::unknown(),
+            g_d_old: Value::unknown(),
+            pk_d_old: Value::unknown(),
+            v_old: Value::unknown(),
+            rho_old: Value::unknown(),
+            psi_old: Value::unknown(),
+            rcm_old: Value::unknown(),
+            cm_old: Value::unknown(),
+            alpha: Value::unknown(),
+            ak: Value::unknown(),
+            nk: Value::unknown(),
+            rivk: Value::unknown(),
+            g_d_new: Value::unknown(),
+            pk_d_new: Value::unknown(),
+            v_new: Value::unknown(),
+            psi_new: Value::unknown(),
+            rcm_new: Value::unknown(),
+            rcv: Value::unknown(),
+        };
+        halo2_proofs::dev::CircuitLayout::default()
+            .show_labels(false)
+            .view_height(0..(1 << 11))
+            .render(K, &circuit, &root)
+            .unwrap();
     }
 }

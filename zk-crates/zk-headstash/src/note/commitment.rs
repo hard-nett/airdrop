@@ -1,18 +1,19 @@
-use std::iter;
+use core::iter;
 
-use bitvec::array::BitArray;
-use bitvec::order::Lsb0;
-use ff::{PrimeField, PrimeFieldBits};
+use bitvec::{array::BitArray, order::Lsb0};
+use group::ff::{PrimeField, PrimeFieldBits};
 use pasta_curves::pallas;
 use subtle::{ConstantTimeEq, CtOption};
 
-use crate::constants::{DST_CM, L_ORCHARD_BASE};
-use crate::keys::EligibleSk;
-use crate::spec::extract_p;
-use crate::value::NoteValue;
+use crate::{
+    constants::{fixed_bases::NOTE_COMMITMENT_PERSONALIZATION, L_ORCHARD_BASE},
+    keys::EligibleSk,
+    spec::extract_p,
+    value::NoteValue,
+};
 
 #[derive(Clone, Debug)]
-pub struct NoteCommitTrapdoor(pub(super) pallas::Scalar);
+pub(crate) struct NoteCommitTrapdoor(pub(super) pallas::Scalar);
 
 impl NoteCommitTrapdoor {
     pub(crate) fn inner(&self) -> pallas::Scalar {
@@ -32,30 +33,32 @@ impl NoteCommitment {
 
 impl NoteCommitment {
     /// $NoteCommit^Orchard$.
+    ///
     /// Defined in [Zcash Protocol Spec § 5.4.8.4: Sinsemilla commitments][concretesinsemillacommit].
     ///
     /// [concretesinsemillacommit]: https://zips.z.cash/protocol/nu5.pdf#concretesinsemillacommit
-    pub fn derive(
-        recp: [u8; 32],
-        v: NoteValue,
+    pub(super) fn derive(
         nd: pallas::Base,
+        v: NoteValue,
         fdi: pallas::Base,
+        recp: [u8; 32],
         esk: EligibleSk,
         rho: pallas::Base,
         psi: pallas::Base,
         rcm: NoteCommitTrapdoor,
     ) -> CtOption<Self> {
         let esk = esk.derive_pallas();
-        let domain = sinsemilla::CommitDomain::new(DST_CM);
+
+        let domain = sinsemilla::CommitDomain::new(NOTE_COMMITMENT_PERSONALIZATION);
         domain
             .commit(
                 iter::empty()
-                    .chain(BitArray::<_, Lsb0>::new(recp).iter().by_vals())
-                    .chain(fdi.to_le_bits().iter().by_vals())
                     .chain(nd.to_le_bits().iter().by_vals())
                     .chain(v.to_le_bits().iter().by_vals())
+                    .chain(fdi.to_le_bits().iter().by_vals())
+                    .chain(BitArray::<_, Lsb0>::new(recp).iter().by_vals())
+                    .chain(esk.to_le_bits().iter().by_vals())
                     .chain(rho.to_le_bits().iter().by_vals().take(L_ORCHARD_BASE))
-                    .chain(esk.to_le_bits().iter().by_vals().take(L_ORCHARD_BASE))
                     .chain(psi.to_le_bits().iter().by_vals().take(L_ORCHARD_BASE)),
                 &rcm.0,
             )
