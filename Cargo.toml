@@ -29,6 +29,7 @@ cw-storage-plus = "3.0.1"
 halo2_proofs = { version = "0.3.1", default-features = false, features = [ ] } 
 hex = "0.4.3"
 serde = { version = "1.0.228", features = ["derive"] }
+bincode = " 2.0.1"
 sha2 = "0.10.9"
 snap-n-pull = { path = "./snap-n-pull" }
 tempfile = "3.23.0"

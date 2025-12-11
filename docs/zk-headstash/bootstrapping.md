@@ -8,7 +8,10 @@
 
 First, the tree is constructed by separating separating all distributions into the smallest amount of fixed denomination notes, for each token allocated (The Headstash Airdrop distributes TERP & THIOL, so there is a set of leaves for each address due to their allocation including 2 tokens.). We generate leaves in an non-interactive manner using the pre-known public information available:
 
-### Step 2: Deploy Verifiable Proxy Service
+### 2. Compiling Circuit `ProvingKey` & `VerifyKey`
+
+
+### 2: Deploy Verifiable Proxy Service
 
 This steps involves deploying the verifiable service used to route claiming actions on-chain for proof validation,nullifier & note commitment storage, and also token distributions.
 

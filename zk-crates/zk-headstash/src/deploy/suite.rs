@@ -1,6 +1,12 @@
 //! main suite for headstash
 use cosmwasm_std::CanonicalAddr;
+use halo2_proofs::plonk::{keygen_pk, keygen_vk};
+use halo2_proofs::poly::commitment::Params;
 use pasta_curves::pallas::Base;
+use pasta_curves::{vesta, EqAffine};
+use rand_core::OsRng;
+use rayon::prelude::*;
+use secp256k1::SecretKey;
 use std::error::Error;
 use std::path::{Path, PathBuf};
 use std::string::{String, ToString};
@@ -8,16 +14,16 @@ use std::sync::Mutex;
 use std::vec::Vec;
 use std::{env, eprintln, fs, println};
 
-use rayon::prelude::*;
-use secp256k1::SecretKey;
-
 use crate::address::RecpAddr;
+use crate::builder::SpendInfo;
+use crate::circuit::{Circuit, Instance, ProvingKey, VerifyingKey};
 use crate::constants::fixed_bases::FIXED_AMOUNTS;
 use crate::constants::sinsemilla::{LEAF_PERSONALIZATION, MERKLE_CRH_PERSONALIZATION};
-use crate::keys::{EligibleSk, NullifierDerivingKey};
-use crate::note::{Note, Rho};
-use crate::spec;
-use crate::value::NoteDenom;
+use crate::keys::{EligibleSk, FullViewingKey, NullifierDerivingKey, SpendingKey};
+use crate::note::{ExtractedNoteCommitment, Note, RandomSeed, Rho};
+use crate::tree::MerklePath;
+use crate::value::{NoteDenom, NoteValue, ValueCommitTrapdoor};
+use crate::{spec, Anchor, Proof};
 
 use alloc::boxed::Box;
 use base64::{engine::general_purpose, Engine as _};
@@ -26,6 +32,11 @@ use hex::decode;
 use pasta_curves::{arithmetic::CurveAffine, group::Curve, pallas, Fp};
 use serde_json::{json, Value};
 use sinsemilla::HashDomain;
+
+const KEYS_DIR: &str = "./circuit_keys";
+const PARAMS_FILE: &str = "params.bin";
+const VK_FILE: &str = "verifying_key.bin";
+const PK_FILE: &str = "proving_key.bin";
 
 /// BoxError
 pub type BoxError = Box<dyn Error + Send + Sync>;
@@ -38,15 +49,23 @@ pub fn get_cli_args() -> Result<(String, String), Box<dyn std::error::Error>> {
     }
     Ok((args[1].clone(), args[2].clone()))
 }
+
 /// TerpHeadstashConfig
 #[derive(Debug)]
-pub struct TerpHeadstashConfig {}
+pub struct TerpHeadstashConfig {
+    // smart contract params
+    // file location params
+    // storage params
+    // deployment params
+    // node params
+}
 
 /// HeadstashSuite
 #[derive(Debug, Default)]
 pub struct HeadstashSuite {}
 impl HeadstashBitwiseInstance for HeadstashSuite {}
 impl HeadstashLaunchpadInstance for HeadstashSuite {}
+impl HeadstashSinsemillaTree for HeadstashSuite {}
 // impl HeadstashProofInstance for HeadstashSuite {}
 // impl HeadstashInstance for HeadstashSuite {
 //     type HsErr = BoxError;
@@ -193,24 +212,9 @@ pub trait HeadstashBitwiseInstance {
     }
 }
 
-/// All actions any user would take for creating a new headstash 100% client side using this launchpad framework.
-///  Requires struct implementing trait to also implement `HeadstashBitwiseInstance` default members.
-/// TODO: feature flag parallelization in tree generation
-/// TODO: add default documentation to each member
-pub trait HeadstashLaunchpadInstance: HeadstashBitwiseInstance {
-    /// create_new_headstash
-    fn create_new_headstash() -> Result<(), BoxError> {
-        // TODO:
-        // prompt to determine communities to include in headstash airdrop
-        // deploy/retrieve holder distributions via full ephemeral full nodes api queries
-        // prompt calculations on percentile distribution and suggested ranges for normalization of airdrop allocation between communities
-        // connfigure how airdrop occurs (existing token, new token)
-        // generate headstash config and post to ipfs
-        // call headstash launchpad
-        // deploy new headstash aggregator
-        todo!()
-    }
-    /// get_input_path
+/// `HeadstashSinsemillaTree`: all functions powering creating of headstash distribution merkle tree instances
+pub trait HeadstashSinsemillaTree: HeadstashBitwiseInstance {
+    /// `get_input_path`: cli helper to retrieve input path
     fn get_input_path(&self) -> Result<String, BoxError> {
         let args: Vec<String> = env::args().collect();
         if args.len() != 2 {
@@ -219,70 +223,24 @@ pub trait HeadstashLaunchpadInstance: HeadstashBitwiseInstance {
         }
         Ok(args[1].clone())
     }
-    /// Helper that generates all leaves for a single token (parallelised)
-    fn derive_leaf(
+    /// Find the first note matching token & amount, return its fdi
+    fn print_tree(
         &self,
-        addr: &str,
-        token_name: &str,
-        total_amount: u64,
-    ) -> Result<(Vec<(u64, usize, String)>, Vec<Fp>), BoxError>
-    where
-        Self: Sync,
-    {
-        // ---------- build work list ------------------------------------------------
-        let mut work_items: Vec<u64> = Vec::new();
-        let mut remainder = total_amount;
-        for &fixed_amount in FIXED_AMOUNTS.iter() {
-            let count = remainder / fixed_amount;
-            if count == 0 {
-                remainder %= fixed_amount;
-                continue;
-            }
-            // push *count* copies of the denomination value
-            work_items.extend(std::iter::repeat(fixed_amount).take(count as usize));
-            remainder %= fixed_amount;
-        }
-        debug_assert_eq!(remainder, 0, "remainder not zero after denomination split");
-
-        // ---------- parallel leaf generation ---------------------------------------
-        let leaf_hexes = Mutex::new(Vec::<(u64, usize, String)>::new());
-        let raw_leaves = Mutex::new(Vec::<Fp>::new());
-
-        let addr_bytes: &[u8; 32] = match addr.starts_with("0x") {
-            true => &decode(addr.trim_start_matches("0x"))?.try_into().unwrap(),
-            false => &general_purpose::STANDARD
-                .decode(addr)
-                .unwrap()
-                .try_into()
-                .unwrap(),
-        };
-
-        // `enumerate` gives us the leaf‑index (0‑based) for this address/token
-        work_items.par_iter().enumerate().try_for_each(
-            |(idx, &fixed_amount)| -> Result<(), BoxError> {
-                let leaf = self.leaf_hash(
-                    &self
-                        .derive_secp256k1_limbs_sum_const_time(&self.derive_esk(*addr_bytes))
-                        .to_repr(),
-                    &self.derive_nd(token_name),
-                    &self.derive_v(fixed_amount),
-                    &self.derive_fdi(idx as u64),
-                )?;
-                let leaf_hex = format!("0x{}", hex::encode(leaf.to_repr()));
-                leaf_hexes
-                    .lock()
-                    .unwrap()
-                    .push((fixed_amount, idx, leaf_hex));
-                raw_leaves.lock().unwrap().push(leaf);
-                Ok(())
-            },
+        input: &mut Value,
+        output: Value,
+        path: &std::path::Path,
+    ) -> Result<(), BoxError> {
+        fs::write(
+            &self.get_input_path()?,
+            serde_json::to_string_pretty(&input)?,
         )?;
-
-        Ok((
-            leaf_hexes.into_inner().unwrap(),
-            raw_leaves.into_inner().unwrap(),
-        ))
+        eprintln!("✅ Input with leaves written to {}", self.get_input_path()?);
+        let merkle_path = path.join("merkle_output.json");
+        fs::write(&merkle_path, serde_json::to_string_pretty(&output)?)?;
+        eprintln!("✅ Merkle output written to {}", merkle_path.display());
+        Ok(())
     }
+
     /// gen_headstash_tree
     fn gen_headstash_tree(&self, output_path: PathBuf) -> Result<String, BoxError>
     where
@@ -368,6 +326,71 @@ pub trait HeadstashLaunchpadInstance: HeadstashBitwiseInstance {
         self.print_tree(&mut data, merkle_output, &output_path)?;
 
         Ok(root_hex)
+    }
+
+    /// Helper that generates all leaves for a single token (parallelised)
+    fn derive_leaf(
+        &self,
+        addr: &str,
+        token_name: &str,
+        total_amount: u64,
+    ) -> Result<(Vec<(u64, usize, String)>, Vec<Fp>), BoxError>
+    where
+        Self: Sync,
+    {
+        // ---------- build work list ------------------------------------------------
+        let mut work_items: Vec<u64> = Vec::new();
+        let mut remainder = total_amount;
+        for &fixed_amount in FIXED_AMOUNTS.iter() {
+            let count = remainder / fixed_amount;
+            if count == 0 {
+                remainder %= fixed_amount;
+                continue;
+            }
+            // push *count* copies of the denomination value
+            work_items.extend(std::iter::repeat(fixed_amount).take(count as usize));
+            remainder %= fixed_amount;
+        }
+        debug_assert_eq!(remainder, 0, "remainder not zero after denomination split");
+
+        // ---------- parallel leaf generation ---------------------------------------
+        let leaf_hexes = Mutex::new(Vec::<(u64, usize, String)>::new());
+        let raw_leaves = Mutex::new(Vec::<Fp>::new());
+
+        let addr_bytes: &[u8; 32] = match addr.starts_with("0x") {
+            true => &decode(addr.trim_start_matches("0x"))?.try_into().unwrap(),
+            false => &general_purpose::STANDARD
+                .decode(addr)
+                .unwrap()
+                .try_into()
+                .unwrap(),
+        };
+
+        // `enumerate` gives us the leaf‑index (0‑based) for this address/token
+        work_items.par_iter().enumerate().try_for_each(
+            |(idx, &fixed_amount)| -> Result<(), BoxError> {
+                let leaf = self.leaf_hash(
+                    &self
+                        .derive_secp256k1_limbs_sum_const_time(&self.derive_esk(*addr_bytes))
+                        .to_repr(),
+                    &self.derive_nd(token_name),
+                    &self.derive_v(fixed_amount),
+                    &self.derive_fdi(idx as u64),
+                )?;
+                let leaf_hex = format!("0x{}", hex::encode(leaf.to_repr()));
+                leaf_hexes
+                    .lock()
+                    .unwrap()
+                    .push((fixed_amount, idx, leaf_hex));
+                raw_leaves.lock().unwrap().push(leaf);
+                Ok(())
+            },
+        )?;
+
+        Ok((
+            leaf_hexes.into_inner().unwrap(),
+            raw_leaves.into_inner().unwrap(),
+        ))
     }
 
     /// Build Merkle tree from list of leaves
@@ -479,14 +502,10 @@ pub trait HeadstashLaunchpadInstance: HeadstashBitwiseInstance {
                                 eprintln!("⚠️  Missing \"index\" in leaf for token {}", token_name);
                                 std::process::exit(1);
                             });
-
                             generated_notes.push(json!({
+                                "nd":      NoteDenom::new_for_proof(&token_name.clone()).to_string(),
+                                "v":     NoteValue::from_bytes(amnt.to_le_bytes()),
                                 "fdi":        fdi,
-                                "amount":     amnt.to_string(),
-                                "denom":      token_name.clone(),
-                                "recp":       "",
-                                "nul":   "",
-                                "note_cm":    ""
                             }));
                         }
 
@@ -535,24 +554,6 @@ pub trait HeadstashLaunchpadInstance: HeadstashBitwiseInstance {
     }
 
     /// Find the first note matching token & amount, return its fdi
-    fn print_tree(
-        &self,
-        input: &mut Value,
-        output: Value,
-        path: &std::path::Path,
-    ) -> Result<(), BoxError> {
-        fs::write(
-            &self.get_input_path()?,
-            serde_json::to_string_pretty(&input)?,
-        )?;
-        eprintln!("✅ Input with leaves written to {}", self.get_input_path()?);
-        let merkle_path = path.join("merkle_output.json");
-        fs::write(&merkle_path, serde_json::to_string_pretty(&output)?)?;
-        eprintln!("✅ Merkle output written to {}", merkle_path.display());
-        Ok(())
-    }
-
-    /// Find the first note matching token & amount, return its fdi
     fn find_fdi(input_path: &str, token: &str, amount: &str) -> Result<u64, BoxError> {
         let json: Value =
             serde_json::from_str(&fs::read_to_string(std::path::Path::new(input_path))?)?;
@@ -596,29 +597,117 @@ pub trait HeadstashLaunchpadInstance: HeadstashBitwiseInstance {
         }
         Ok((args[1].clone(), args[2].clone(), args[3].clone()))
     }
+}
 
-    /// # Headstash: Create Nullifier
-    /// ```sh
-    /// # ex:  cargo run --bin create_nullifiers -- 0x0000000000000000000000000000000000000000 uterp 100
-    /// cargo run --bin create_nullifier -- <elig_addr> <token-denom> <amount>
-    /// ```
-    ///  Derives a nullifier, which is a pallas curve point derived from the hkdf used with an `esk`,
-    /// I generate a note:
-    // - when building a proof
-    // - through using egui
-    // - through my web-browser
-    // - by metamask snap
+/// All actions any user would take for creating a new headstash 100% client side using this launchpad framework.
+///  Requires struct implementing trait to also implement `HeadstashBitwiseInstance` default members.
+/// TODO: feature flag parallelization in tree generation
+/// TODO: add default documentation to each member
+pub trait HeadstashLaunchpadInstance: HeadstashBitwiseInstance {
+    /// create_new_headstash
+    fn create_new_headstash(&self) -> Result<(), BoxError> {
+        // TODO:
+        self.gen_new_headstash_params();
+        // prompt to determine communities to include in headstash airdrop
+        // deploy/retrieve holder distributions via full ephemeral full nodes api queries
+        self.gen_community_snapshots();
+        // prompt calculations on percentile distribution and suggested ranges for normalization of airdrop allocation between communities
+        self.gen_calculate_distribution();
+        // generate headstash config and post to ipfs
+        self.gen_headstash_keys()?;
+        self.upload_headstash_params()?;
+        self.upload_circuit_keys()?;
+        // call headstash launchpad
+        // deploy new headstash aggregator
+        todo!()
+    }
 
-    // we should enable our msg for generating a note to take a manifold approach so that we can use a single function in our headstash suite for routing msgs based on the various ways we generate a note.
-    fn gen_note(&self) -> Result<(), BoxError> {
-        // retrieve sk from metamask
-        // for each note, generate randomness values, and define note. save spent nullifier and nk to local db store
-        // define note
-        // let note = Note::new(recp, v, nd, fdi, esk, rho, rseed)
+    /// `gen_headstgen_community_snapshotsash_keys`: retrive snapshot and pubkeys of list of community holders.
+    fn gen_new_headstash_params(&self) {
+        // load config file or create new one
+        // a. determine what circuit keys used
+        //  - default headstash, custom one we upload
+        // b. smart contract params
+        // c. deployment params
+        // d. node params
+    }
+
+    /// `gen_headstgen_community_snapshotsash_keys`: retrive snapshot and pubkeys of list of community holders.
+    fn gen_community_snapshots(&self) {
+        // load config file
+        // connect to eth node
+        // retrieve latest holder distribution and pubkeys for each community
+        // write csv into each community folder
+    }
+    /// `gen_calculate_distribution`:  .
+    fn gen_calculate_distribution(&self) {}
+
+    /// `gen_headstash_keys`: generate [ProvingKey] & [VerifyingKey] with hex-encode, write to ./data/keys/.
+    fn gen_headstash_keys(&self) -> Result<(), BoxError> {
+        // ProvingKey struct contains VerifyingKey
+        let pk = ProvingKey::build();
+        fs::create_dir_all("./data/keys")?;
+        let pk_path = Path::new("./data/keys").join(PK_FILE);
+        let mut pk_file = fs::File::create(&pk_path)?;
+        pk.params().write(&mut pk_file)?;
+        Ok(())
+    }
+
+    /// `upload_headstash_params`: upload headstash params to ipfs for public distribution
+    fn upload_headstash_params(&self) -> Result<(), BoxError> {
+        Ok(())
+    }
+    /// `req_headstash_keys`: request headstash proof keys from storage method defined by params
+    async fn req_headstash_keys(&self) -> Result<ProvingKey, BoxError> {
+        todo!()
+    }
+    /// `upload_circuit_keys`: upload keys to ipfs for public distribution
+    fn upload_circuit_keys(&self) -> Result<(), BoxError> {
+        // check for existing ipfs connection
+        // options:
+        // -  use node local ipfs gateway
+        // -  use remote ipfs gateway
+        // -  deploy new one if needed
+        // load key files from default folder
+        // upload and handle response gracefully
+        Ok(())
+    }
+
+    /// ## [create_headstash_proof]
+    async fn create_headstash_proof(&self) -> Result<(), BoxError> {
+        let mut rng = OsRng;
+        // retrieve headstash proving key from defined storage location
+        let pk = self.req_headstash_keys().await?;
+        // retrieve secret key from defined key management system
+        let esk = EligibleSk::from_bytes([0; 32]);
+        todo!();
+        // prepare proof inputs
+        let anchor = Anchor::empty_tree();
+        let nd = NoteDenom::default();
+        let rho = self.rho_from_secure_random();
+        let rseed = RandomSeed::from_bytes([71; 32], &rho).expect("random seed");
+        let spk = SpendingKey::from_bytes(self.rho_from_secure_random().to_bytes())
+            .expect("ephemeral spending key");
+        let fvk = FullViewingKey::from(&spk);
+        let v = NoteValue::default();
+        let fdi = u64::default();
+        let recp = RecpAddr::new([0; 32]);
+        let note = Note::from_parts(nd, v, fdi, recp, esk, rho, rseed).expect("note derivation");
+        let nf = note.nullifier();
+        let cmx = ExtractedNoteCommitment::from(note.commitment());
+        let instances = Instance::from_parts(anchor, nd, v, recp, nf, cmx);
+        let mp: MerklePath = MerklePath::dummy(&mut rng);
+        let claim = SpendInfo::new(fvk, note, mp).expect("headstash claim");
+        let alpha =
+            pallas::Scalar::from_repr(self.rho_from_secure_random().to_bytes()).expect("auth keys");
+
+        // generate proof
+        let circuit = Circuit::from_action_context(claim, note).expect("headstash circuit");
+        let proof = Proof::create(&pk, &[circuit], &[instances], &mut rng)?;
         Ok(())
     }
     /// rho_from_secure_random
-    fn rho_from_secure_random() -> Rho {
+    fn rho_from_secure_random(&self) -> Rho {
         let mut randomness_64 = [0; 64];
         blake3::Hasher::new()
             .update(&headstash_randomness::ultra_secure_random())

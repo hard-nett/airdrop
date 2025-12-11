@@ -3,7 +3,7 @@ use memuse::DynamicUsage;
 use crate::{
     note::{ExtractedNoteCommitment, Nullifier, Rho, TransmittedNoteCiphertext},
     primitives::redpallas::{self, SpendAuth},
-    value::ValueCommitment,
+    value::{NoteValue, ValueCommitment},
 };
 
 /// An action applied to the global ledger.
@@ -15,13 +15,14 @@ pub struct Action<A> {
     /// The nullifier of the note being spent.
     nf: Nullifier,
     /// The randomized verification key for the note being spent.
-    rk: redpallas::VerificationKey<SpendAuth>,
+    // rk: redpallas::VerificationKey<SpendAuth>,
     /// A commitment to the new note being created.
     cmx: ExtractedNoteCommitment,
     /// The transmitted note ciphertext.
-    encrypted_note: TransmittedNoteCiphertext,
+    // encrypted_note: TransmittedNoteCiphertext,
     /// A commitment to the net value created or consumed by this action.
-    cv_net: ValueCommitment,
+    v: NoteValue,
+    // cv_net: ValueCommitment,
     /// The authorization for this action.
     authorization: A,
 }
@@ -30,18 +31,20 @@ impl<T> Action<T> {
     /// Constructs an `Action` from its constituent parts.
     pub fn from_parts(
         nf: Nullifier,
-        rk: redpallas::VerificationKey<SpendAuth>,
+        // rk: redpallas::VerificationKey<SpendAuth>,
         cmx: ExtractedNoteCommitment,
-        encrypted_note: TransmittedNoteCiphertext,
-        cv_net: ValueCommitment,
+        // encrypted_note: TransmittedNoteCiphertext,
+        v: NoteValue,
+        // cv_net: ValueCommitment,
         authorization: T,
     ) -> Self {
         Action {
             nf,
-            rk,
+            // rk,
+            v,
             cmx,
-            encrypted_note,
-            cv_net,
+            // encrypted_note,
+            // cv_net,
             authorization,
         }
     }
@@ -51,20 +54,20 @@ impl<T> Action<T> {
         &self.nf
     }
 
-    /// Returns the randomized verification key for the note being spent.
-    pub fn rk(&self) -> &redpallas::VerificationKey<SpendAuth> {
-        &self.rk
-    }
+    // /// Returns the randomized verification key for the note being spent.
+    // pub fn rk(&self) -> &redpallas::VerificationKey<SpendAuth> {
+    //     &self.rk
+    // }
 
     /// Returns the commitment to the new note being created.
     pub fn cmx(&self) -> &ExtractedNoteCommitment {
         &self.cmx
     }
 
-    /// Returns the encrypted note ciphertext.
-    pub fn encrypted_note(&self) -> &TransmittedNoteCiphertext {
-        &self.encrypted_note
-    }
+    // /// Returns the encrypted note ciphertext.
+    // pub fn encrypted_note(&self) -> &TransmittedNoteCiphertext {
+    //     &self.encrypted_note
+    // }
 
     /// Obtains the [`Rho`] value that was used to construct the new note being created.
     pub fn rho(&self) -> Rho {
@@ -72,9 +75,14 @@ impl<T> Action<T> {
     }
 
     /// Returns the commitment to the net value created or consumed by this action.
-    pub fn cv_net(&self) -> &ValueCommitment {
-        &self.cv_net
+    pub fn v(&self) -> &NoteValue {
+        &self.v
     }
+
+    // /// Returns the commitment to the net value created or consumed by this action.
+    // pub fn cv_net(&self) -> &ValueCommitment {
+    //     &self.cv_net
+    // }
 
     /// Returns the authorization for this action.
     pub fn authorization(&self) -> &T {
@@ -85,10 +93,11 @@ impl<T> Action<T> {
     pub fn map<U>(self, step: impl FnOnce(T) -> U) -> Action<U> {
         Action {
             nf: self.nf,
-            rk: self.rk,
+            // rk: self.rk,
             cmx: self.cmx,
-            encrypted_note: self.encrypted_note,
-            cv_net: self.cv_net,
+            // encrypted_note: self.encrypted_note,
+            v: self.v,
+            // cv_net: self.cv_net,
             authorization: step(self.authorization),
         }
     }
@@ -97,10 +106,11 @@ impl<T> Action<T> {
     pub fn try_map<U, E>(self, step: impl FnOnce(T) -> Result<U, E>) -> Result<Action<U>, E> {
         Ok(Action {
             nf: self.nf,
-            rk: self.rk,
+            // rk: self.rk,
             cmx: self.cmx,
-            encrypted_note: self.encrypted_note,
-            cv_net: self.cv_net,
+            // encrypted_note: self.encrypted_note,
+            v: self.v,
+            // cv_net: self.cv_net,
             authorization: step(self.authorization)?,
         })
     }
@@ -159,12 +169,16 @@ pub(crate) mod testing {
                 enc_ciphertext: [0u8; 580],
                 out_ciphertext: [0u8; 80]
             };
+
+                        let v = spend_value;
+
             Action {
                 nf,
-                rk,
+                // rk,
                 cmx,
-                encrypted_note,
-                cv_net,
+                // encrypted_note,
+                v,
+                // cv_net,
                 authorization: ()
             }
         }
@@ -184,6 +198,7 @@ pub(crate) mod testing {
                 spend_value - output_value,
                 ValueCommitTrapdoor::zero()
             );
+            let v = spend_value;
 
             // FIXME: make a real one from the note.
             let encrypted_note = TransmittedNoteCiphertext {
@@ -196,10 +211,11 @@ pub(crate) mod testing {
 
             Action {
                 nf,
-                rk: redpallas::VerificationKey::from(&sk),
+                // rk: redpallas::VerificationKey::from(&sk),
                 cmx,
-                encrypted_note,
-                cv_net,
+                // encrypted_note,
+                v,
+                // cv_net,
                 authorization: sk.sign(rng, &fake_sighash),
             }
         }

@@ -126,6 +126,10 @@ impl NoteDenom {
     pub fn max_len() -> usize {
         32
     }
+    /// Return the raw bytes (including unused trailing zeros).
+    pub fn to_pallas(&self) -> pallas::Base {
+        pallas::Base::from_repr(self.bytes).expect("darn")
+    }
 }
 
 impl From<[u8; 32]> for NoteDenom {
@@ -166,6 +170,9 @@ impl NoteValue {
     pub(crate) fn zero() -> Self {
         // Default for u64 is zero.
         Default::default()
+    }
+    pub(crate) fn one() -> Self {
+        NoteValue(1)
     }
 
     /// Returns the raw underlying value.

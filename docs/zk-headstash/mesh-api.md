@@ -12,9 +12,8 @@ we are tasked to implement a group of new features to our node. These features
   instance into our storage node and perform all of the actions needed when a new
   headstash is registered. specifically, we will need to query an ipfs cid that will
   contain the verifying keys and metadata about the headstash, and then save a
-  reference to a headstash by the contract addr 
+  reference to a headstash by the contract addr
 
-  
  *A Verifiable Service mesh of nodes acting an a proxy for broadcasting proofs and other data.*
 
 - verifiable api powered by WAVS
@@ -124,3 +123,123 @@ impl ::prost::Name for MaxCallsLimit {
     }
 }
 ``` -->
+
+## commonware_runtime Usage Guide
+
+## Overview
+
+`commonware_runtime` provides configurable async runtimes for executing tasks:
+
+- **Production**: `tokio::Runner` (backed by [Tokio](https://tokio.rs)).
+- **Testing/Simulation**: `deterministic::Runner` (deterministic execution with fixed seed; mocks time/network/storage).
+
+**Status**: ALPHA – expect breaking changes.
+
+Key traits:
+
+- [`Runner`]: Starts root tasks synchronously: `runner.start(|ctx| async { ... }) -> Output`.
+- [`Spawner`]: Spawns supervised child tasks (abort cascades on parent abort/completion/panic).
+- [`Clock`]: Time ops (mockable).
+- [`Network`/`Storage`]: I/O (mockable).
+- [`Metrics`]: Prometheus integration.
+
+All tasks supervised; panics/aborts propagate.
+
+## Sync Binary with Async Task (e.g., CLI Tools)
+
+Bridge async code (e.g., proving) to sync `main()` **without** `#[tokio::main]` or full Tokio:
+
+### Cargo.toml
+
+```toml
+[dependencies]
+commonware_runtime = { version = "0.1", features = ["tokio"] }  # Adjust version/path
+zk_headstash = { ... }  # Your async crate
+```
+
+### src/bin/gen_headstash_keys.rs
+
+```rust
+use std::error::Error;
+use zk_headstash::deploy::suite::*;
+use commonware_runtime::tokio::Runner;
+
+/// # Create Headstash circuit proof from a note
+///
+/// Generates default Headstash [VerifyingKey] and [ProvingKey].
+///
+/// ```bash
+/// cargo run --bin gen_headstash_keys
+/// ```
+fn main() -> Result<(), Box<dyn Error>> {
+    Runner::default().start(|_| HeadstashSuite::new().create_headstash_proof())?;
+    Ok(())
+}
+```
+
+**How it works**:
+
+- `Runner::start<F>(self, f: F) -> Fut::Output` where `F: FnOnce(Context) -> Fut`.
+- Injects `Context` (ignore with `|_|` if unused).
+- Drives async root task to completion synchronously.
+- Returns future's `Output` (e.g., `Result<(), E>` → propagates `?`).
+
+## Advanced Usage
+
+### Spawning Tasks
+
+```rust
+Runner::default().start(|ctx| async move {
+    let handle = ctx.spawn(|_| async { /* child */ });
+    handle.await?;  // Err(Error::Closed) if aborted
+});
+```
+
+### Shutdown
+
+```rust
+let handle = ctx.spawn(|_| async move { /* long task */ });
+ctx.stop(9, None).await?;  // Signals all tasks; waits for cleanup
+handle.await;  // Closed if not finished
+```
+
+### Metrics
+
+```rust
+ctx.register("my_counter", "Help", Counter::default());
+let metrics = ctx.encode();  // Prometheus text
+```
+
+### Testing (Deterministic)
+
+```rust
+use commonware_runtime::deterministic::Runner;
+
+// Exact same API; time advances predictably
+Runner::default().start(|ctx| async move {
+    ctx.sleep(Duration::from_secs(1)).await;
+    assert!(ctx.current() >= start + 1s);
+});
+```
+
+## Full API Docs
+
+Extracted from `lib.rs`:
+
+> [!Execute asynchronous tasks with a configurable scheduler.]
+>
+> - [Runner], [Spawner], [Clock], [Network], [Storage], [Metrics], [Pacer].
+> - Supervision: Children abort on parent exit/panic/abort.
+> - Metrics prefix: `runtime_*`.
+
+## Errors
+
+Common: `Error::Exited`, `Closed`, `Timeout`, `Io(...)`.
+
+## Features
+
+- `tokio`: Tokio runtime (non-WASM).
+- `deterministic`: Testing runtime.
+- `iouring-*`: io_uring storage/network (if enabled).
+
+For source/traits: See crate repo/docs.rs/commonware_runtime.

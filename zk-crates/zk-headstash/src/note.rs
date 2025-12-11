@@ -11,7 +11,9 @@ use subtle::CtOption;
 
 use crate::{
     address::RecpAddr,
-    keys::{EligibleSk, EphemeralSecretKey, FullViewingKey, Scope, SpendingKey},
+    keys::{
+        EligibleSk, EphemeralSecretKey, FullViewingKey, NullifierDerivingKey, Scope, SpendingKey,
+    },
     spec::{to_base, to_scalar, NonZeroPallasScalar, PrfExpand},
     value::{NoteDenom, NoteValue},
     Address,
@@ -319,10 +321,15 @@ impl Note {
         )
     }
 
+    /// Derives the nullifier key for this note.
+    pub fn nk(&self, rho: Rho) -> NullifierDerivingKey {
+        NullifierDerivingKey::derive_from(self.esk, rho)
+    }
+
     /// Derives the nullifier for this note.
-    pub fn nullifier(&self, fvk: &FullViewingKey) -> Nullifier {
+    pub fn nullifier(&self) -> Nullifier {
         Nullifier::derive(
-            fvk.nk(),
+            &self.nk(self.rho()),
             self.rho.0,
             self.rseed.psi(&self.rho),
             self.commitment(),

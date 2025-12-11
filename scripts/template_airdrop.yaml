@@ -1,4 +1,19 @@
 # genesis-config.yaml
+zk_params:
+  contract:
+    - method: #  new,existing
+      - new: 
+      - existing: 
+  storage:
+    - method: # oneof,composite
+      - oneof: 
+      - composite: # custom blend of oneofs 
+  deployment:
+    - method: # oneof,composite
+  storage:
+    - method: "local" # local,remote
+  api-node:
+    - method: "new" # new,existing
 
 # Global Parameters
 total_supply: 420000000

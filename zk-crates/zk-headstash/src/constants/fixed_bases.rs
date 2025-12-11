@@ -21,6 +21,8 @@ pub mod spend_auth_g;
 pub mod value_commit_r;
 pub mod value_commit_v;
 
+
+
 /// FIXED_AMOUNTS
 pub const FIXED_AMOUNTS: [u64; 10] = [
     1_000_000_000,

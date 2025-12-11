@@ -8,6 +8,7 @@ default = ["circuit", "multicore", "std"]
 multicore = ["halo2_proofs?/multicore"]
 circuit = ["dep:halo2_gadgets", "dep:halo2_proofs", "std"]
 std = ["core2/std", "group/wnaf-memuse", "reddsa/std"]
+dev-graph = ["halo2_proofs?/dev-graph", "image", "plotters"]
 rpc = []
 
 [dependencies]
@@ -17,8 +18,10 @@ halo2_gadgets = { path = "../submodules/halo2/halo2_gadgets",  optional = true, 
 halo2_proofs = { path = "../submodules/halo2/halo2_proofs", optional = true, version = "0.3.1" , default-features = false,features = ["test-dev-graph","gadget-traces", "dev-graph"]  } 
 halo2-ecc = {path = "../submodules/halo2-lib/halo2-ecc"}
 halo2-base = {path = "../submodules/halo2-lib/halo2-base"}
+commonware-runtime = "0.0.63"
 
 aes = "0.8"
+tokio = "1.48.0"
 base64 = "0.22.1"
 bip39 = "2.2.0"
 bitvec = { version = "1", default-features = false }
@@ -50,6 +53,7 @@ secp256k1  = {workspace = true}
 prost = { workspace = true }
 tonic = {workspace = true }
 tonic-prost = {workspace = true }
+bincode = {workspace = true }
 
 serde = { version = "1.0.228", features = ["derive"] } 
 serde_json = "1.0.145"
