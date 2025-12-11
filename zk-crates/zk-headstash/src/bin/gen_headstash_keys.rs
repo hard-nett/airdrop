@@ -6,6 +6,6 @@ use zk_headstash::deploy::suite::*;
 ///  cargo run -- --bin gen_headtash_keys
 /// ```
 fn main() -> Result<(), BoxError> {
-    HeadstashSuite::new().gen_headstash_keys()?;
+    HeadstashSuite::new().gen_headstash_circuit()?;
     Ok(())
 }

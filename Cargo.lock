@@ -157,6 +157,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "anybuf"
+version = "1.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a7658b7ea4a6843aad293ca2d3b0ba4d200b9720b18a5db0cea478dace9a9716"
+
+[[package]]
 name = "anyhow"
 version = "1.0.100"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1469,6 +1475,7 @@ dependencies = [
 name = "cw-headstash"
 version = "0.0.1"
 dependencies = [
+ "anybuf",
  "ark-bls12-381",
  "ark-ec",
  "ark-ff",
@@ -1480,13 +1487,14 @@ dependencies = [
  "cosmwasm-schema",
  "cosmwasm-std",
  "cw-storage-plus",
- "halo2_proofs 0.3.1 (registry+https://github.com/rust-lang/crates.io-index)",
+ "halo2_proofs 0.3.1",
  "hex",
  "pasta_curves",
  "rand_core 0.6.4",
  "serde",
  "sha2",
  "token-bindings",
+ "zk-headstash",
 ]
 
 [[package]]
@@ -2706,24 +2714,9 @@ dependencies = [
  "plotters",
  "proptest",
  "rand_core 0.6.4",
+ "subtle",
  "tabbycat",
  "tempfile",
- "tracing",
-]
-
-[[package]]
-name = "halo2_proofs"
-version = "0.3.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "019561b5f3be60731e7b72f3f7878c5badb4174362d860b03d3cf64cb47f90db"
-dependencies = [
- "blake2b_simd",
- "ff",
- "group",
- "indexmap 1.9.3",
- "maybe-rayon",
- "pasta_curves",
- "rand_core 0.6.4",
  "tracing",
 ]
 
@@ -7176,6 +7169,7 @@ name = "zk-headstash"
 version = "0.0.1"
 dependencies = [
  "aes",
+ "anybuf",
  "base64 0.22.1",
  "bincode",
  "bip39",
@@ -7226,7 +7220,6 @@ dependencies = [
  "shardtree",
  "sinsemilla",
  "subtle",
- "tokio",
  "tonic 0.14.2",
  "tonic-prost",
  "tracing",

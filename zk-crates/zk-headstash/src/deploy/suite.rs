@@ -1,13 +1,11 @@
 //! main suite for headstash
-use cosmwasm_std::CanonicalAddr;
-use halo2_proofs::plonk::{keygen_pk, keygen_vk};
-use halo2_proofs::poly::commitment::Params;
-use pasta_curves::pallas::Base;
-use pasta_curves::{vesta, EqAffine};
+use alloc::boxed::Box;
 use rand_core::OsRng;
 use rayon::prelude::*;
-use secp256k1::SecretKey;
+
 use std::error::Error;
+use std::fs::File;
+use std::io::{BufWriter, Write};
 use std::path::{Path, PathBuf};
 use std::string::{String, ToString};
 use std::sync::Mutex;
@@ -22,14 +20,18 @@ use crate::constants::sinsemilla::{LEAF_PERSONALIZATION, MERKLE_CRH_PERSONALIZAT
 use crate::keys::{EligibleSk, FullViewingKey, NullifierDerivingKey, SpendingKey};
 use crate::note::{ExtractedNoteCommitment, Note, RandomSeed, Rho};
 use crate::tree::MerklePath;
-use crate::value::{NoteDenom, NoteValue, ValueCommitTrapdoor};
+use crate::value::{HeadstashValue, NoteDenom, NoteValue, ValueCommitTrapdoor};
 use crate::{spec, Anchor, Proof};
 
-use alloc::boxed::Box;
+use anybuf::Anybuf;
 use base64::{engine::general_purpose, Engine as _};
+use cosmwasm_std::CanonicalAddr;
 use ff::{Field, FromUniformBytes, PrimeField, PrimeFieldBits};
 use hex::decode;
+use pasta_curves::pallas::Base;
+use pasta_curves::EqAffine;
 use pasta_curves::{arithmetic::CurveAffine, group::Curve, pallas, Fp};
+use secp256k1::SecretKey;
 use serde_json::{json, Value};
 use sinsemilla::HashDomain;
 
@@ -66,29 +68,13 @@ pub struct HeadstashSuite {}
 impl HeadstashBitwiseInstance for HeadstashSuite {}
 impl HeadstashLaunchpadInstance for HeadstashSuite {}
 impl HeadstashSinsemillaTree for HeadstashSuite {}
-// impl HeadstashProofInstance for HeadstashSuite {}
-// impl HeadstashInstance for HeadstashSuite {
-//     type HsErr = BoxError;
-// }
+impl HeadstashIpfsInstance for HeadstashSuite {}
 impl HeadstashSuite {
     /// create new headsatsh suite
     pub fn new() -> Self {
         Self {}
     }
 }
-
-// /// # Trait: `HeadstashProofInstance`
-// ///
-// /// implement expected functions for client side interactions headstashes.
-// pub trait HeadstashProofInstance {
-//     /// generates a note proof by preparing raw inputs and then calling
-//     fn generate_note_proof() -> Result<(), BoxError> {
-//         Ok(())
-//     }
-//     fn verify_note_proof() -> Result<(), BoxError> {
-//         Ok(())
-//     }
-// }
 
 /// # Trait: `HeadstashInstance`
 ///
@@ -129,22 +115,22 @@ impl HeadstashSuite {
 
 /// HeadstashBitwiseInstance
 pub trait HeadstashBitwiseInstance {
-    /// derive_m
-    fn derive_m(
-        &self,
-        esk: &[u8; 32],
-        fdi: u64,
-        v: u64,
-        nd: &str,
-    ) -> Result<pallas::Base, BoxError> {
-        let esk = self.derive_secp256k1_limbs_sum_const_time(&self.derive_esk(*esk));
-        let (fdi, v, nd) = (
-            Fp::from_u128(u64::from_le_bytes(self.derive_fdi(fdi)) as u128),
-            Fp::from_repr(NoteDenom::new_for_proof(nd).as_bytes().try_into().unwrap()).expect("nd"),
-            Fp::from_u128(u64::from_le_bytes(self.derive_v(v)) as u128),
-        );
-        Ok(crate::spec::prf_pallas_m(fdi, esk, v, nd))
-    }
+    // /// derive_m
+    // fn derive_m(
+    //     &self,
+    //     esk: &[u8; 32],
+    //     fdi: u64,
+    //     v: u64,
+    //     nd: &str,
+    // ) -> Result<pallas::Base, BoxError> {
+    //     let esk = self.derive_secp256k1_limbs_sum_const_time(&self.derive_esk(*esk));
+    //     let (fdi, v, nd) = (
+    //         Fp::from_u128(u64::from_le_bytes(self.derive_fdi(fdi)) as u128),
+    //         Fp::from_repr(NoteDenom::new_for_proof(nd).as_bytes().try_into().unwrap()).expect("nd"),
+    //         Fp::from_u128(u64::from_le_bytes(self.derive_v(v)) as u128),
+    //     );
+    //     Ok(crate::spec::prf_pallas_m(fdi, esk, v, nd))
+    // }
 
     /// derive_esk
     fn derive_esk(&self, sk: [u8; 32]) -> [Fp; 3] {
@@ -210,6 +196,23 @@ pub trait HeadstashBitwiseInstance {
         let bit_slice = a.to_le_bits();
         bits.extend(bit_slice.iter().take(250).map(|b| *b));
     }
+    /// repeated_bytes: turns proof keys into anybuf msgs
+    fn repeated_bytes<C: CurveAffine>(&self, items: &[C]) -> Vec<Anybuf> {
+        items
+            .iter()
+            .map(|b| Anybuf::new().append_bytes(1, b.to_bytes()))
+            .collect()
+    }
+    /// rho_from_secure_random
+    fn rho_from_secure_random(&self) -> Rho {
+        let mut randomness_64 = [0; 64];
+        blake3::Hasher::new()
+            .update(&headstash_randomness::ultra_secure_random())
+            .finalize_xof()
+            .fill(&mut randomness_64);
+
+        Rho::from_bytes(&Base::from_uniform_bytes(&randomness_64).to_repr()).unwrap()
+    }
 }
 
 /// `HeadstashSinsemillaTree`: all functions powering creating of headstash distribution merkle tree instances
@@ -269,7 +272,7 @@ pub trait HeadstashSinsemillaTree: HeadstashBitwiseInstance {
             alloc_array.sort_by_key(|t| t["name"].to_string());
 
             for token in alloc_array.iter_mut() {
-                let total_amount: u64 = token["amount"]
+                let v: u64 = token["amount"]
                     .as_str()
                     .and_then(|s| s.parse::<u64>().ok())
                     .unwrap();
@@ -277,7 +280,7 @@ pub trait HeadstashSinsemillaTree: HeadstashBitwiseInstance {
                 // ---- parallel leaf generation ---------------------------------
                 // Parallel leaf generation (now also gives us an index)
                 let (lidxh, raw_leaves) =
-                    self.derive_leaf(addr.as_str(), &token["name"].to_string(), total_amount)?;
+                    self.derive_leaf(addr.as_str(), &token["name"].to_string(), v)?;
                 // ---- attach leaves back to the JSON object (single‑thread) ----
                 {
                     token
@@ -302,7 +305,6 @@ pub trait HeadstashSinsemillaTree: HeadstashBitwiseInstance {
             }
         }
 
-        // If no leaves, exit early
         if leaves.is_empty() {
             println!("No leaves generated.");
             return Ok(String::default());
@@ -333,14 +335,14 @@ pub trait HeadstashSinsemillaTree: HeadstashBitwiseInstance {
         &self,
         addr: &str,
         token_name: &str,
-        total_amount: u64,
+        v: u64,
     ) -> Result<(Vec<(u64, usize, String)>, Vec<Fp>), BoxError>
     where
         Self: Sync,
     {
         // ---------- build work list ------------------------------------------------
         let mut work_items: Vec<u64> = Vec::new();
-        let mut remainder = total_amount;
+        let mut remainder = v;
         for &fixed_amount in FIXED_AMOUNTS.iter() {
             let count = remainder / fixed_amount;
             if count == 0 {
@@ -504,7 +506,7 @@ pub trait HeadstashSinsemillaTree: HeadstashBitwiseInstance {
                             });
                             generated_notes.push(json!({
                                 "nd":      NoteDenom::new_for_proof(&token_name.clone()).to_string(),
-                                "v":     NoteValue::from_bytes(amnt.to_le_bytes()),
+                                "v":     NoteValue::from_bytes(amnt.to_le_bytes()).inner(),
                                 "fdi":        fdi,
                             }));
                         }
@@ -603,23 +605,78 @@ pub trait HeadstashSinsemillaTree: HeadstashBitwiseInstance {
 ///  Requires struct implementing trait to also implement `HeadstashBitwiseInstance` default members.
 /// TODO: feature flag parallelization in tree generation
 /// TODO: add default documentation to each member
-pub trait HeadstashLaunchpadInstance: HeadstashBitwiseInstance {
+pub trait HeadstashIpfsInstance: HeadstashBitwiseInstance {
+    /// `upload_circuit_keys`: upload keys to ipfs for public distribution
+    fn upload_circuit_keys(&self) -> Result<(), BoxError> {
+        // check for existing ipfs connection
+        // options:
+        // -  use node local ipfs gateway
+        // -  use remote ipfs gateway
+        // -  deploy new one if needed
+        // load key files from default folder
+        // upload and handle response gracefully
+        Ok(())
+    }
+    /// `upload_headstash_params`: upload headstash params to ipfs for public distribution
+    fn upload_headstash_yaml(&self) -> Result<(), BoxError> {
+        Ok(())
+    }
+    /// `req_headstash_pk`: request headstash proof keys from storage method defined by params
+    async fn req_headstash_pk(&self) -> Result<ProvingKey, BoxError> {
+        todo!()
+    }
+}
+
+/// launchpad
+pub trait HeadstashLaunchpadInstance: HeadstashBitwiseInstance + HeadstashIpfsInstance {
+    /// ## [create_headstash_proof]
+    async fn create_headstash_proof(
+        &self,
+        a: Anchor,
+        mp: MerklePath,
+        esk: EligibleSk,
+        recp: RecpAddr,
+        hv: HeadstashValue,
+    ) -> Result<Proof, BoxError> {
+        let mut rng = OsRng;
+        let pk = self.req_headstash_pk().await?;
+
+        let r = self.rho_from_secure_random().to_bytes();
+        let rho = self.rho_from_secure_random();
+        let rseed = RandomSeed::from_bytes(r, &rho).expect("random seed");
+
+        let spk = SpendingKey::from_bytes(r).expect("spk");
+        let fvk = FullViewingKey::from(&spk);
+
+        let n = Note::from_parts(hv, recp, esk, rho, rseed).expect("note derivation");
+        let nf = n.nullifier();
+
+        let cmx = ExtractedNoteCommitment::from(n.commitment());
+        let instances = Instance::from_parts(a, hv.denom(), hv.amount(), recp, nf, cmx);
+        let c = SpendInfo::new(fvk, n, mp).expect("headstash claim");
+
+        // generate proof, unchecked as we rho is not deterministically derived
+        let circuit = Circuit::from_action_context_unchecked(c, n);
+        Ok(Proof::create(&pk, &[circuit], &[instances], &mut rng)?)
+    }
     /// create_new_headstash
     fn create_new_headstash(&self) -> Result<(), BoxError> {
-        // TODO:
+        // generate template headstash yaml
         self.gen_new_headstash_params();
         // prompt to determine communities to include in headstash airdrop
         // deploy/retrieve holder distributions via full ephemeral full nodes api queries
         self.gen_community_snapshots();
         // prompt calculations on percentile distribution and suggested ranges for normalization of airdrop allocation between communities
         self.gen_calculate_distribution();
-        // generate headstash config and post to ipfs
-        self.gen_headstash_keys()?;
-        self.upload_headstash_params()?;
+        // generate headstash circuit
+        self.gen_headstash_circuit()?;
+        // upload circuit keys to ipfs
         self.upload_circuit_keys()?;
+        // upload headstash yaml to ipfs
+        self.upload_headstash_yaml()?;
         // call headstash launchpad
         // deploy new headstash aggregator
-        todo!()
+        unimplemented!()
     }
 
     /// `gen_headstgen_community_snapshotsash_keys`: retrive snapshot and pubkeys of list of community holders.
@@ -642,79 +699,12 @@ pub trait HeadstashLaunchpadInstance: HeadstashBitwiseInstance {
     /// `gen_calculate_distribution`:  .
     fn gen_calculate_distribution(&self) {}
 
-    /// `gen_headstash_keys`: generate [ProvingKey] & [VerifyingKey] with hex-encode, write to ./data/keys/.
-    fn gen_headstash_keys(&self) -> Result<(), BoxError> {
-        // ProvingKey struct contains VerifyingKey
-        let pk = ProvingKey::build();
+    /// `gen_headstash_circuit`: generate circuit [ProvingKey] & [VerifyingKey] with hex-encode, write to ./data/keys/.
+    fn gen_headstash_circuit(&self) -> Result<(), BoxError> {
         fs::create_dir_all("./data/keys")?;
         let pk_path = Path::new("./data/keys").join(PK_FILE);
-        let mut pk_file = fs::File::create(&pk_path)?;
-        pk.params().write(&mut pk_file)?;
+        ProvingKey::build_and_write(pk_path)?;
         Ok(())
-    }
-
-    /// `upload_headstash_params`: upload headstash params to ipfs for public distribution
-    fn upload_headstash_params(&self) -> Result<(), BoxError> {
-        Ok(())
-    }
-    /// `req_headstash_keys`: request headstash proof keys from storage method defined by params
-    async fn req_headstash_keys(&self) -> Result<ProvingKey, BoxError> {
-        todo!()
-    }
-    /// `upload_circuit_keys`: upload keys to ipfs for public distribution
-    fn upload_circuit_keys(&self) -> Result<(), BoxError> {
-        // check for existing ipfs connection
-        // options:
-        // -  use node local ipfs gateway
-        // -  use remote ipfs gateway
-        // -  deploy new one if needed
-        // load key files from default folder
-        // upload and handle response gracefully
-        Ok(())
-    }
-
-    /// ## [create_headstash_proof]
-    async fn create_headstash_proof(&self) -> Result<(), BoxError> {
-        let mut rng = OsRng;
-        // retrieve headstash proving key from defined storage location
-        let pk = self.req_headstash_keys().await?;
-        // retrieve secret key from defined key management system
-        let esk = EligibleSk::from_bytes([0; 32]);
-        todo!();
-        // prepare proof inputs
-        let anchor = Anchor::empty_tree();
-        let nd = NoteDenom::default();
-        let rho = self.rho_from_secure_random();
-        let rseed = RandomSeed::from_bytes([71; 32], &rho).expect("random seed");
-        let spk = SpendingKey::from_bytes(self.rho_from_secure_random().to_bytes())
-            .expect("ephemeral spending key");
-        let fvk = FullViewingKey::from(&spk);
-        let v = NoteValue::default();
-        let fdi = u64::default();
-        let recp = RecpAddr::new([0; 32]);
-        let note = Note::from_parts(nd, v, fdi, recp, esk, rho, rseed).expect("note derivation");
-        let nf = note.nullifier();
-        let cmx = ExtractedNoteCommitment::from(note.commitment());
-        let instances = Instance::from_parts(anchor, nd, v, recp, nf, cmx);
-        let mp: MerklePath = MerklePath::dummy(&mut rng);
-        let claim = SpendInfo::new(fvk, note, mp).expect("headstash claim");
-        let alpha =
-            pallas::Scalar::from_repr(self.rho_from_secure_random().to_bytes()).expect("auth keys");
-
-        // generate proof
-        let circuit = Circuit::from_action_context(claim, note).expect("headstash circuit");
-        let proof = Proof::create(&pk, &[circuit], &[instances], &mut rng)?;
-        Ok(())
-    }
-    /// rho_from_secure_random
-    fn rho_from_secure_random(&self) -> Rho {
-        let mut randomness_64 = [0; 64];
-        blake3::Hasher::new()
-            .update(&headstash_randomness::ultra_secure_random())
-            .finalize_xof()
-            .fill(&mut randomness_64);
-
-        Rho::from_bytes(&Base::from_uniform_bytes(&randomness_64).to_repr()).unwrap()
     }
 }
 

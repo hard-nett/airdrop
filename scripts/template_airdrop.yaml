@@ -3,17 +3,29 @@ zk_params:
   contract:
     - method: #  new,existing
       - new: 
+          chain: "cosmos.terp"
       - existing: 
+          # ... existing params in new
+          contract: "terp1..."
   storage:
     - method: # oneof,composite
       - oneof: 
       - composite: # custom blend of oneofs 
   deployment:
     - method: # oneof,composite
-  storage:
-    - method: "local" # local,remote
   api-node:
     - method: "new" # new,existing
+
+chains: 
+  cosmos:
+    terp:
+      chain-id: "morocco-1"
+      prefix: "terp"
+      native_coin: "uterp"
+      gas_coin: "uthiol"
+      rpc: "https://rpc.terp.network:443"
+      grpc: "https://grpc.terp.network:443"
+      api: "https://api.terp.network:443"
 
 # Global Parameters
 total_supply: 420000000

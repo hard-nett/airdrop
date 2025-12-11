@@ -4,12 +4,10 @@
 
 ### Core Purpose
 
-This contract serves **two intertwined roles** on a custom Cosmos SDK chain with `x/authenticator` (CosmWasm Authenticator) support:
-
-1. **On-chain Authenticator** – Replaces or augments traditional `secp256k1` signatures with **BLS12-381 aggregate threshold signatures** and **zk-proof verification** via custom AnteHandler flow.
-2. **Headstash Distribution Engine** – Privacy-preserving token/airdrop distribution using Merkle proofs + zk-SNARK nullifiers, protected by the same BLS aggregate keyset.
-
-It enables **smart-account style authentication** (DAOs, institutions, or multi-device users) while maintaining full on-chain trustlessness and gas-efficient verification.
+- off-chain service operator set signature authentication
+- proof verification
+- headstash instance nullifier set storage medium
+- token factory middleware for escrow and distribution
 
 ---
 
@@ -18,15 +16,15 @@ It enables **smart-account style authentication** (DAOs, institutions, or multi-
 ```
 [CosmWasm Authenticator] ←─── Custom AnteHandler (x/authenticator)
         │
-        ├── BLS12-381 Threshold Signature Verification
-        ├── zk-SNARK Proof Verification (via ConfirmExecution)
+        ├── BLS12-381 Threshold Signature Verification: Off-chain proof verification
+        ├── Proof verification
         └── State Management (nullifiers, roots, aggregated keys)
-
 [Headstash Instance] ←─── Instantiated per distribution campaign
         ├── Genesis Merkle Root (SinsemillaHashDomain)
         ├── Nullifier Set (double-spend prevention)
         ├── Token Strategy: New (TokenFactory) or Existing denom
         └── Funds held or minted on-demand
+
 ```
 
 ---
@@ -141,41 +139,6 @@ layouter.constrain_instance(public_hash.cell(), primary, 0)?;
 - Any DAO or smart account can now use **BLS threshold signatures** instead of EOAs.
 - Supports **AllOf(passkey, wallet, DAO vote)** composite authenticators via macro injection.
 
-#### 7. Mobile-First UX (Passkeys + OAuth-like)
+### Proving Keys
 
-Out-of-band flow:
-
-- User authenticates via passkey → generates note + proof client-side
-- Submits via relayer or directly → contract verifies under BLS + zk
-- No private key exposure
-
----
-
-### Final Contract Capabilities Summary
-
-| Feature                              |       | Notes |
-|--------------------------------------|------------|-------|
-| CosmWasm Authenticator (AnteHandler) | | BLS + zk dual path |
-| BLS12-381 Threshold Signatures       | | With PoP & rotation |
-| Key Rotation (threshold-signed)      |   | Via `RotateKey` + sudo |
-| zk-SNARK Claim Verification          |   | Halo2/Plonk ready |
-| Single Public Input Hash             |    | **Must be used** |
-| TokenFactory Integration             |   | Dynamic denoms |
-| Existing Denom Support               |   | Strict balance checks |
-| Nullifier Double-Spend Prevention    | On-chain map | Atomic insert |
-| Smart Account / DAO Authentication   | Native | Self-registered authenticator |
-| Mobile Passkey Flow                  | Supported | OOB proof generation |
-
----
-
-### Recommended Next Steps
-
-1. **Enforce single public input hash** in all circuits
-2. Add verifying key to `HeadstashCfg` (or use code ID pinning)
-3. Implement `extended_authenticate` with `cosmwasm_vm::verify_proof`
-4. Add `RotateKey` with threshold-signed message validation
-5. Add governance gate (e.g. DAO-only instantiation)
-
-This contract is now **mainnet-ready**, **modular**, **secure**, and **gas-optimized** for large-scale private distributions and institutional-grade smart accounts on Cosmos.
-
-Let me know if you want the **final cleaned + production-ready contract code** with all fixes applied.
+We store the viewing keys of a headstash circuit inside a cosmwasm contract for proof verification.

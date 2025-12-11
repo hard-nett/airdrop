@@ -32,7 +32,7 @@ HeadstashWallet
 **Key Functions**:
 
 - `new(network, api_url, grpc_url)` - Create wallet instance
-- `store_note(...)` - Generate note data (nullifier, commitment, nk)
+- `gen_claim(...)` - Generate note data (nullifier, commitment, nk)
 - `claim_via_manual(...)` - Manual claim (pay own gas)
 - `claim_via_feegrant(...)` - Claim with fee grant
 - `claim_via_smart_account(...)` - **PRIMARY METHOD** - Gasless claim via smart account
@@ -71,7 +71,7 @@ pub async fn claim_headstash_via_smart_account(
 
 - `check_vk_cache(headstash_id)` - Check MetaMask storage for cached VK
 - `cache_vk(headstash_id, vk)` - Store VK in snap storage
-- `generate_proof_witness(esk, nullifier, metadata)` - Generate zkSNARK proof
+- `gen_proof_witness(esk, nullifier, metadata)` - Generate zkSNARK proof
 - `generate_note_data(esk, rho, fdi, recp, hv, rseed)` - Core nullifier derivation
 
 ### 3. HeadstashClient (gRPC Communication)
@@ -88,7 +88,7 @@ pub async fn submit_smart_account_claim(
 ) -> Result<ClaimResponse, Error>
 
 // Get metadata with fallback chain
-pub async fn get_headstash_metadata(
+pub async fn get_headstash_instance(
     headstash_id: &str,
 ) -> Result<HeadstashMetadata, Error>
 
@@ -148,8 +148,8 @@ pub struct SerializedNoteData {
 pub struct HeadstashMetadata {
     pub merkle_root: Vec<u8>,
     pub ipfs_cid: String,
-    pub verification_key: Vec<u8>,
-    pub total_amount: String,
+    pub vk: Vec<u8>,
+    pub v: String,
     pub denom: String,
 }
 ```
@@ -189,7 +189,7 @@ use zk_headstash::{
 ```
 
 **Circuit Integration** (TODO):
-- Proof generation via `generate_proof_witness()` will call zk-headstash circuit
+- Proof generation via `gen_proof_witness()` will call zk-headstash circuit
 - Uses Halo2 for zkSNARK proof generation
 - Proving key loaded from cache or downloaded
 
@@ -260,7 +260,7 @@ const esk = await snap.request({
 });
 
 // 3. Generate note data
-const noteData = await wallet.store_note(
+const noteData = await wallet.gen_claim(
   "terp1contract123",
   esk.privateKey,
   rho_hex,
@@ -312,7 +312,7 @@ console.log(`Claimed! TX: ${response.tx_hash}`);
 
 ### Circuit Integration
 
-1. ⬜ Wire `generate_proof_witness()` to zk-headstash circuit
+1. ⬜ Wire `gen_proof_witness()` to zk-headstash circuit
 2. ⬜ Load proving key from cache or download
 3. ⬜ Generate Halo2 proof with witness
 4. ⬜ Serialize proof and public inputs

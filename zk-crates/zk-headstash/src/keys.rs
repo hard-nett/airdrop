@@ -978,7 +978,15 @@ impl EligibleSk {
 /// Eligible secret key for headstashes
 #[derive(Debug, Copy, Clone)]
 pub struct EligiblePk(pub secp256k1::PublicKey);
-
+impl EligiblePk {
+    /// the (x,y) uncompressed coordinates
+    pub fn xy(&self) -> ([u8; 32], [u8; 32]) {
+        let e_pk_bytes = self.0.serialize_uncompressed();
+        let e_pk_x_bytes: [u8; 32] = e_pk_bytes[1..33].try_into().unwrap();
+        let e_pk_y_bytes: [u8; 32] = e_pk_bytes[33..65].try_into().unwrap();
+        (e_pk_x_bytes, e_pk_y_bytes)
+    }
+}
 impl From<&Vec<u8>> for EligiblePk {
     fn from(data: &Vec<u8>) -> Self {
         Self(
@@ -1149,13 +1157,13 @@ mod tests {
     //         let addr = fvk.address(diversifier, Scope::External);
     //         assert_eq!(&addr.pk_d().to_bytes(), &tv.default_pk_d);
     //         // 3. Note parameters
-    //         let v = NoteValue::from_raw(100);
+    //         let v = NoteValue::from(100);
     //         let nd = NoteDenom::new_for_proof("TEST_DENOM");
     //         let fdi = 0u64;
     //         let rho = Rho::from_bytes(&tv.note_rho).unwrap();
     //         let note = Note::from_parts(
     //             tv.nd,
-    //             NoteValue::from_raw(tv.note_v),
+    //             NoteValue::from(tv.note_v),
     //             v,
     //             addr,
     //             fdi,

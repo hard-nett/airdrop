@@ -1,95 +1,139 @@
 use crate::tokenfactory::TokenStrategy;
 
 use super::*;
-use cosmwasm_std::{Addr, Uint128};
+use cosmwasm_std::{CanonicalAddr, Uint128};
 use pasta_curves::group::ff::PrimeField;
-use pasta_curves::Fp;
+use pasta_curves::pallas;
+use zk_headstash::address::RecpAddr;
+use zk_headstash::note::{ExtractedNoteCommitment, Nullifier};
+use zk_headstash::value::{NoteDenom, NoteValue};
+
 use std::collections::{HashMap, HashSet};
+use std::io::{self, Cursor};
 use std::str::FromStr;
+use zk_headstash::circuit::{Instance, VerifyingKey};
+use zk_headstash::{Anchor, Proof};
 
-// Groth16 proof structure (192 bytes)
-#[cosmwasm_schema::cw_serde]
-struct Groth16Proof {
-    a: Vec<u8>,
-    b: Vec<u8>,
-    c: Vec<u8>,
-}
-impl Groth16Proof {
-    pub fn validate(&self) -> bool {
-        self.a.len() > 48 || self.b.len() > 96 || self.c.len() > 48
+/// lazily load the dedicated headstash circuit key to smart contract params
+pub static VK: LazyLock<VerifyingKey> = LazyLock::new(|| {
+    VerifyingKey::load_cosmwasm(include_bytes!("../../../data/keys/proving_key.bin"))
+});
+
+// Helper function to skip VK bytes (reads through VK without storing)
+fn skip_vk_bytes<R: io::Read>(reader: &mut R) -> io::Result<()> {
+    // Version byte
+    let mut version = [0u8; 1];
+    reader.read_exact(&mut version)?;
+
+    // Fixed commitments
+    let mut len_bytes = [0u8; 4];
+    reader.read_exact(&mut len_bytes)?;
+    let fixed_commitments_len = u32::from_le_bytes(len_bytes) as usize;
+    for _ in 0..fixed_commitments_len {
+        let mut commitment_bytes = [0u8; 64]; // Adjust based on your curve
+        reader.read_exact(&mut commitment_bytes)?;
     }
-}
-// Verifying Key (alpha_g1, beta_g2, gamma_g2, delta_g2, gamma_abc_g1[])
-#[cosmwasm_schema::cw_serde]
-struct VerifyingKey {
-    alpha_g1: Vec<u8>,
-    beta_g2: Vec<u8>,
-    gamma_g2: Vec<u8>,
-    delta_g2: Vec<u8>,
-    ic: Vec<u8>, // one per public input
-}
 
-impl VerifyingKey {
-    pub fn validate(&self) -> bool {
-        self.alpha_g1.len() > 48
-            || self.beta_g2.len() > 96
-            || self.gamma_g2.len() > 96
-            || self.delta_g2.len() > 96
-            || self.ic.len() > 48
-    }
-    fn from_binary(data: Binary) -> StdResult<Self> {
-        let bytes = data.as_slice();
-        // Format: [48|96|96|96|48*N] where N = number of public inputs
-        // Minimum size: alpha_g1 (48) + beta_g2 (96) + gamma_g2 (96) + delta_g2 (96) = 336
-        if bytes.len() < 336 {
-            return Err(StdError::msg("Verifying key too short"));
-        }
+    // Skip permutation bytes (implement based on permutation::VerifyingKey::write)
+    // ...
 
-        let mut offset = 0;
+    // Skip selectors
+    reader.read_exact(&mut len_bytes)?;
+    let selectors_len = u32::from_le_bytes(len_bytes) as usize;
+    // Skip the actual selector bytes...
 
-        // Extract fixed-size points
-        let (alpha_g1, rest) = bytes.split_at(48);
-        let (beta_g2, rest) = rest.split_at(96);
-        let (gamma_g2, rest) = rest.split_at(96);
-        let (delta_g2, rest) = rest.split_at(96);
-        let mut ic = rest;
-        Ok(VerifyingKey {
-            alpha_g1: alpha_g1.to_vec(),
-            beta_g2: beta_g2.to_vec(),
-            gamma_g2: gamma_g2.to_vec(),
-            delta_g2: delta_g2.to_vec(),
-            ic: ic.to_vec(),
-        })
-    }
+    Ok(())
 }
 
-#[cosmwasm_schema::cw_serde]
-pub struct HeadstashCoin {
-    pub v: u64,
-    pub nd: Binary,
-}
 #[cosmwasm_schema::cw_serde]
 pub struct HeadstashCfg {
+    // gr: genesis tree root hash
     pub gr: Binary,
+    // ts: token strategies
     pub ts: Vec<TokenStrategy>,
+    // w: wavs operator set
     pub w: WavsOperatorSet,
     // pub created_at: u64,
 }
 
 #[cosmwasm_schema::cw_serde]
 pub struct HeadstashNote {
-    // genesis distribution merkle tree root.
-    pub root: Binary,
-    // witness proof.
-    pub proof: Binary,
-    // nullifer genreated client side out of circuit
-    pub null: Binary,
-    // public address token are sent to
-    pub recp: String,
-    // amount of funds to send
-    pub coin: HeadstashCoin,
+    // i: instances
+    pub i: HeadstashInstances,
+    // p: proof
+    pub p: Binary,
+    // r: raw recipient of headstash. CanonicalAddr
+    pub rr: Binary,
 }
 
+impl HeadstashNote {
+    // verifies a nullifier does not exist in the map, and will save to map if it does not
+    fn verify_recp_posiedon_hash(&self) -> Result<(), StdError> {
+        match pallas::Base::from_repr(self.rr.as_slice().try_into()?)
+            .expect("proof has been verified")
+            == RecpAddr::try_from(self.i.recp.as_slice())?.to_pallas()
+        {
+            true => Ok(()),
+            false => Err(StdError::msg("recipient addr not represented in proof ")),
+        }
+    }
+}
+
+#[cosmwasm_schema::cw_serde]
+pub struct HeadstashInstances {
+    pub anchor: Binary,
+    pub nd: Binary,
+    pub v: u64,
+    pub nf: Binary,
+    pub recp: Binary,
+    pub cmx: Binary,
+}
+
+impl Into<Instance> for HeadstashInstances {
+    fn into(self) -> Instance {
+        Instance::from_parts(
+            Anchor::from_bytes(
+                self.anchor
+                    .as_slice()
+                    .try_into()
+                    .expect("Invalid anchor bytes"),
+            )
+            .expect("bad anchor"),
+            NoteDenom::from(self.nd),
+            NoteValue::from(self.v),
+            RecpAddr::from(self.recp),
+            Nullifier::from_bytes(
+                self.nf
+                    .as_slice()
+                    .try_into()
+                    .expect("Invalid nullifier bytes"),
+            )
+            .expect("darn"),
+            ExtractedNoteCommitment::from(self.cmx),
+        )
+    }
+}
+
+#[cosmwasm_schema::cw_serde]
+pub struct HeadstashCoin {
+    /// v: value
+    pub v: u64,
+    /// nd: token denom in circuit pre-input specification
+    pub nd: Binary,
+}
+
+/// Validates nullifiers uniqueness & distribute funds
+pub fn set_verifying_key(
+    deps: DepsMut,
+    env: Env,
+    vk: Binary,
+) -> Result<Response<TokenFactoryMsg>, StdError> {
+    // ensure sender is this contract owner (or this contract)
+    // hash & save vk
+
+    let mut r: Response<TokenFactoryMsg> = Response::new();
+    Ok(r)
+}
 /// Validates nullifiers uniqueness & distribute funds
 pub fn process_headstash(
     deps: DepsMut,
@@ -97,100 +141,57 @@ pub fn process_headstash(
     claims: Vec<HeadstashNote>,
 ) -> Result<Response<TokenFactoryMsg>, StdError> {
     let cfg = HEADSTASH_CFG.load(deps.storage)?;
+    let mut n = HashSet::new();
+    let mut cts = HashMap::new();
 
-    let mut seen_nullifiers = HashSet::new();
-    let mut tokens = HashMap::new();
     for claim in &claims {
-        // verify no nullifier duplicates
-        if !seen_nullifiers.insert(claim.null.clone()) {
-            return Err(StdError::msg(format!("null: {}", hex::encode(&claim.null))));
+        // verify no nullifier duplicates at once.
+        if !n.insert(claim.i.nf.clone()) {
+            return Err(StdError::msg(format!("null: {}", &claim.i.nf.to_hex())));
         }
-        verify_nullifier_stateful(deps.storage, claim.null.to_string())?;
+        // verify nullifier is new. adds nullifier to map if so
+        verify_nullifier_stateful(deps.storage, claim.i.nf.to_hex())?;
 
         // verify denom is supported for this token strategy
         if !cfg
             .ts
             .iter()
-            .any(|e| &e.proof_representation() == &claim.coin.nd)
+            .any(|e| &e.proof_representation() == &claim.i.nd)
         {
             return Err(StdError::msg("incorrect token denom"));
         }
 
         // verify headstash proof
-
-        //  Deserialize proof
-        let proof = {
-            let mut proof_vec = claim.proof.clone();
-            if proof_vec.len() != 96 {
-                // typical Groth16 proof size
-                return Err(StdError::msg("invalid proof length"));
-            }
-            proof_vec
-        };
-
-        //  Reconstruct public inputs (must match circuit order!)
-        let public_inputs = vec![
-            // Order MUST match your circuit's assigned public inputs
-            Fp::from_repr(claim.root.to_array()?).expect("genesis root"),
-            Fp::from_repr(claim.null.to_array()?).expect("note nullifier"),
-            Fp::from_repr(
-                claim
-                    .recp
-                    .as_bytes()
-                    .try_into()
-                    .expect("recipient represenation bytes length"),
-            )
-            .expect("recipient addr representation"),
-            Fp::from_u128(Uint128::from_str(&claim.coin.v.to_string())?.u128()),
-            Fp::from_repr(claim.coin.nd.to_array()?).expect("note-denomination representation"),
-        ];
-
-        // 5. Accumulate IC * public_input
-        let mut acc = [0u8; 48];
-
-        // 6. Final Groth16 pairing check
-        // let valid = deps.api.bls12_381_pairing_equality(
-        //     // e(A, B) == e(alpha, beta)
-        //     &proof.a,
-        //     &proof.b,
-        //     &vk.alpha_g1,
-        //     &vk.beta_g2,
-        // )? && deps.api.bls12_381_pairing_equality(
-        //     // e(C, delta) == e(acc, gamma)
-        //     &proof.c,
-        //     &vk.delta_g2,
-        //     &acc,
-        //     &vk.gamma_g2,
-        // )?;
-
-        // if !valid {
-        //     return Err(StdError::generic_err("invalid proof"));
-        // }
+        Proof::new(claim.p.to_vec()).verify(&VK, &[claim.i.clone().into()])?;
+        // verify recp integrity
+        claim.verify_recp_posiedon_hash()?;
 
         // increment allcoation going to user if multiple proofs are being claimed
-        *tokens
-            .entry((claim.coin.nd.clone(), claim.recp.clone()))
-            .or_insert(claim.coin.v) += claim.coin.v;
+        *cts.entry((claim.i.nd.clone(), claim.rr.clone()))
+            .or_insert(claim.i.v) += claim.i.v;
     }
 
-    let mut response: Response<TokenFactoryMsg> = Response::new();
+    let mut res: Response<TokenFactoryMsg> = Response::new();
 
-    for tech in cfg.ts {
-        // Manifold dispatch: mint or send
-        let denom = tech.denom(&env.contract.address);
-        let mut denom_entries: Vec<((Binary, String), u64)> = tokens
+    // TODO(hard-nett): implement multi-token support
+    for t in cfg.ts {
+        let td = t.denom(&env.contract.address);
+
+        let mut denom_entries: Vec<_> = cts
             .iter()
-            .filter(|((_, d), _)| d == &denom)
+            .filter(|((_, d), _)| d == &t.proof_representation())
             .map(|(k, &v)| (k.clone(), v))
             .collect();
-        match tech {
+
+        match t {
             TokenStrategy::NewFungible(d) => {
                 // Mint one message per recipient (batched amount)
-                for ((_, recipient), amount) in denom_entries {
-                    response = response.add_message(TokenFactoryMsg::MintTokens {
-                        denom: denom.to_string(),
+                for ((_, r), amount) in denom_entries {
+                    let ra = deps.api.addr_humanize(&CanonicalAddr::from(r))?;
+                    res = res.add_message(TokenFactoryMsg::MintTokens {
+                        denom: td.to_string(),
                         amount: amount.try_into().unwrap(),
-                        mint_to_address: recipient,
+                        mint_to_address: ra.into(),
                     });
                 }
             }
@@ -198,18 +199,19 @@ pub fn process_headstash(
                 // Sum total required for this denom
                 let total_required: u64 = denom_entries.iter().map(|(_, amount)| *amount).sum();
                 // Escrow: check balance first
-                let balance = deps
+                if deps
                     .querier
-                    .query_balance(&env.contract.address, denom)?
-                    .amount;
-
-                if balance < Uint128::new(total_required as u128).into() {
+                    .query_balance(&env.contract.address, td)?
+                    .amount
+                    < Uint128::new(total_required as u128).into()
+                {
                     return Err(StdError::msg("insuffiecient balance"));
                 }
 
-                for ((_, recipient), amount) in denom_entries {
-                    response = response.add_message(BankMsg::Send {
-                        to_address: recipient,
+                for ((_, r), amount) in denom_entries {
+                    let ra = deps.api.addr_humanize(&CanonicalAddr::from(r))?;
+                    res = res.add_message(BankMsg::Send {
+                        to_address: ra.into(),
                         amount: vec![Coin::new(amount, &d.raw)],
                     });
                 }
@@ -218,7 +220,7 @@ pub fn process_headstash(
     }
     // }
 
-    Ok(response.add_attribute("action", "process_headstash"))
+    Ok(res.add_attribute("action", "process_headstash"))
 }
 
 // verifies a nullifier does not exist in the map, and will save to map if it does not

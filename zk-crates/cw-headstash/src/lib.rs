@@ -3,14 +3,13 @@ pub mod msg;
 pub mod smartaccount;
 pub mod tokenfactory;
 pub mod wavs;
-use ark_ff::Zero;
-pub use msg::*;
-
 use crate::{
     headstash::*,
     tokenfactory::TokenStrategy,
     wavs::{WavsOperatorSet, WavsProofOfOwnership},
 };
+use ark_bls12_381::G1Affine;
+use ark_ff::Zero;
 use cosmwasm_schema::{cw_serde, serde, QueryResponses};
 use cosmwasm_std::{
     from_json, to_json_binary, AnyMsg, BankMsg, Binary, Coin, CosmosMsg, Deps, DepsMut, Env,
@@ -18,7 +17,15 @@ use cosmwasm_std::{
     BLS12_381_G2_GENERATOR as G2,
 };
 use cw_storage_plus::{Bound, Bounder, Item, KeyDeserialize, Map};
+use halo2_proofs::{
+    plonk::{self, ProvingKey, VerifyingKey as Halo2Vk},
+    poly::commitment::Params,
+};
+pub use msg::*;
+
+
 use serde::{Deserialize, Serialize};
+use std::sync::LazyLock;
 use token_bindings::TokenFactoryMsg;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -32,6 +39,7 @@ pub const HEADSTASH_CFG: Item<HeadstashCfg> = Item::new("headstash_params");
 pub(crate) const GENESIS_TREE_ROOT: Item<Binary> = Item::new("root_gen_tree");
 pub(crate) const COMMITMENT_TREE_ROOT: Item<Binary> = Item::new("root_cm_tree");
 pub(crate) const NULLIFIERS: Map<String, ()> = Map::new("nullifiers");
+
 #[cfg_attr(not(feature = "library"), cosmwasm_std::entry_point)]
 pub fn instantiate(
     deps: DepsMut,
@@ -39,23 +47,16 @@ pub fn instantiate(
     info: MessageInfo,
     msg: InstantiateMsg,
 ) -> Result<Response<TokenFactoryMsg>, StdError> {
-    // ── Simple, fast WAVS validation (no heavy crypto) ─────────────────────
-    if msg.wavs.poos.len() != msg.wavs.msg.total_operators || msg.wavs.poos.is_empty() {
-        return Err(StdError::msg("invalid amount of operators defined"));
-    }
-
-    if msg.wavs.msg.threshold == 0 || msg.wavs.msg.threshold > msg.wavs.msg.total_operators {
-        return Err(StdError::msg("invalid threshold"));
-    }
-
+    // validate initialization params
+    msg.wavs.verify()?;
     msg.token_strategy.validate()?;
 
     let ts = msg.token_strategy;
     let c = env.contract.address.clone();
     let d = ts.denom(&c);
 
+    // check for prefunding of headstash
     if ts.requires_prefund() {
-        // check if any sent in msg
         if !info.funds.iter().any(|c| c.denom == d) {
             let balance = deps.querier.query_balance(&c, &d)?.amount;
             if balance.is_zero() {
@@ -65,26 +66,25 @@ pub fn instantiate(
             }
         }
     }
+    let w = msg.wavs.proof_of_ownership(deps.api, &c)?;
+    let mint_msgs = ts.initial_mint_msgs(&c)?;
 
-    let w = WavsOperatorSet {
-        c: c.to_string(),
-        keys: msg.wavs.poos.iter().map(|e| e.key.clone()).collect(),
-        msg: msg.wavs.msg.clone(),
-    };
-    w.proof_of_ownership(&c, deps.api, &msg.wavs)?;
+    // register self as authenticator
+    let add_auth = CosmosMsg::Any(AnyMsg {
+        type_url: "/terp.smartaccount.v1beta1.MsgAddAuthenticator".to_string(),
+        value: to_json_binary(&btsg_auth::MsgAddAuthenticator {
+            sender: c.to_string(),
+            authenticator_type: "CosmwasmAuthenticatorV1".into(),
+            data: to_json_binary(&btsg_auth::CosmwasmAuthenticatorInitData {
+                contract: c.to_string(),
+                params: to_json_binary(&w)?.to_vec(),
+            })?
+            .into(),
+        })?,
+    });
 
-    let mut r = Response::new().add_messages(ts.initial_mint_msgs(&c)?);
-
-    let add_auth = btsg_auth::MsgAddAuthenticator {
-        sender: c.to_string(),
-        authenticator_type: "CosmwasmAuthenticatorV1".into(),
-        data: to_json_binary(&btsg_auth::CosmwasmAuthenticatorInitData {
-            contract: c.to_string(),
-            params: to_json_binary(&w)?.to_vec(),
-        })?
-        .into(),
-    };
-
+    // let me: HeadstashVk = VK;
+    GENESIS_TREE_ROOT.save(deps.storage, &msg.genesis_root)?;
     HEADSTASH_CFG.save(
         deps.storage,
         &HeadstashCfg {
@@ -93,13 +93,11 @@ pub fn instantiate(
             w,
         },
     )?;
-    GENESIS_TREE_ROOT.save(deps.storage, &msg.genesis_root)?;
 
-    Ok(r.add_attribute("action", "instantiate_headstash")
-        .add_message(CosmosMsg::Any(AnyMsg {
-            type_url: "/terp.smartaccount.v1beta1.MsgAddAuthenticator".to_string(),
-            value: to_json_binary(&add_auth)?,
-        })))
+    Ok(Response::new()
+        .add_attribute("action", "instantiate_headstash")
+        .add_message(add_auth)
+        .add_messages(mint_msgs))
 }
 
 #[cfg_attr(not(feature = "library"), cosmwasm_std::entry_point)]
@@ -113,9 +111,8 @@ pub fn execute(
     match msg {
         ExecuteMsg::ProcessHeadstash { claims } => {
             crate::headstash::process_headstash(deps, env, claims)
-        } // ExecuteMsg::RotateKey { keys } => {
-          //     crate::headstash::rotate_key(deps, info.sender, env, keys)
-          // }
+        }
+        ExecuteMsg::LoadVk { vk } => crate::headstash::set_verifying_key(deps, env, vk),
     }
 }
 

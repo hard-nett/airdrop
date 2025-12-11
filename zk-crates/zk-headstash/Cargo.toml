@@ -4,81 +4,83 @@ version = {workspace = true}
 edition = "2021"
 
 [features]
-default = ["circuit", "multicore", "std"]
+default = ["circuit", "multicore", "std", "interface"]
+interface = ["headstash-randomness"]
 multicore = ["halo2_proofs?/multicore"]
 circuit = ["dep:halo2_gadgets", "dep:halo2_proofs", "std"]
-std = ["core2/std", "group/wnaf-memuse", "reddsa/std"]
+std = ["core2/std", "group/wnaf-memuse" , "dep:halo2_proofs","reddsa/std"]
 dev-graph = ["halo2_proofs?/dev-graph", "image", "plotters"]
 rpc = []
 
 [dependencies]
-headstash-randomness = { path = "../../pub-crates/randomness" }
-plume_rustcrypto = {path = "../submodules/zk-nullifier-sig/rust-k256"}
-halo2_gadgets = { path = "../submodules/halo2/halo2_gadgets",  optional = true, version = "0.3.1",   default-features = false ,features = ["test-dev-graph","test-dependencies"]  } 
-halo2_proofs = { path = "../submodules/halo2/halo2_proofs", optional = true, version = "0.3.1" , default-features = false,features = ["test-dev-graph","gadget-traces", "dev-graph"]  } 
-halo2-ecc = {path = "../submodules/halo2-lib/halo2-ecc"}
-halo2-base = {path = "../submodules/halo2-lib/halo2-base"}
-commonware-runtime = "0.0.63"
 
+headstash-randomness  = { workspace = true,  optional = true }
+plume_rustcrypto  = { workspace = true }
+halo2_gadgets  = { workspace = true, optional = true }
+halo2_proofs  = { workspace = true , optional = true}
+halo2-ecc   = { workspace = true }
+halo2-base  = { workspace = true }
+anybuf  = { workspace = true }
+
+commonware-runtime = "0.0.63"
 aes = "0.8"
-tokio = "1.48.0"
-base64 = "0.22.1"
-bip39 = "2.2.0"
-bitvec = { version = "1", default-features = false }
-blake2b_simd = { version = "1", default-features = false }
-blake3 = "1.8.2"
-bls12_381 = "0.8.0"
-core2 = { version = "0.3", default-features = false, features = ["alloc"] }
-cosmwasm-std = { version = "3.0.0" }
-elliptic-curve = { version = "0.13.8", features = ["hash2curve"] }
-ff = "0.13"
-fpe = { version = "0.6", default-features = false, features = ["alloc"] }
-group = {workspace = true}
-hex = "0.4.3"
-hex-literal = "1.0.0"
-hkdf = "0.12.4"
-jubjub = { version = "0.10", default-features = false, features = ["alloc"] }
-k256 = { version = "0.13.4", features = ["hash2curve"] }
-lazy_static = "1"
-memuse = { version = "0.2.2", default-features = false }
-num-bigint = "0.4.6"
-num-traits = "0.2.19"
-pasta_curves = "0.5"
-reddsa = { version = "0.5", default-features = false }
-poseidon-rs = "0.0.8"
-rand = "0.8"
-rand_core = { version = "0.6", default-features = false }
-rayon = "1.11.0"
+base64  = { workspace = true }
+bip39  = { workspace = true }
+bitvec = { workspace = true, default-features = false }
+blake2b_simd = { workspace = true, default-features = false }
+blake3  = { workspace = true }
+bls12_381  = {workspace = true }
+core2 = { workspace = true, default-features = false, features = ["alloc"] }
+cosmwasm-std = { workspace = true }
+elliptic-curve = { workspace = true, features = ["hash2curve"] }
+ff  = {workspace = true }
+fpe = { workspace = true, default-features = false, features = ["alloc"] }
+hex = {workspace = true }
+hex-literal  = {workspace = true }
+hkdf  = {workspace = true }
+jubjub = { workspace = true, default-features = false, features = ["alloc"] }
+k256 = { workspace = true, features = ["hash2curve"] }
+lazy_static  = {workspace = true }
+memuse = { workspace = true, default-features = false }
+num-bigint  = {workspace = true }
+num-traits = {workspace = true }
+pasta_curves  = {workspace = true }
+reddsa = { workspace = true, default-features = false }
+poseidon-rs  = {workspace = true }
+rand = {workspace = true }
+rand_core = { workspace = true, default-features = false }
+rayon = {workspace = true }
 secp256k1  = {workspace = true}
 prost = { workspace = true }
 tonic = {workspace = true }
 tonic-prost = {workspace = true }
 bincode = {workspace = true }
+group = {workspace = true}
 
-serde = { version = "1.0.228", features = ["derive"] } 
-serde_json = "1.0.145"
-sinsemilla = "0.1.0"
-subtle = { version = "2.3", default-features = false }
-zip32 = { version = "0.2.0", default-features = false }
-sha3 = "0.10.8"
-proptest = { version = ">=1.0.0, <1.7.0", optional = true }
-nonempty = { version = "0.11", default-features = false }
+serde = { workspace = true, features = ["derive"] } 
+serde_json  = {workspace = true }
+sinsemilla = {workspace = true }
+subtle = { workspace = true, default-features = false }
+zip32 = { workspace = true, default-features = false }
+sha3  = {workspace = true }
+proptest = { workspace = true, optional = true }
+nonempty = { workspace = true, default-features = false }
 zcash_note_encryption = "0.4"
 incrementalmerkletree = "0.8.1"
-zcash_spec = "0.2.1"
-visibility = "0.1.1"
+zcash_spec = {workspace = true }
+visibility = {workspace = true }
 
 # Logging
-tracing = { version = "0.1", default-features = false }
+tracing = { workspace = true, default-features = false }
 # Developer tooling dependencies
-image = { version = "0.24", optional = true }
-plotters = { version = "0.3.0", optional = true }
+image = { workspace = true, optional = true }
+plotters = { workspace = true, optional = true }
 # Boilerplate
-getset = "0.1"
+getset = {workspace = true }
  
 [dev-dependencies]
 criterion = "0.4" # 0.5 depends on clap 4 which has MSRV 1.70
-halo2_gadgets = { path = "../submodules/halo2/halo2_gadgets",  version = "0.3.1", features = ["test-dependencies"] }
+halo2_gadgets = { workspace = true,  version = "0.3.1", features = ["test-dependencies"] }
 hex = "0.4"
 proptest = ">=1.0.0, <1.7.0"
 zcash_note_encryption = { version = "0.4", features = ["pre-zip-212"] }

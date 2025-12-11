@@ -1,7 +1,4 @@
-
-## Sinsemilla Commitdomain
-
-- messge limb rules: 1 single 250 bit limb (or limbs that are factors of 10 and less than 64, totaling less than 250)
+# Circuit Specs
 
 ## Canonicity Gates
 
@@ -22,14 +19,83 @@ Linking across gates to ensure the value in one piece correctly connects to the 
 
 ### Design
 
-```
-// Optimized decomposition for Sinsemilla (250 bit pieces, 10-bit limb alignment):
-//   Piece a: bits 0-249 of nd (250 bits)
-//   Piece b: bits 250-253 of nd || bits 0-56 of v  (4 + 56 = 60 bits)
-//   Piece c: bits 57-64 of v || 0-53 of fdi  (7 + 53 = 60 bits)
-//   Piece d: bits 54-64 of fdi || 0-49 of recp (11 + 49 = 60 bits)
-//   Piece e: bits 50..109 of recp || 111..171 of recp  || 172..232 of recp  || 233..254 of recp || 0..9 bits of esk ||  10..40 bits of esk  (60+60+60 +21 +9+30 = 240 bits)
-//   Piece f: bits 41..101 of esk  || 102..=162 of esk  || 163..=223 of esk  || 224..=254 of esk || 0..9 bits of rho ||  10..40 bits of rho  (60+60+60 +24 +8+28 = 240 bits)
-//   Piece g: bits 41..101 of rho  || 102..=162 of rho  || 163..=223 of rho  || 224..=254 of rho || 0..9 bits of psi ||  10..40 bits of psi  (60+60+60 +24 +8+28 = 240 bits)
-//   Piece h: bits 41-253 of psi || 7 bits blank (213 + 7 = 220 bits)
-```
+### Verifying Key
+<!-- q: what is minimum required data needed to verify a proof? -->
+<!-- q: how do we store/retrieve these keys in a cosmwasm contract for use to prooveF -->
+
+Verifying Key (VK)
+
+Size: Typically 10-50 KB (depends on circuit complexity)
+Contents:
+
+Fixed commitments: Commitments to fixed columns in your circuit
+Permutation commitments: For the copy constraint system
+Circuit structure metadata: Number of columns, gates, etc.
+Domain information: FFT domain size
+
+### Proving Key
+
+### Serializing And Deserializing Keys
+
+We specifically define how do serialize and deserialize circuit proving & verification keys. WE implement this via the logic defined in this pr: <https://github.com/zcash/halo2/pull/661/>
+
+#### Writing
+
+| bytes | value | description | |
+|--------|-----------|--------|--------------|
+|  0..1 | `0x01` | version byte checked on read |||
+|  1..`fixed_commitments.len()` | `vk.fixed_commitments` ||||
+|  `fixed_commitments.len()`..`permutation.len()` | `vk.permutation` ||||
+|  `permutation.len()`..`selectors.len()` | `vk.selectors` ||||
+
+#### Reading
+
+Reading requires the vk deserialized params, or manually deserializing each value composing the key via knowledge of the byte positions set upon serialization. Below are the values needed to reconstruct and what knowledge we need to do so:
+
+| Offset | Size | Value | Description | Label |
+|--------|------|-------|-------------|-------|
+| 0 | 1 byte | `0x01` | Version byte | |
+| 1 | 4 bytes | `u32` (little-endian) | Number of fixed columns | `num_fixed_columns` |
+| 5 | `num_fixed_columns * commitment_size` | `Vec<C>` | Fixed commitments (each commitment is typically 64 bytes) | `fixed_commitments` |
+| ... | 4 bytes | `u32` (little-endian) | Number of permutation commitments | `permutation.num_commitments` |
+| ... | `num_commitments * commitment_size` | `Vec<C>` | Permutation commitments (each typically 64 bytes) | `permutation.commitments` |
+| ... | 4 bytes | `u32` (little-endian) | Number of selectors | `num_selectors` |
+| ... | `sum((selector.len() + 7) / 8)` | `Vec<Vec<bool>>` | Selectors (packed as bits, 8 bools per byte) | `selectors` |
+
+**Key Points:**
+
+- `from_bytes()` is a convenience wrapper around `read()` that works with byte slices
+- Requires `params` and `ConcreteCircuit` type to reconstruct the domain and constraint system
+- Selectors are bit-packed for efficiency (8 boolean values per byte)
+- The permutation section contains its own count followed by its commitments
+- The total size can be calculated with `bytes_length()` which accounts for all components
+
+### Generating Proof
+
+**What you need to provide:**
+
+1. **Params**: The universal setup parameters
+2. **Proving Key**: Generated earlier
+3. **Circuit instance**: Your actual circuit with witness data filled in
+4. **Public inputs**: The instance values (public inputs to your circuit)
+5. **RNG**: For generating random challenges
+
+#### **Proof Size**
+
+- **Typical size**: 1-5 KB for most circuits
+- **Fixed components** (don't scale much with circuit size):
+  - Advice commitments: 32 bytes each
+  - Lookup commitments: 32 bytes each
+  - Opening proofs: ~64 bytes each
+  - Evaluations: 32 bytes each (field elements)
+
+  ```
+
+Proof Components (approximate):
+├─ Advice commitments: 32 bytes × (number of advice columns) × (number of phases)
+├─ Lookup commitments: 32 bytes × (number of lookup arguments)
+├─ Permutation product commitments: 32 bytes × (number of permutation products)
+├─ Vanishing argument commitment: 32 bytes
+├─ Random commitment: 32 bytes
+├─ Opening evaluations: 32 bytes × (number of opened points)
+└─ Multi-open proof: ~128 bytes

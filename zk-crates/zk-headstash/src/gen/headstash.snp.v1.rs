@@ -232,7 +232,7 @@ impl ::prost::Name for EncryptedNullifierState {
         "/headstash.snp.v1.EncryptedNullifierState".into()
     }
 }
-/// nullifier key
+/// serialized note data
 #[derive(serde::Serialize, serde::Deserialize, Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct SerializedNoteData {
     /// nullifier key
@@ -471,8 +471,8 @@ pub mod headstash_snap_service_server {
         clippy::wildcard_imports,
         clippy::let_unit_value
     )]
-    use std::boxed::Box;
     use tonic::codegen::*;
+    use std::boxed::Box;
     /// Generated trait containing gRPC methods that should be implemented for use with HeadstashSnapServiceServer.
     #[async_trait]
     pub trait HeadstashSnapService: std::marker::Send + std::marker::Sync + 'static {

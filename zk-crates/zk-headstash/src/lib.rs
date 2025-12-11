@@ -53,7 +53,7 @@ pub use constants::MERKLE_DEPTH_ORCHARD as NOTE_COMMITMENT_TREE_DEPTH;
 pub use note::Note;
 pub use tree::Anchor;
 
- 
+pub use spec::recp_to_fp;
 
 /// A proof of the validity of an Orchard [`Bundle`].
 ///

@@ -54,6 +54,7 @@ use pasta_curves::{
 use rand::RngCore;
 use subtle::CtOption;
 
+use crate::address::RecpAddr;
 use crate::{
     constants::fixed_bases::{
         VALUE_COMMITMENT_PERSONALIZATION, VALUE_COMMITMENT_R_BYTES, VALUE_COMMITMENT_V_BYTES,
@@ -99,22 +100,18 @@ impl NoteDenom {
     pub fn new_for_proof(denom: &str) -> Self {
         let hash = Self::hash(denom);
         let mut bytes = *hash.as_bytes();
-
         bytes[31] &= 0x1F;
-        // Convert to NoteDenom type (assuming NoteDenom wraps [u8; 32])
         NoteDenom { bytes }
     }
     /// hash via blake3
     pub fn hash(denom: &str) -> blake3::Hash {
-        // Hash the denomination string with Blake3
         let mut hasher = blake3::Hasher::new();
         hasher.update(denom.as_bytes());
         hasher.finalize()
     }
 
-    /// hex string of trimmed blake3 hash representing note-denom
+    /// hex string of already trimmed blake3 hash representing note-denom
     pub fn as_str_for_proof(&self) -> String {
-        let mut bytes = self.bytes;
         hex::encode(self.bytes)
     }
 
@@ -130,8 +127,22 @@ impl NoteDenom {
     pub fn to_pallas(&self) -> pallas::Base {
         pallas::Base::from_repr(self.bytes).expect("darn")
     }
+    /// Return the raw bytes (including unused trailing zeros).
+    pub fn to_cosmwasm(&self) -> cosmwasm_std::Binary {
+        cosmwasm_std::Binary::new(self.as_bytes().to_vec())
+    }
 }
 
+impl From<cosmwasm_std::Binary> for NoteDenom {
+    fn from(value: cosmwasm_std::Binary) -> Self {
+        NoteDenom {
+            bytes: value
+                .as_slice()
+                .try_into()
+                .expect("Invalid note denom bytes"),
+        }
+    }
+}
 impl From<[u8; 32]> for NoteDenom {
     fn from(value: [u8; 32]) -> Self {
         NoteDenom { bytes: value }
@@ -168,7 +179,6 @@ pub struct NoteValue(u64);
 
 impl NoteValue {
     pub(crate) fn zero() -> Self {
-        // Default for u64 is zero.
         Default::default()
     }
     pub(crate) fn one() -> Self {
@@ -178,14 +188,6 @@ impl NoteValue {
     /// Returns the raw underlying value.
     pub fn inner(&self) -> u64 {
         self.0
-    }
-
-    /// Creates a note value from its raw numeric value.
-    ///
-    /// This only enforces that the value is an unsigned 64-bit integer. Callers should
-    /// enforce any additional constraints on the value's valid range themselves.
-    pub fn from_raw(value: u64) -> Self {
-        NoteValue(value)
     }
 
     pub(crate) fn from_bytes(bytes: [u8; 8]) -> Self {
@@ -205,6 +207,12 @@ impl NoteValue {
 impl From<&NoteValue> for Assigned<pallas::Base> {
     fn from(v: &NoteValue) -> Self {
         pallas::Base::from(v.inner()).into()
+    }
+}
+//  #[cfg(feature = "circuit")]
+impl From<u64> for NoteValue {
+    fn from(v: u64) -> Self {
+        Self(v)
     }
 }
 
@@ -489,7 +497,7 @@ impl ValueCommitment {
 ///
 /// // Create a value for 1000 uterp
 /// let value = HeadstashValue::new(
-///     NoteValue::from_raw(1000),
+///     NoteValue::from(1000),
 ///     NoteDenom::from_str("uterp").unwrap()
 /// );
 ///
@@ -501,19 +509,20 @@ impl ValueCommitment {
 pub struct HeadstashValue {
     v: NoteValue,
     nd: NoteDenom,
+    fdi: u64,
 }
 
 impl HeadstashValue {
     /// Create a new HeadstashValue from amount and denomination.
-    pub fn new(v: NoteValue, nd: NoteDenom) -> Self {
-        Self { v, nd }
+    pub fn new(v: NoteValue, nd: NoteDenom, fdi: u64) -> Self {
+        Self { v, nd, fdi }
     }
 
     /// Create a HeadstashValue from raw u64 amount and denomination string.
-    pub fn from_raw(amount: u64, denom: &str) -> Result<Self, String> {
-        let v = NoteValue::from_raw(amount);
+    pub fn from_raw(amount: u64, denom: &str, fdi: u64) -> Result<Self, String> {
+        let v = NoteValue::from(amount);
         let nd = NoteDenom::new_for_proof(denom);
-        Ok(Self { v, nd })
+        Ok(Self { v, nd, fdi })
     }
 
     /// Returns the note value (amount).
@@ -522,8 +531,8 @@ impl HeadstashValue {
     }
 
     /// Returns a reference to the note denomination.
-    pub fn denom(&self) -> &NoteDenom {
-        &self.nd
+    pub fn denom(&self) -> NoteDenom {
+        self.nd
     }
 
     /// Returns the raw amount as u64.
@@ -537,8 +546,8 @@ impl HeadstashValue {
     }
 
     /// Convert to tuple (amount, denom) for easier destructuring.
-    pub fn into_parts(self) -> (NoteValue, NoteDenom) {
-        (self.v, self.nd)
+    pub fn into_parts(self) -> (NoteValue, NoteDenom, u64) {
+        (self.v, self.nd, self.fdi)
     }
 
     /// Create a zero value for a given denomination.
@@ -546,6 +555,7 @@ impl HeadstashValue {
         Self {
             v: NoteValue::zero(),
             nd,
+            fdi: 0,
         }
     }
 
@@ -565,8 +575,9 @@ impl HeadstashValue {
             return None;
         }
         Some(Self {
-            v: NoteValue::from_raw(new_amount),
+            v: NoteValue::from(new_amount),
             nd: self.nd,
+            fdi: self.fdi,
         })
     }
 
@@ -578,8 +589,9 @@ impl HeadstashValue {
         }
         let new_amount = self.v.inner().checked_sub(other.v.inner())?;
         Some(Self {
-            v: NoteValue::from_raw(new_amount),
+            v: NoteValue::from(new_amount),
             nd: self.nd,
+            fdi: self.fdi,
         })
     }
 }
@@ -589,6 +601,7 @@ impl Default for HeadstashValue {
         Self {
             v: NoteValue::zero(),
             nd: NoteDenom::default(),
+            fdi: 0,
         }
     }
 }
@@ -729,20 +742,19 @@ mod tests {
     #[test]
     fn test_headstash_value_creation() {
         // Test creating HeadstashValue from raw components
-        let value = HeadstashValue::from_raw(1000, "uterp").unwrap();
+        let value = HeadstashValue::from_raw(1000, "uterp", 0).unwrap();
 
         assert_eq!(value.raw_amount(), 1000);
-        assert_eq!(value.amount(), NoteValue::from_raw(1000));
+        assert_eq!(value.amount(), NoteValue::from(1000));
     }
 
     #[test]
     fn test_headstash_value_new() {
         // Test creating HeadstashValue with NoteValue and NoteDenom
-        let note_val = NoteValue::from_raw(5000);
+        let note_val = NoteValue::from(5000);
         let note_denom = NoteDenom::new_for_proof("ibc/usdc");
 
-        let value = HeadstashValue::new(note_val, note_denom);
-
+        let value = HeadstashValue::new(note_val, note_denom, 0);
         assert_eq!(value.raw_amount(), 5000);
         assert_eq!(value.amount(), note_val);
     }
@@ -760,8 +772,8 @@ mod tests {
     #[test]
     fn test_headstash_value_checked_add_same_denom() {
         // Test adding two values with same denomination
-        let val1 = HeadstashValue::from_raw(1000, "uterp").unwrap();
-        let val2 = HeadstashValue::from_raw(500, "uterp").unwrap();
+        let val1 = HeadstashValue::from_raw(1000, "uterp", 0).unwrap();
+        let val2 = HeadstashValue::from_raw(500, "uterp", 0).unwrap();
 
         let result = val1.checked_add(&val2).unwrap();
         assert_eq!(result.raw_amount(), 1500);
@@ -770,8 +782,8 @@ mod tests {
     #[test]
     fn test_headstash_value_checked_add_different_denom() {
         // Test that adding values with different denoms returns None
-        let val1 = HeadstashValue::from_raw(1000, "uterp").unwrap();
-        let val2 = HeadstashValue::from_raw(500, "ibc/usdc").unwrap();
+        let val1 = HeadstashValue::from_raw(1000, "uterp", 0).unwrap();
+        let val2 = HeadstashValue::from_raw(500, "ibc/usdc", 0).unwrap();
 
         let result = val1.checked_add(&val2);
         assert!(result.is_none());
@@ -780,8 +792,8 @@ mod tests {
     #[test]
     fn test_headstash_value_checked_add_overflow() {
         // Test overflow protection
-        let val1 = HeadstashValue::from_raw(MAX_NOTE_VALUE, "uterp").unwrap();
-        let val2 = HeadstashValue::from_raw(1, "uterp").unwrap();
+        let val1 = HeadstashValue::from_raw(MAX_NOTE_VALUE, "uterp", 0).unwrap();
+        let val2 = HeadstashValue::from_raw(1, "uterp", 0).unwrap();
         let result = val1.checked_add(&val2);
         assert!(result.is_none());
     }
@@ -789,8 +801,8 @@ mod tests {
     #[test]
     fn test_headstash_value_checked_sub_same_denom() {
         // Test subtracting two values with same denomination
-        let val1 = HeadstashValue::from_raw(1000, "uterp").unwrap();
-        let val2 = HeadstashValue::from_raw(300, "uterp").unwrap();
+        let val1 = HeadstashValue::from_raw(1000, "uterp", 0).unwrap();
+        let val2 = HeadstashValue::from_raw(300, "uterp", 0).unwrap();
 
         let result = val1.checked_sub(&val2).unwrap();
         assert_eq!(result.raw_amount(), 700);
@@ -799,8 +811,8 @@ mod tests {
     #[test]
     fn test_headstash_value_checked_sub_different_denom() {
         // Test that subtracting values with different denoms returns None
-        let val1 = HeadstashValue::from_raw(1000, "uterp").unwrap();
-        let val2 = HeadstashValue::from_raw(300, "ibc/usdc").unwrap();
+        let val1 = HeadstashValue::from_raw(1000, "uterp", 0).unwrap();
+        let val2 = HeadstashValue::from_raw(300, "ibc/usdc", 0).unwrap();
 
         let result = val1.checked_sub(&val2);
         assert!(result.is_none());
@@ -809,8 +821,8 @@ mod tests {
     #[test]
     fn test_headstash_value_checked_sub_underflow() {
         // Test underflow protection
-        let val1 = HeadstashValue::from_raw(100, "uterp").unwrap();
-        let val2 = HeadstashValue::from_raw(200, "uterp").unwrap();
+        let val1 = HeadstashValue::from_raw(100, "uterp", 0).unwrap();
+        let val2 = HeadstashValue::from_raw(200, "uterp", 0).unwrap();
 
         let result = val1.checked_sub(&val2);
         assert!(result.is_none());
@@ -819,8 +831,8 @@ mod tests {
     #[test]
     fn test_headstash_value_into_parts() {
         // Test destructuring into components
-        let value = HeadstashValue::from_raw(1000, "uterp").unwrap();
-        let (note_val, note_denom) = value.into_parts();
+        let value = HeadstashValue::from_raw(1000, "uterp", 0).unwrap();
+        let (note_val, note_denom, fdi) = value.into_parts();
 
         assert_eq!(note_val.inner(), 1000);
         assert_eq!(note_denom, NoteDenom::new_for_proof("uterp"));
@@ -829,7 +841,7 @@ mod tests {
     #[test]
     fn test_headstash_value_display() {
         // Test display formatting
-        let value = HeadstashValue::from_raw(1000, "uterp").unwrap();
+        let value = HeadstashValue::from_raw(1000, "uterp", 0).unwrap();
         let display_str = format!("{}", value);
 
         assert!(display_str.contains("1000"));
@@ -847,9 +859,9 @@ mod tests {
     #[test]
     fn test_headstash_value_multi_denom_support() {
         // Test multiple different denominations
-        let uterp = HeadstashValue::from_raw(1000, "uterp").unwrap();
-        let usdc = HeadstashValue::from_raw(500, "ibc/usdc").unwrap();
-        let custom = HeadstashValue::from_raw(250, "factory/contract/custom").unwrap();
+        let uterp = HeadstashValue::from_raw(1000, "uterp", 0).unwrap();
+        let usdc = HeadstashValue::from_raw(500, "ibc/usdc", 0).unwrap();
+        let custom = HeadstashValue::from_raw(250, "factory/contract/custom", 0).unwrap();
 
         assert_eq!(uterp.raw_amount(), 1000);
         assert_eq!(usdc.raw_amount(), 500);

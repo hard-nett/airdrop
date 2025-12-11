@@ -15,7 +15,7 @@ use crate::{
         EligibleSk, EphemeralSecretKey, FullViewingKey, NullifierDerivingKey, Scope, SpendingKey,
     },
     spec::{to_base, to_scalar, NonZeroPallasScalar, PrfExpand},
-    value::{NoteDenom, NoteValue},
+    value::{HeadstashValue, NoteDenom, NoteValue},
     Address,
 };
 
@@ -177,14 +177,13 @@ impl Note {
     ///
     /// [Section 4.19]: https://zips.z.cash/protocol/protocol.pdf#saplingandorchardinband
     pub fn from_parts(
-        nd: NoteDenom,
-        v: NoteValue,
-        fdi: u64,
+        hv: HeadstashValue,
         recipient: RecpAddr,
         esk: EligibleSk,
         rho: Rho,
         rseed: RandomSeed,
     ) -> CtOption<Self> {
+        let (v, nd, fdi) = hv.into_parts();
         let note = Note {
             nd,
             v,
@@ -213,9 +212,7 @@ impl Note {
     ) -> Self {
         loop {
             let note = Note::from_parts(
-                nd,
-                v,
-                fdi,
+                HeadstashValue::new(v, nd, fdi),
                 recipient,
                 esk,
                 rho,
@@ -277,6 +274,10 @@ impl Note {
         &self.rseed
     }
 
+    /// Derives the ephemeral secret key for this note.
+    pub(crate) fn elig_sk(&self) -> EligibleSk {
+        self.esk
+    }
     /// Derives the ephemeral secret key for this note.
     pub(crate) fn esk(&self) -> EphemeralSecretKey {
         EphemeralSecretKey(self.rseed.esk(&self.rho))

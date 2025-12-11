@@ -74,9 +74,9 @@ We have 3 main types of keys involved in this process.
 |---|------------------|------------|--------------|------------------------|-----------------------------|----------------------|
 | 1 | **Eligible Key** | `secp256k1`  | `k256` (or `secp256k1`) | Public key is **published** in the allocation; **private key + any signatures / hashes must stay secret** to preserve privacy. | `k256::ecdsa::SigningKey` / `k256::ecdsa::VerifyingKey` | - |
 | 2 | **Recipient Key** | secp256k1 |  `cosmwasm_std` | Public key is **the recp** key the claimed allocation. This is the raw bech32 bytes of an account for the chain we are claiming a headstash on.| May be pre‑generated or created on‑the‑fly; no HKDF involved. | In-circuit we constrain a posiedon hash of a raw canonical bech32 addr represented in 2x16 byte limbs |
-| 3 | **HKDF‑derived Key** |  `pallas` | `pasta-curves` | Private key **only**; the corresponding public key is *not* exposed – it is used inside the circuit for proof‑of‑ownership. |   | Deterministically derived via posiedon based HKDF from circuit‑private inputs (e.g., a seed, a note commitment, a nullifier). The derived scalar is mapped to a pallas point using the crate’s `generator` |
+| 3 | **HKDF‑derived Key** |  `pallas` | `pasta-curves` | Keys derived from hashing input values. Used for encrypting data & *"pivoting"* from one cryptographic field to anothe.r |   | Deterministically derived via **posiedon-based** HKDF from circuit‑private inputs (e.g., a seed, a note commitment, a nullifier). The derived scalar is mapped to a pallas point using the crate’s `generator` |
 
-> NOTE: zcash orchard protocol implements key derivation for viewing, authorization, and privacy retention purposes. Our scope does not require the use of viewing or authorization keys, as the end results of tokens claimed will be public. A large portion of the modifications from the orchard protocol altering how note-commitments & nullifiers are derived, as they rely heavily on the use of the key structure used by zcash orchard protocol.
+> NOTE: zcash orchard protocol implements key derivation for viewing, authorization, and privacy retention purposes. Our initial scope removed the use of viewing or authorization keys,however upcoming interations will reimplement viewing keys for full disclosure selection to note data.
 
 ### Curves
 
@@ -101,7 +101,7 @@ When a note is is being spent, the owner generates a nullifier & note commitment
 Headstashes use a HKDF generated nullifier key `nk` seeded from private input, powering the key separation, verifiablility, & cryptographic binding of the nullifier and note commitment.
 **Users end up proving they know the key pair `esk,epk` by providing the nullifier as a public input into the circuit when generating a proof.**
 
-This lets the circuit use the known curve equation & generator points to constrain that the two keys are either mathematically paired together or not, without ever needing to reveal these values, since constraint the generation point of secp256k1 to the two keys for an expected known value.
+This lets the circuit use the known curve equation & generator points to constrain that the public and private key are either mathematically paired together or not.
 
 > ### **To prevent double-spending of headstash allocations, a nullifier must be:**
 >
@@ -112,32 +112,33 @@ This lets the circuit use the known curve equation & generator points to constra
 
 ### Derivation
 
-> TLDR:
+> `TLDR:`
 >
-> 1. **select note**: this determines `v`,`nd`,`fdi`,`epk` (and inherrently `esk`)
-> 2. **prepare inputs**: circuit inputs MUST have a specification for compatibility with Pallas curve to be prepared prior to use for proof generation. For Headstashes:
->
+> 1. **select note**: this determines `v`,`nd`,`fdi`,`epk`, `recp`, `rho` (and inherrently `esk` & `psi`)
+> 2. **prepare inputs**: values need some packaging into formats comaptible with our circuit. All clients generating proofs must prepare:
 >     - `v`: fully padded `u64` value
 >     - `fdi`: fully padded `u64` value
 >     - `nd`: Blake3 Hash of token denomination, with top-most byte cleared to fit as Pallas field element.
 >     - `recp`: Posiedon Hash of the recipients canonical bech32 addr in 2x16 byte chunks.
->     - `esk`: the Posiedon Hash of `esk`, where `esk` is a 3x88 bit pallas base field elemements representing the esk. *note this is derived in circuit and never exposed in our library*
+>     - `esk`: the Posiedon Hash of `esk`, where `esk` is a 3x88 bit pallas base field elemements representing the esk.
 >
-> 3. **derive note-commitment**: deriving `cm` requires `recp`, `fdi`, `nd`,`v`,`rho`, `esk`,`psi`,and blinded to r with`rcm`.\
+> 3. **derive note-commitment**: deriving `cm` requires `nd`, `v`, `fdi`,`recp`,`esk`, `rho`,`psi`,and blinded to r with`rcm`.\
 > Specifically, we use the sinsemilla CommitDomain hashing function to commit these values for creating a note commitment in that specified order.
-> 3. **derive nullifier**: deriving the nullifier requires `nk`, `rho`,`psi`, and `cm`. Specifically:
+> 4. **derive nullifier**: deriving the nullifier requires `nk`, `rho`,`psi`, and `cm`. Specifically:
 >
 > - a. hash the `(nk,hkdf_sk)` with `rho` via Posiedon
 > - b. add hash output to `psi`
 > - c. multiply scalar by NullifierK
 > - d. add product to note-commitment
 
-**Headstashes derive a keypair `(hkdf_sk,nk)` that is on the pallas curve from the `esk`,*along with other private inputs*.** Specifically, we inlcude `esk`,`leaf`,`recp`,and a user PRF-derived valus `psi` in the HKDF input, cryptographically bind the nullifier to a specific fund destination, where only the owner has discrection in deciding who can derive the note from it since it depends on their private note_secret and the associated key of the `epk`.
+**Headstashes derive from `esk`,*along with other private inputs a keypair `(nk)` that is on the pallas curve*.**
+
+Specifically, we hash the 3 88-bit limbs of an esk using posiedon,and hash this value `esk_pallas` along with `rho` using a domain-separated posideon hasher, cryptographically bind the nullifier to a specific fund destination, where only the owner has discrection in deciding who can derive the note from it since it depends on their private `note_secret` and the associated key of the `epk`.
 
 *This defends against a subtle but serious class of attacks man-in-the-middle modifications where an adversary intercepts a transaction and attempts to redirect funds to a different address, while reusing the same proof structure. Because the nullifier depends on the exact allocation being spent, any such alteration would result in a different derived `nk`, causing the proof to fail verification.*
 
 #### NoteCommitment Derivation
-
+<!-- TODO: hash each limb of esk and sum limbs to get esk_pallas -->
 ```math
 \begin{array}{lcl}
 
@@ -186,7 +187,12 @@ This lets the circuit use the known curve equation & generator points to constra
 
 For effecieny in-circuit hashing, we are using Posiedon as the hkdf hashing algorithm. Poseidon is a ZK-friendly hash function used for nullifier derivation, note commitments.
 
-q: when exactly are we using the posiedon function
+<!-- q: when exactly are we using the posiedon function -->
+
+| use   |      context                     |                                   |    | ||
+|----------|---------------------------------|--------------------------------------|--------------------------------------|------------|--|
+| `recp_to_fp` | Convert `RecpAddr` into field element by hashing 2 part pallas represenation  ||||
+| `hdkf_pallas` | Derive `nk` by hashing `esk_pallas` with `rho`  ||||
 
 #### Blake3
 
@@ -344,6 +350,24 @@ ___
 > <center>  DEMO: our script used to generate this is invokable via the command:
 >
 > `cargo run --bin create_merkle -- data/sinsemilla_json.json`</center>
+>
+### Account Headstash Instance Yaml
+
+each accounts progress for claiming a headstash instance can be summed up into a single yaml definition:
+
+```yaml
+id: "0"
+balance:
+  - nd: "value1"
+    v: "value2"
+  - nd: "value3"
+    v: "value4"
+spent:
+  - nd: "value5"
+    v: "value6"
+```
+
+This can be viewed as a "private key", as it contains sensitive information related to your headstash transactions that can break the privacy properties of your headstash claims. Its purpose is to keep accounts in sync across user devices, encrypting and transporting this file across devices.
 
 ### note-commitments: futureproof system
 
@@ -576,9 +600,50 @@ pub type FqChip<'range, F> = fp::FpChip<'range, F, Secp256k1::Fq>;
 
 ### NoteCommitChip Chip
 
+Note commit chip constrains the derivation of the `cm` value, via decomposition & canonicity bounds. This chip uses sinsemilla CommitDomain, and expects the following structure:
+
+- each MessagePiece for a Message to be composed must be:
+  - < 64 bytes
+- simming MessagePiece bytes ubti a Message requires:
+  - < 260 total bytes
+  - total bytes multiple of 10
+
+#### Headstash Sinsemilla Running Sum Bitrange
+
+| object  | variables | len |
+|-|-|-|
+|`nd`|`a:0..250`,`b0:250..255`| 255|
+|`v`|`b1:0..55`,`c0:55..64`| 64|
+|`fdi`|`c1:0..51`,`d0:51..64`| 64|
+|`recp`|`d1:0..7`,`ea:7..67,eb:67..127,ec:127..187,ed:187..247, ee:247..255`| 255|
+|`esk`|`ee:0..2`,`f:2..252`, `g0:252..255`| 255|
+|`rho`|`g1:0..57`,`h0:57..117`,`h1:117..177`,`h2:177..237`,`h3:237..247`,`i0:247..255`| 255|
+|`psi`|`i1:0..2`,`i1:2..252`,`i1:252..255`| 255|
+|`padding`|`i4:0..7` | 7 |
+|| **`1403`** |
+
 ## HeadstashAPI: Verifiable Service Mesh
 
+full docs: [Documentation](./mesh-api)
+
 ## Metamask Snap: Headstash
+
+Metamask snap plugin powering interface for importing/managin circuit proving keys, generating proofs, and for syncing with network for accounts current state across multiple devices
+
+|   |   |   |
+|-|-|-|
+|[Snap-N-Pull](../../zk-crates/snap-n-pull/README) |[Documentation](./metamask-snap) |
+
+actions: `claim-note-nullifier`, `manage-headstash-instance-yaml`, `gen-offline-nullifier`
+
+## WasmBindgen
+
+| actions  | descr | used-by  |
+|-|-|-|
+| web3-connect  |   |   |
+| generating proofs  |   |   |
+| verifying proofs  |   |   |
+| syncing headstash-yamls  |   |   |
 
 ## Genesis Bootstrapping
 
@@ -614,3 +679,5 @@ In order to make it impossible to retroatively derive randomness used during the
 - <https://snaps.metamask.io/snap/npm/chainsafe/webzjs-zcash-snap/>
 - <https://eprint.iacr.org/2025/2031.pdf>
 - <https://github.com/axiom-crypto/halo2-lib/blob/community-edition/halo2-ecc/src/secp256k1/tests/ecdsa.rs>
+- <https://zcash.github.io/halo2/user/wasm-port.html>
+- <https://github.com/zcash/halo2/issues/443>

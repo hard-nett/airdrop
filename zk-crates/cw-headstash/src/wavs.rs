@@ -29,10 +29,42 @@ pub struct WavsAuthMetadata {
 #[cosmwasm_schema::cw_serde]
 
 pub struct WavsProofOfOwnership {
-    /// list of aggregated keys (used for proof of ownership )
+    /// list of aggregated keys (used for proof of ownership)
     pub poos: Vec<WavsOpAuth>,
-    /// msg that is hashed and signed by wavs operators.
+    /// msg that is used as dst for signing and hashing operators for offchain validation
     pub msg: WavsAuthMetadata,
+}
+impl WavsProofOfOwnership {
+    pub fn verify(&self) -> StdResult<()> {
+        if self.poos.len() != self.msg.total_operators || self.poos.is_empty() {
+            return Err(StdError::msg("invalid amount of operators defined"));
+        }
+
+        if self.msg.threshold == 0 || self.msg.threshold > self.msg.total_operators {
+            return Err(StdError::msg("invalid threshold"));
+        }
+        Ok(())
+    }
+
+    /// Proof of ownership verification where H(pk) is signed with sk. Required before instantiation for certainty in inital keyset.
+    /// Message is <contract-addr>-<pubkey>> for doublespend-prevention.\
+    /// ref: : https://eth2book.info/capella/part2/building_blocks/signatures/#proof-of-possession
+    pub fn proof_of_ownership(&self, api: &dyn Api, c: &Addr) -> StdResult<WavsOperatorSet> {
+        for poo in &self.poos {
+            let ps = hex::decode(&poo.key)?;
+            let qs = api.bls12_381_hash_to_g2(HashFunction::Sha256, &ps, &G2)?;
+            let s = hex::decode(&poo.poo)?;
+            if !api.bls12_381_pairing_equality(&ps, &qs, &G1, &s)? {
+                return Err(StdError::msg("proof of ownership failed"));
+            }
+        }
+        // bls12-381 proof of possession
+        Ok(WavsOperatorSet {
+            c: c.to_string(),
+            keys: self.poos.iter().map(|e| e.key.clone()).collect(),
+            msg: self.msg.clone(),
+        })
+    }
 }
 
 #[cosmwasm_schema::cw_serde]
@@ -53,25 +85,6 @@ pub struct WavsOpAuth {
 }
 
 impl WavsOperatorSet {
-    /// Proof of ownership verification where H(pk) is signed with sk. Required before instantiation for certainty in inital keyset.
-    /// Message is <contract-addr>-<pubkey>> for doublespend-prevention.
-    pub fn proof_of_ownership(
-        &self,
-        c: &Addr,
-        api: &dyn Api,
-        pte: &WavsProofOfOwnership,
-    ) -> StdResult<()> {
-        for poo in &pte.poos {
-            let ps = hex::decode(&poo.key)?;
-            let qs = api.bls12_381_hash_to_g2(HashFunction::Sha256, &ps, &G2)?;
-            let s = hex::decode(&poo.poo)?;
-            if !api.bls12_381_pairing_equality(&ps, &qs, &G1, &s)? {
-                return Err(StdError::msg("proof of ownership failed"));
-            }
-        }
-        Ok(())
-    }
-
     fn handle_key_rotation(&self) -> StdResult<()> {
         // validate key rotating is in current set & has a valid signature for key rotation
         // update state to replace old pubkey with new pubkey
@@ -180,7 +193,7 @@ mod tests {
         };
 
         // Should pass
-        let result = wavs.proof_of_ownership(&c, &api, &poos);
+        let result = poos.proof_of_ownership(&api, &c);
         assert!(
             result.is_ok(),
             "PoP verification should succeed: {:?}",
@@ -209,16 +222,6 @@ mod tests {
             poo: hex::encode(serialize_g2(&wrong_signature)),
         };
 
-        let wavs = WavsOperatorSet {
-            c: "cosmos1test".to_string(),
-            keys: vec![operator.key.clone()],
-            msg: WavsAuthMetadata {
-                aggregate_key: hex::encode(&pk_bytes),
-                threshold: 1,
-                total_operators: 1,
-                nonce: 42,
-            },
-        };
         let poos = WavsProofOfOwnership {
             poos: vec![operator],
             msg: WavsAuthMetadata {
@@ -230,7 +233,7 @@ mod tests {
         };
 
         // Should fail
-        let result = wavs.proof_of_ownership(&c, &api, &poos);
+        let result = poos.proof_of_ownership(&api, &c);
         assert!(result.is_err());
         assert!(result
             .unwrap_err()
@@ -281,7 +284,7 @@ mod tests {
         };
 
         // All PoPs should be valid
-        let result = wavs.proof_of_ownership(&c, &api, &poos);
+        let result = poos.proof_of_ownership(&api, &c);
         assert!(
             result.is_ok(),
             "All PoPs should be valid: {:?}",

@@ -80,7 +80,6 @@ impl TokenStrategy {
     pub fn initial_mint_msgs(&self, contract_addr: &Addr) -> StdResult<Vec<TokenFactoryMsg>> {
         match self {
             TokenStrategy::NewFungible(cfg) => {
-                let full_denom = self.denom(contract_addr);
                 let mut res = vec![TokenFactoryMsg::CreateDenom {
                     subdenom: cfg.subdenom.raw.clone(),
                     metadata: Some(cfg.metadata.clone()),
@@ -92,7 +91,7 @@ impl TokenStrategy {
                             mints
                                 .iter()
                                 .map(|m| TokenFactoryMsg::MintTokens {
-                                    denom: full_denom.clone(),
+                                    denom: self.denom(contract_addr).clone(),
                                     amount: m.amount,
                                     mint_to_address: m.to_address.clone(),
                                 })

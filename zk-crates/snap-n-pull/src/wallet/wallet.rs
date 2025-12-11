@@ -16,6 +16,8 @@ use group::ff::PrimeField;
 // use pczt::roles::combiner::Combiner;
 // use pczt::roles::prover::Prover;
 
+use rand::rngs::OsRng;
+use rand::RngCore;
 use serde::Deserialize;
 // use pczt::roles::updater::Updater;
 // use pczt::Pczt;
@@ -25,13 +27,21 @@ use serde::Serialize;
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
+use zk_headstash::address::RecpAddr;
+use zk_headstash::circuit::Instance;
+use zk_headstash::deploy::suite::HeadstashLaunchpadInstance;
+use zk_headstash::deploy::HeadstashSuite;
 use zk_headstash::keys::FullViewingKey;
 use zk_headstash::keys::SpendingKey;
-
 use zk_headstash::keys::{EligiblePk, EligibleSk, NullifierDerivingKey};
+use zk_headstash::note::{Note, RandomSeed};
 use zk_headstash::note::{NoteCommitment, Nullifier, Rho};
 use zk_headstash::r#gen::snp::v1::*;
+use zk_headstash::tree::MerkleHashOrchard;
+use zk_headstash::tree::MerklePath;
 use zk_headstash::value::HeadstashValue;
+use zk_headstash::Anchor;
+use zk_headstash::Proof;
 
 use crate::client::HeadstashClient;
 use crate::crypto::{decrypt_nullifier_state, encrypt_nullifier_state, NullifierState};
@@ -51,26 +61,49 @@ pub struct ClaimResponse {
 
 /// Headstash metadata (from API, blockchain, or IPFS)
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct HeadstashMetadata {
-    /// Merkle root of the note tree
-    pub merkle_root: Vec<u8>,
-    /// IPFS CID for full tree data
+pub struct HeadstashInstance {
     pub ipfs_cid: String,
-    /// Circuit verification key
-    pub verification_key: Vec<u8>,
-    /// Total allocation amount
-    pub total_amount: String,
-    /// Denomination
-    pub denom: String,
+    pub ca: String,
+    pub vk: Vec<u8>,
 }
 
+/// Headstash metadata (from API, blockchain, or IPFS)
+#[derive(Debug, Clone)]
+pub struct HeadstashMetadata {
+    pub nf: Nullifier,
+    /// mr: merkle-root
+    pub mr: Vec<u8>,
+    /// mp: merkle-path
+    pub mp: Vec<Vec<u8>>,
+    /// The value of the note
+    pub hv: HeadstashValue,
+    /// recp: recipient
+    pub recp: Vec<u8>,
+}
+
+// #[derive(Debug, Clone)]
+// pub struct NoteData {
+//     /// nk: nullifier key derived from esk and rho
+//     pub nk: NullifierDerivingKey,
+//     /// The nullifier used to claim the note
+//     pub nullifier: Nullifier,
+//     /// The note commitment
+//     pub commitment: NoteCommitment,
+//     /// The value of the note
+//     pub hv: HeadstashValue,
+//     /// The fixed denomination index (leaf position in tree)
+//     pub fdi: u64,
+//     /// Whether this note has been spent
+//     pub spent: bool,
+// }
+
 /// Proof data for smart account claim
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Default)]
 pub struct ProofData {
     /// The zkSNARK proof bytes
     pub proof: Vec<u8>,
     /// Public inputs for verification
-    pub public_inputs: Vec<Vec<u8>>,
+    pub instances: Vec<Vec<u8>>,
     /// The nullifier being claimed
     pub nullifier: Vec<u8>,
 }
@@ -81,7 +114,7 @@ pub struct ProofData {
 // /// shielding transaction
 // const SHIELDING_THRESHOLD: Zatoshis = Zatoshis::const_from_u64(100000);
 
-/// # A Headstash Stash
+/// # HeadstashWallet
 ///
 /// A wallet is a manifold that is used to synchronized together with the blockchain & headstash-api.
 /// It has the ability to store local records of spent note nullifiers & note-commitments, share & export these files via authenticated requests
@@ -111,22 +144,6 @@ pub struct ProofData {
 /// 3. Requests secret key from MetaMask only when needed
 ///
 ///
-#[derive(Debug, Clone)]
-pub struct NoteData {
-    /// The nullifier key derived from esk and rho
-    pub nk: NullifierDerivingKey,
-    /// The nullifier used to claim the note
-    pub nullifier: Nullifier,
-    /// The note commitment
-    pub commitment: NoteCommitment,
-    /// The value of the note
-    pub hv: HeadstashValue,
-    /// The fixed denomination index (leaf position in tree)
-    pub fdi: u64,
-    /// Whether this note has been spent
-    pub spent: bool,
-}
-
 pub struct HeadstashWallet {
     /// Internal database for note data (nullifiers, commitments, etc.)
     // pub(crate) db: Arc<RwLock<W>>,
@@ -162,19 +179,47 @@ impl HeadstashWallet {
         })
     }
 
-    /// Generate nullifier and commitment for a note (requires ESK from MetaMask)
+    /// Generate proof witness for headstash claim
     ///
-    /// This is a helper that generates the cryptographic values needed for a note.
-    /// The ESK is passed in (retrieved from MetaMask) and NOT stored.
+    /// This generates the zkSNARK proof using the headstash circuit.
     ///
     /// # Arguments
-    /// * `esk` - Secret key from MetaMask (NOT stored, only used for this operation)
-    /// * `rho` - Randomness value for the note
-    /// * `fdi` - Fixed denomination index (leaf position)
-    /// * `value` - Note value (amount + denomination)
-    ///
-    /// # Returns
-    /// Tuple of (NullifierDerivingKey, Nullifier, NoteCommitment)
+    /// * `esk` - Secret key (transient)
+    /// * `nullifier` - The nullifier being claimed
+    /// * `metadata` - Headstash metadata (merkle root, circuit params, etc.)
+    async fn gen_proof_witness(
+        &self,
+        esk: EligibleSk,
+        hi: &HeadstashInstance,
+        md: &HeadstashMetadata,
+    ) -> Result<ProofData, Error> {
+        let a = Anchor::from_bytes(md.mr.as_slice().try_into().expect("darg")).expect("bvad");
+        let mp = MerklePath::from_parts(
+            1,
+            md.mp
+                .iter()
+                .map(|l| {
+                    MerkleHashOrchard::from_bytes(l.as_slice().try_into().unwrap()).expect("darng")
+                })
+                .collect::<Vec<_>>()
+                .try_into()
+                .expect("Expected exactly 32 merkle path elements"),
+        );
+        let recp = RecpAddr::new(md.recp.as_slice().try_into().expect("darn"));
+
+        let proof: Proof = HeadstashSuite::new()
+            .create_headstash_proof(a, mp, esk, recp, md.hv)
+            .await
+            .map_err(|e| Error::KeyDecoding(e.to_string()))?;
+
+        Ok(ProofData {
+            proof: proof.as_ref().to_vec(),
+            instances: vec![],
+            nullifier: md.nf.to_bytes().to_vec(),
+        })
+    }
+
+    /// connects to headstash api client
     pub async fn client(&self) -> HeadstashClient {
         let client = HeadstashClient::new(None, Some("https://headstash-api.terp.network"))
             .await
@@ -183,46 +228,29 @@ impl HeadstashWallet {
         client
     }
 
-    pub fn generate_rho(&self, dst: Option<&[u8; 32]>, user: &[u8; 32]) -> Result<Rho, Error> {
-        Ok(zk_headstash::note::Rho::from_bytes(user).expect("rho error"))
-    }
+    /// ## `generate_note_data`
+    /// ### generates nullifer-key `nk` ,nullifier `nf`, and note-commitment `cm`
     pub fn generate_note_data(
         &self,
         esk: EligibleSk,
         rho: Rho,
-        fdi: u64,
-        recp: &[u8],
         hv: HeadstashValue,
+        recp: RecpAddr,
         rseed: [u8; 32],
     ) -> Result<(NullifierDerivingKey, Nullifier, NoteCommitment), Error> {
-        // Derive nullifier key
         let nk = NullifierDerivingKey::derive_from(esk, rho);
-
-        // Create a temporary note to derive nullifier and commitment
-        // Note: We use HeadstashSuite methods here similar to suite.rs
-        use zk_headstash::address::RecpAddr;
-        use zk_headstash::note::{Note, RandomSeed};
-
-        let recp = RecpAddr::try_from(recp)
-            .map_err(|e| Error::KeyDecoding(format!("Invalid address: {:?}", e)))?;
-
         let rseed = RandomSeed::from_bytes(rseed, &rho).expect("rseed input");
-        let fvk = FullViewingKey::from(
-            &SpendingKey::from_bytes(esk.derive_pallas().to_repr()).expect("esk spending key"),
-        );
-        // Create note
-        let (v, nd) = hv.into_parts();
-        let note = Note::from_parts(
-            fvk.address_at(0u32, zk_headstash::keys::Scope::External),
-            v,
-            rho,
-            rseed,
-        ) // nd, fdi, esk,
-        .into_option()
-        .ok_or_else(|| Error::KeyDecoding("Failed to create valid note".into()))?;
+
+        // let fvk = FullViewingKey::from(
+        //     &SpendingKey::from_bytes(esk.derive_pallas().to_repr()).expect("esk spending key"),
+        // );
+
+        let note = Note::from_parts(hv, recp, esk, rho, rseed)
+            .into_option()
+            .ok_or_else(|| Error::KeyDecoding("Failed to create valid note".into()))?;
 
         // Derive nullifier and commitment
-        let nullifier = note.nullifier(&fvk);
+        let nullifier = note.nullifier();
         let commitment = note.commitment();
 
         Ok((nk, nullifier, commitment))
@@ -236,7 +264,7 @@ impl HeadstashWallet {
     // /// * `rho` - Randomness value
     // /// * `fdi` - Leaf index
     // /// * `v` - Note value
-    // pub async fn store_note(
+    // pub async fn gen_claim(
     //     &self,
     //     headstash_id: String,
     //     esk: EligibleSk,
@@ -259,7 +287,7 @@ impl HeadstashWallet {
     //     };
 
     //     let mut db = self.db.write().await;
-    //     db.store_note(&headstash_id, note_data)?;
+    //     db.gen_claim(&headstash_id, note_data)?;
 
     //     Ok(())
     // }
@@ -362,56 +390,38 @@ impl HeadstashWallet {
     /// 4. Submit claim to headstash-api with smart account auth
     ///
     /// # Arguments
-    /// * `headstash_id` - Contract address
+    /// * `hid` - Contract address
     /// * `esk` - Secret key from MetaMask (transient, not stored)
     /// * `nullifier` - The nullifier to claim
     pub async fn claim_headstash_via_smart_account(
         &self,
-        headstash_id: String,
+        hid: String,
         esk: EligibleSk,
-        nullifier: Nullifier,
+        hmd: HeadstashMetadata,
     ) -> Result<ClaimResponse, Error> {
-        let client = self
+        let c = self
             .client
             .as_ref()
             .ok_or_else(|| Error::Js("No client configured".into()))?;
 
         // 1. Check for cached verification key
-        let vk_cached = self.check_vk_cache(&headstash_id).await?;
-
-        // 2. If not cached, fetch metadata to get circuit info and VK
-        let metadata = if !vk_cached {
-            let metadata = client.get_headstash_metadata(&headstash_id).await?;
-
-            // Cache the verification key for future use
-            self.cache_vk(&headstash_id, &metadata.verification_key)
-                .await?;
-
-            metadata
-        } else {
-            // Still need metadata for merkle proof, but VK is cached
-            client.get_headstash_metadata(&headstash_id).await?
+        let m = match !self.check_vk_cache(&hid).await? {
+            true => {
+                let m = c.get_headstash_instance(&hid).await?;
+                self.cache_vk(&hid, &m.vk).await?;
+                m
+            }
+            false => c.get_headstash_instance(&hid).await?,
         };
 
-        // 3. Get note data (would come from local DB in full implementation)
-        // For now, we generate it from the inputs we have
-        // In production, this would be: db.get_note_by_nullifier(&headstash_id, &nullifier)?
-
-        // 4. Generate proof witness
-        // This calls the zk-headstash circuit to generate the proof
-        let proof_data = self
-            .generate_proof_witness(esk, nullifier, &metadata)
-            .await?;
-
-        // 5. Submit to headstash-api with smart account signature
-        let response = client
-            .submit_smart_account_claim(&headstash_id, proof_data)
-            .await?;
+        // generate proof witness data
+        let pd = self.gen_proof_witness(esk, &m, &hmd).await?;
+        let r = c.submit_smart_account_claim(&hid, pd).await?;
 
         // 6. Mark as spent in local DB (when DB is implemented)
         // db.mark_note_spent(&headstash_id, &nullifier)?;
 
-        Ok(response)
+        Ok(r)
     }
 
     /// Check if verification key is cached for a headstash
@@ -430,71 +440,42 @@ impl HeadstashWallet {
         Ok(())
     }
 
-    /// Generate proof witness for headstash claim
-    ///
-    /// This generates the zkSNARK proof using the headstash circuit.
-    ///
-    /// # Arguments
-    /// * `esk` - Secret key (transient)
-    /// * `nullifier` - The nullifier being claimed
-    /// * `metadata` - Headstash metadata (merkle root, circuit params, etc.)
-    async fn generate_proof_witness(
-        &self,
-        esk: EligibleSk,
-        nullifier: Nullifier,
-        metadata: &HeadstashMetadata,
-    ) -> Result<ProofData, Error> {
-        // TODO: Implement actual proof generation using zk-headstash circuit
-        // This would involve:
-        // 1. Load proving key (from cache or download)
-        // 2. Prepare witness (esk, nullifier, merkle path, etc.)
-        // 3. Generate proof using halo2
-        // 4. Serialize proof and public inputs
+    // /// Export encrypted spent note details
+    // ///
+    // /// Encrypts spent notes nullifier-key `nk`, the ranomness bytes, and the bytes to use across library.
+    // /// This is used for syncing nullifier state across devices.
+    // ///
+    // /// # Arguments
+    // /// * `headstash_id` - Contract address to export notes for
+    // /// * `recipient_pk` - Public key to encrypt to
+    // /// * `sender_sk` - Secret key for signing (proves origin)
+    // pub async fn export_headstash_instance_yaml(
+    //     &self,
+    //     headstash_id: &String,
+    //     recipient_pk: &EligiblePk,
+    //     sender_sk: &EligibleSk,
+    // ) -> Result<Vec<u8>, Error> {
+    //     todo!()
+    //     // let db = self.db.read().await;
+    //     // let spent_notes = db.list_spent_notes(headstash_id)?;
 
-        // For now, return placeholder
-        Ok(ProofData {
-            proof: vec![],
-            public_inputs: vec![],
-            nullifier: nullifier.to_bytes().to_vec(),
-        })
-    }
+    //     // // Convert to serializable format
+    //     // let serialized_notes: Vec<SerializedNoteData> =
+    //     //     spent_notes.iter().map(|n| n.into()).collect();
 
-    /// Export encrypted spent note details
-    ///
-    /// Encrypts spent notes nullifier-key `nk`, the ranomness bytes, and the bytes to use across library.
-    /// This is used for syncing nullifier state across devices.
-    ///
-    /// # Arguments
-    /// * `headstash_id` - Contract address to export notes for
-    /// * `recipient_pk` - Public key to encrypt to
-    /// * `sender_sk` - Secret key for signing (proves origin)
-    pub async fn export_spent_note_details_encrypted(
-        &self,
-        headstash_id: &String,
-        recipient_pk: &EligiblePk,
-        sender_sk: &EligibleSk,
-    ) -> Result<Vec<u8>, Error> {
-        todo!()
-        // let db = self.db.read().await;
-        // let spent_notes = db.list_spent_notes(headstash_id)?;
+    //     // // Create nullifier state
+    //     // let state = NullifierState {
+    //     //     headstash_id: headstash_id.clone(),
+    //     //     spent_notes: serialized_notes,
+    //     // };
 
-        // // Convert to serializable format
-        // let serialized_notes: Vec<SerializedNoteData> =
-        //     spent_notes.iter().map(|n| n.into()).collect();
+    //     // // Encrypt
+    //     // let encrypted = encrypt_nullifier_state(&state, recipient_pk, sender_sk)?;
 
-        // // Create nullifier state
-        // let state = NullifierState {
-        //     headstash_id: headstash_id.clone(),
-        //     spent_notes: serialized_notes,
-        // };
-
-        // // Encrypt
-        // let encrypted = encrypt_nullifier_state(&state, recipient_pk, sender_sk)?;
-
-        // // Serialize encrypted payload
-        // serde_json::to_vec(&encrypted)
-        //     .map_err(|e| Error::Js(format!("Failed to serialize encrypted state: {}", e).into()))
-    }
+    //     // // Serialize encrypted payload
+    //     // serde_json::to_vec(&encrypted)
+    //     //     .map_err(|e| Error::Js(format!("Failed to serialize encrypted state: {}", e).into()))
+    // }
 
     // /// Sync encrypted spent note details from endpoint
     // ///
@@ -643,7 +624,7 @@ impl HeadstashWallet {
 #[derive(Debug, Clone, Default)]
 pub struct MemoryHeadstashDb {
     // Maps: String → (Nullifier bytes → NoteData)
-    storage: HashMap<String, HashMap<[u8; 32], NoteData>>,
+    storage: HashMap<String, HashMap<[u8; 32], ()>>,
 }
 
 // ============================================================================
@@ -1230,7 +1211,7 @@ mod tests {
 
     //     // Store note
     //     wallet
-    //         .store_note(headstash_id.clone(), esk, rho, 0, recp, value, &rho_bytes)
+    //         .gen_claim(headstash_id.clone(), esk, rho, 0, recp, value, &rho_bytes)
     //         .await
     //         .unwrap();
 
@@ -1262,7 +1243,7 @@ mod tests {
     //     let recp = String::default().as_bytes();
     //     // Store note
     //     wallet
-    //         .store_note(headstash_id.clone(), esk, rho, 0, recp, hv, rng)
+    //         .gen_claim(headstash_id.clone(), esk, rho, 0, recp, hv, rng)
     //         .await
     //         .unwrap();
 

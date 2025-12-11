@@ -157,7 +157,7 @@ commonware_runtime = { version = "0.1", features = ["tokio"] }  # Adjust version
 zk_headstash = { ... }  # Your async crate
 ```
 
-### src/bin/gen_headstash_keys.rs
+### src/bin/gen_headstash_circuit.rs
 
 ```rust
 use std::error::Error;
@@ -169,7 +169,7 @@ use commonware_runtime::tokio::Runner;
 /// Generates default Headstash [VerifyingKey] and [ProvingKey].
 ///
 /// ```bash
-/// cargo run --bin gen_headstash_keys
+/// cargo run --bin gen_headstash_circuit
 /// ```
 fn main() -> Result<(), Box<dyn Error>> {
     Runner::default().start(|_| HeadstashSuite::new().create_headstash_proof())?;

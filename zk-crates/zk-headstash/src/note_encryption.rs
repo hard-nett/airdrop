@@ -464,7 +464,7 @@
 // //             let ephemeral_key = EphemeralKeyBytes(tv.ephemeral_key);
 
 // //             // Details about the expected note
-// //             let value = NoteValue::from_raw(tv.v);
+// //             let value = NoteValue::from(tv.v);
 // //             let rseed = RandomSeed::from_bytes(tv.rseed, &rho).unwrap();
 
 // //             //

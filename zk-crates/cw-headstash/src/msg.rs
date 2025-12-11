@@ -11,6 +11,7 @@ pub struct InstantiateMsg {
 pub enum ExecuteMsg {
     // RotateKey { keys: Vec<String> },
     ProcessHeadstash { claims: Vec<HeadstashNote> },
+    LoadVk { vk: Binary },
 }
 
 #[cw_serde]

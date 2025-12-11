@@ -127,12 +127,19 @@ impl RecpAddr {
     }
 }
 
-impl TryFrom<CanonicalAddr> for RecpAddr {
-    type Error = std::array::TryFromSliceError;
-
-    fn try_from(canonical_addr: CanonicalAddr) -> Result<Self, Self::Error> {
-        let bytes: [u8; 32] = canonical_addr.as_slice().try_into()?;
-        Ok(Self(bytes))
+impl From<cosmwasm_std::Binary> for RecpAddr {
+    fn from(value: cosmwasm_std::Binary) -> Self {
+        Self::new(
+            value
+                .as_slice()
+                .try_into()
+                .expect("Invalid nullifier bytes"),
+        )
+    }
+}
+impl From<CanonicalAddr> for RecpAddr {
+    fn from(ca: CanonicalAddr) -> Self {
+        Self(ca.as_slice().try_into().expect("Invalid nullifier bytes"))
     }
 }
 
@@ -145,11 +152,13 @@ impl TryFrom<&[u8]> for RecpAddr {
     }
 }
 
-/// testing
 #[cfg(test)]
-pub mod test {
+mod tests {
     use std::println;
     use std::string::ToString;
+
+    use super::*;
+    use crate::spec::recp_to_fp;
 
     use cosmwasm_std::testing::mock_dependencies;
     use cosmwasm_std::{Api, CanonicalAddr};
@@ -163,18 +172,6 @@ pub mod test {
         println!("{:#?}", canon.len());
         println!("{:#?}", canon.to_string());
     }
-}
-
-#[cfg(test)]
-mod tests {
-    use std::println;
-    use std::string::ToString;
-
-    use crate::spec::recp_to_fp;
-
-    use super::*;
-    use cosmwasm_std::testing::mock_dependencies;
-    use cosmwasm_std::Api;
 
     // Helper function to create a valid 32-byte array
     fn create_test_bytes() -> [u8; 32] {

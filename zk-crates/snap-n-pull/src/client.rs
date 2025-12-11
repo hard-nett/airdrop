@@ -26,8 +26,8 @@ use zk_headstash::gen::headstash::snp::v1::{
     DownloadNullifierStateResponse, UploadNullifierStateRequest, UploadNullifierStateResponse,
 };
 
+use crate::wallet::wallet::{ClaimResponse, HeadstashInstance, HeadstashMetadata, ProofData};
 use crate::Error;
-use crate::wallet::wallet::{ClaimResponse, HeadstashMetadata, ProofData};
 
 /// Headstash client for gRPC communication
 ///
@@ -247,10 +247,10 @@ impl HeadstashClient {
     ///
     /// # Returns
     /// HeadstashMetadata with merkle root, VK, IPFS CID, etc.
-    pub async fn get_headstash_metadata(
+    pub async fn get_headstash_instance(
         &self,
         headstash_id: &str,
-    ) -> Result<HeadstashMetadata, Error> {
+    ) -> Result<HeadstashInstance, Error> {
         // 1. Try headstash-api first (fastest)
         if let Some(channel) = &self.api_channel {
             if let Ok(metadata) =
@@ -282,29 +282,12 @@ pub struct FeegrantRequest {
     pub nullifier: Vec<u8>,
 }
 
-/// Feegrant response
-#[derive(Clone, Serialize, Deserialize, Default)]
-pub struct FeegrantResponse {
-    pub granted: bool,
-    pub granter_address: String,
-    pub allowance_amount: String,
-}
-
 /// Smart account claim request
 #[derive(Clone, Serialize, Deserialize)]
 pub struct SmartAccountClaimRequest {
     pub headstash_id: String,
     pub claim_msg: Vec<u8>,
     pub signature: Vec<u8>,
-}
-
-/// Transaction response
-#[derive(Clone, Serialize, Deserialize)]
-pub struct TxResponse {
-    pub tx_hash: String,
-    pub height: i64,
-    pub code: u32,
-    pub raw_log: String,
 }
 
 // ============================================================================
@@ -329,26 +312,6 @@ async fn query_wasm_smart_internal(
             .data,
     })
 }
-
-// /// Internal: Upload nullifier state
-// async fn upload_nullifier_state_internal(
-//     channel: Channel,
-//     request: UploadNullifierStateRequest,
-// ) -> Result<UploadNullifierStateResponse, Box<dyn std::error::Error>> {
-//     let mut client = HeadstashSnapServiceClient::new(channel);
-//     let response = client.upload_nullifier_state(request).await?;
-//     Ok(response.into_inner())
-// }
-
-// /// Internal: Download nullifier state
-// async fn download_nullifier_state_internal(
-//     channel: Channel,
-//     request: DownloadNullifierStateRequest,
-// ) -> Result<DownloadNullifierStateResponse, Box<dyn std::error::Error>> {
-//     let mut client = HeadstashSnapServiceClient::new(channel);
-//     let response = client.download_nullifier_state(request).await?;
-//     Ok(response.into_inner())
-// }
 
 /// Internal: Submit smart account claim
 async fn submit_smart_account_claim_internal(
@@ -377,7 +340,7 @@ async fn submit_smart_account_claim_internal(
 async fn get_metadata_from_api_internal(
     channel: Channel,
     headstash_id: &str,
-) -> Result<HeadstashMetadata, Box<dyn std::error::Error>> {
+) -> Result<HeadstashInstance, Box<dyn std::error::Error>> {
     // TODO: Add GetHeadstashMetadata RPC to proto
     // For now, return error to force fallback to blockchain
     Err("Metadata API not yet implemented".into())

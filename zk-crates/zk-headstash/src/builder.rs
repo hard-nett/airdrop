@@ -1325,7 +1325,7 @@ pub struct SigningMetadata {
 //         );
 
 //         builder
-//             .add_output(None, recipient, NoteValue::from_raw(5000), [0u8; 512])
+//             .add_output(None, recipient, NoteValue::from(5000), [0u8; 512])
 //             .unwrap();
 //         let balance: i64 = builder.value_balance().unwrap();
 //         assert_eq!(balance, -5000);

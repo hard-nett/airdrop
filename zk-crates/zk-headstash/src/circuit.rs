@@ -1,18 +1,24 @@
 //! The Orchard Action circuit implementation.
+use std::{
+    fs::File,
+    io::{self, BufWriter, Write},
+    path::PathBuf,
+};
 
 use alloc::vec::Vec;
-
+use anybuf::Anybuf;
 use ff::PrimeField;
 use group::{Curve, GroupEncoding};
 use halo2_proofs::{
     circuit::{floor_planner, Layouter, Value},
     plonk::{
         self, Advice, Column, Constraints, Expression, Instance as InstanceColumn, Selector,
-        SingleVerifier,
+        SingleVerifier, VerifyingKey as Halo2Vk,
     },
-    poly::Rotation,
+    poly::{EvaluationDomain, Rotation},
     transcript::{Blake2bRead, Blake2bWrite},
 };
+use pasta_curves::EqAffine;
 use pasta_curves::{arithmetic::CurveAffine, pallas, vesta};
 use rand::RngCore;
 
@@ -160,19 +166,21 @@ impl Circuit {
         // alpha: pallas::Scalar,
         // rcv: ValueCommitTrapdoor,
     ) -> Circuit {
-        let sender_address = spend.note.recipient();
         let rho_old = spend.note.rho();
         let psi_old = spend.note.rseed().psi(&rho_old);
         let rcm_old = spend.note.rseed().rcm(&rho_old);
-
-        let rho_new = output_note.rho();
-        let psi_new = output_note.rseed().psi(&rho_new);
-        let rcm_new = output_note.rseed().rcm(&rho_new);
+        let esk = spend.note.elig_sk();
+        let fdi = spend.note.fdi();
+        let (epkx, epky) = spend.note.elig_sk().epk().xy();
+        let recp = spend.note.recipient();
+        let nd = spend.note.nd();
+        // let rho_new = output_note.rho();
+        // let psi_new = output_note.rseed().psi(&rho_new);
+        // let rcm_new = output_note.rseed().rcm(&rho_new);
 
         Circuit {
             path: Value::known(spend.merkle_path.auth_path()),
             pos: Value::known(spend.merkle_path.position()),
-
             v: Value::known(spend.note.value()),
             rho_old: Value::known(rho_old),
             psi_old: Value::known(psi_old),
@@ -180,12 +188,12 @@ impl Circuit {
             cm_old: Value::known(spend.note.commitment()),
             nk: Value::known(*spend.fvk.nk()),
             // rcv: Value::known(rcv),
-            esk: todo!(),
-            epkx: todo!(),
-            epky: todo!(),
-            fdi: todo!(),
-            nd: todo!(),
-            recp: todo!(),
+            esk: Value::known(Secp256k1Fq::from_bytes(&esk.0.secret_bytes()).expect("valid Fq")),
+            epkx: Value::known(Secp256k1Fp::from_bytes(&epkx).expect("valid Fp")),
+            epky: Value::known(Secp256k1Fp::from_bytes(&epky).expect("valid Fp")),
+            fdi: Value::known(fdi.into()),
+            nd: Value::known(nd.to_pallas()),
+            recp: Value::known(recp.to_pallas()),
         }
     }
 }
@@ -563,12 +571,26 @@ pub struct VerifyingKey {
 
 impl VerifyingKey {
     /// Builds the verifying key.
+    pub fn new(vk: plonk::VerifyingKey<pasta_curves::EqAffine>) -> Self {
+        let params = halo2_proofs::poly::commitment::Params::new(K);
+        VerifyingKey { params, vk }
+    }
+
+    /// loads a key from raw bytes for cosmswasm contracts.
+    pub fn load_cosmwasm(b: &[u8]) -> Self {
+        let params = halo2_proofs::poly::commitment::Params::new(K);
+        let circuit: Circuit = Default::default();
+        let vk = plonk::keygen_vk(&params, &circuit).unwrap();
+
+        // TODO: read params & vk from raw file
+
+        VerifyingKey { params, vk }
+    }
+    /// Builds the verifying key.
     pub fn build() -> Self {
         let params = halo2_proofs::poly::commitment::Params::new(K);
         let circuit: Circuit = Default::default();
-
         let vk = plonk::keygen_vk(&params, &circuit).unwrap();
-
         VerifyingKey { params, vk }
     }
 }
@@ -585,16 +607,20 @@ impl ProvingKey {
     pub fn build() -> Self {
         let params = halo2_proofs::poly::commitment::Params::new(K);
         let circuit: Circuit = Default::default();
-        // rayon::ThreadPoolBuilder::new()
-        //     .num_threads(4) // Adjust to your CPU cores (e.g., std::thread::available_parallelism())
-        //     .build_global()
-        //     .expect("Failed to initialize Rayon thread pool");
 
-        std::println!("Using {} threads", rayon::current_num_threads());
         let vk = plonk::keygen_vk(&params, &circuit).unwrap();
         let pk = plonk::keygen_pk(&params, vk, &circuit).unwrap();
 
         ProvingKey { params, pk }
+    }
+
+    /// Builds pk & vk, writes to file
+    pub fn build_and_write(path: PathBuf) -> io::Result<()> {
+        let mut writer = BufWriter::new(File::create(path)?);
+        let pk = Self::build();
+        pk.params.write(&mut writer)?;
+        pk.pk.get_vk().write(&mut writer)?;
+        writer.flush()
     }
 
     /// retrieve a clone of the params
@@ -611,8 +637,8 @@ pub struct Instance {
     pub(crate) v: NoteValue,
     pub(crate) nf: Nullifier,
     pub(crate) recp: RecpAddr,
-    // pub(crate) rk: VerificationKey<SpendAuth>,
     pub(crate) cmx: ExtractedNoteCommitment,
+    // pub(crate) rk: VerificationKey<SpendAuth>,
     // pub(crate) enable_spend: bool,
     // pub(crate) enable_output: bool,
 }
@@ -642,8 +668,8 @@ impl Instance {
             v,
             recp,
             nf,
-            // rk,
             cmx,
+            // rk,
             // enable_spend,
             // enable_output,
         }
@@ -657,18 +683,7 @@ impl Instance {
         instance[HS_V] = self.v.inner().into();
         instance[RECP] = self.recp.to_pallas();
         instance[NF_OLD] = self.nf.0;
-
-        // let rk = pallas::Point::from_bytes(&self.rk.clone().into())
-        //     .unwrap()
-        //     .to_affine()
-        //     .coordinates()
-        //     .unwrap();
-
-        // instance[RK_X] = *rk.x();
-        // instance[RK_Y] = *rk.y();
         instance[CMX] = self.cmx.inner();
-        // instance[ENABLE_SPEND] = vesta::Scalar::from(u64::from(self.enable_spend));
-        // instance[ENABLE_OUTPUT] = vesta::Scalar::from(u64::from(self.enable_output));
 
         [instance]
     }
@@ -761,16 +776,10 @@ mod tests {
         let (_, fvk, esk, spent_note) = Note::dummy(&mut rng, None);
         // 1. Generate secp256k1 key pair (esk, epk)
 
-        let epk = esk.epk().0;
-        // 6. Extract secp256k1 coordinates for circuit
-        // let secp = Secp256k1::new();
-        // let e_pk_secp = PublicKey::from_secret_key(&secp, &esk);
-        let e_pk_bytes = epk.serialize_uncompressed();
-        let e_pk_x_bytes: [u8; 32] = e_pk_bytes[1..33].try_into().unwrap();
-        let e_pk_y_bytes: [u8; 32] = e_pk_bytes[33..65].try_into().unwrap();
+        let (epkx, epky) = esk.epk().xy();
         let e_sk_fq = Secp256k1Fq::from_bytes(&esk.0.secret_bytes()).expect("valid Fq");
-        let epkx = Secp256k1Fp::from_bytes(&e_pk_x_bytes).expect("valid Fp");
-        let epky = Secp256k1Fp::from_bytes(&e_pk_y_bytes).expect("valid Fp");
+        let epkx = Secp256k1Fp::from_bytes(&epkx).expect("valid Fp");
+        let epky = Secp256k1Fp::from_bytes(&epky).expect("valid Fp");
 
         let sender_address = spent_note.recipient();
         let nk = *fvk.nk();
@@ -826,8 +835,8 @@ mod tests {
                 v,
                 recp,
                 nf,
-                // rk,
                 cmx,
+                // rk,
                 // enable_spend: true,
                 // enable_output: true,
             },
@@ -906,8 +915,8 @@ mod tests {
             w.write_all(&instance.v.to_bytes())?;
             w.write_all(&instance.recp.to_bytes())?;
             w.write_all(&instance.nf.to_bytes())?;
-            // w.write_all(&<[u8; 32]>::from(instance.rk.clone()))?;
             w.write_all(&instance.cmx.to_bytes())?;
+            // w.write_all(&<[u8; 32]>::from(instance.rk.clone()))?;
             // w.write_all(&[
             //     u8::from(instance.enable_spend),
             //     u8::from(instance.enable_output),

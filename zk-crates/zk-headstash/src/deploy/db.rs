@@ -9,7 +9,7 @@
 // /// - File system (native)
 // pub trait HeadstashApiDbInstance: Send + Sync {
 //     // /// Store note data for a specific headstash
-//     // fn store_note(&mut self, headstash_id: &String, note_data: NoteData) -> Result<(), Error>;
+//     // fn gen_claim(&mut self, headstash_id: &String, note_data: NoteData) -> Result<(), Error>;
 
 //     // /// Get note data by nullifier
 //     // fn get_note_by_nullifier(
@@ -36,7 +36,7 @@
 // }
 
 // impl HeadstashApiDbInstance for MemoryHeadstashDb {
-//     // fn store_note(&mut self, headstash_id: &String, note_data: NoteData) -> Result<(), Error> {
+//     // fn gen_claim(&mut self, headstash_id: &String, note_data: NoteData) -> Result<(), Error> {
 //     //     let notes = self
 //     //         .storage
 //     //         .entry(headstash_id.clone())
@@ -107,7 +107,7 @@
     /// # Examples
     ///
     /// ```javascript
-    /// await wallet.store_note(
+    /// await wallet.gen_claim(
     ///     "terp1contract123",
     ///     esk_hex,
     ///     rho_hex,
@@ -118,7 +118,7 @@
     ///     rseed_hex
     /// );
     /// ```
-    // pub async fn store_note(
+    // pub async fn gen_claim(
     //     &self,
     //     headstash_id: String,
     //     esk_hex: String,
@@ -153,6 +153,6 @@
     //         .map_err(|_| Error::KeyDecoding("Invalid rseed length".into()))?;
 
     //     self.inner
-    //         .store_note(headstash_id, esk, rho, fdi, &recp_bytes, hv, rseed_bytes)
+    //         .gen_claim(headstash_id, esk, rho, fdi, &recp_bytes, hv, rseed_bytes)
     //         .await
     // }

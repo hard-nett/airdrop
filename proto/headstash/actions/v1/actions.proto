@@ -4,8 +4,9 @@ package headstash.actions.v1;
 
 import "google/protobuf/struct.proto";
 
-
 service HeadstashService {
+      // client access to storage layer dedicated for headstash keys
+      rpc ManageHeadstashKeyFromStorage(MsgManageHeadstashKeyFromStorage) returns (MsgManageHeadstashKeyFromStorageResponse);
       // retrieve token holder distribution
       rpc CreateHeadstashNotes(MsgCreateHeadstashNotes) returns (MsgCreateHeadstashNoteResponse);
       // Creates a new headstash instance
@@ -24,26 +25,103 @@ service HeadstashActionsService {
       // perform headstash action
 }
 
+// request for client to access a circuit verifying key from its storage layer
+message MsgManageHeadstashKeyFromStorage {
+// technique
+ oneof tech  {
+      // sets key, or removes key via id if empty. 
+      // keys are mapped as values to prefixes of blake3 hashes of the hex encoded binary
+      SetHeadstashKey set_headstash_pk = 1;
+      // retrieves key via prefix (blake3 hash of pk)
+      GetHeadstashKey get_headstash_pk = 2;     
+ };
+}
+
+// response for client to access a circuit verifying key from its storage layer
+message MsgManageHeadstashKeyFromStorageResponse {
+      // store key for headstash circuit
+      string key =  1;
+}
+
+// set a headstash instance ProvingKey bytes
+message SetHeadstashKey {
+      // headstash instance ProvingKey bytes
+      bytes data =  1;
+};
+
+// get a headstash instance ProvingKey bytes given its storage key
+message GetHeadstashKey {
+      // store key for headstash circuit
+      string key =  1;
+};
+
 // response of creating the tree 
-message MsgCreateHeadstashTreeResponse {}
+message MsgCreateHeadstashTreeResponse {
+      // genesis tree root
+      string root =  1;
+      // total leafs in genesis tree
+      uint64 total_leafs =  2;
+      // total eligible members
+      uint64 total_elig =  3;
+      // total byte size of genesis tree param file
+      uint64 total_size =  4;
+}
+
+
 // Create a distribution headstash tree for a given distribution param
 message MsgCreateHeadstashTree {}
+
 // Create a note nullifier for a given note input
-message MsgPrepareNoteNullifier {}
+message MsgPrepareNoteNullifier {
+      // note-denom
+      string nd = 1;
+      // value
+      uint64 v = 2;
+      // fixed-denom-index
+      uint64 fdi = 3;
+      // recipient
+      string recp = 4;
+      // esk
+      bytes esk = 5;
+      // headstash sinsemilla root
+      bytes sinroot = 6;
+}
+
 // Return the resonse for a spefici note input
-message MsgPrepareNoteNullifierResponse {}
+message MsgPrepareNoteNullifierResponse {
+      // nullifier
+      bytes nf = 1;
+      // commitment
+      bytes cmx = 2;
+      // recipient
+      uint64 recp = 3;
+      // nd
+      uint64 nd =4;
+      // v
+      uint64 v = 5;
+}
+
 // Create a Headstash instance
-message MsgCreateHeadstash {}
+message MsgCreateHeadstash {
+      // HeadstashInstanceParams bytes
+      bytes params = 1;
+}
+
 // All relevant information created during successful headstash creation
 message MsgCreateHeadstashResponse {}
+
 // Create a list of the notes for a given address and headstash instance
 message MsgCreateHeadstashNotes {}
+
 // output of note instance location
 message MsgCreateHeadstashNoteResponse {}
 
 //  claim a headstash note and broadcast claim 
-message MsgClaimHeadstashNote {}
+message MsgClaimHeadstashNote {
+      // encoded msg of `MsgPrepareNoteNullifier`
+      bytes msg_prep_note_nullifier = 1;
+
+}
+
 // response of claiming a headhstash note
 message MsgClaimHeadstashNoteResponse {}
-
- 

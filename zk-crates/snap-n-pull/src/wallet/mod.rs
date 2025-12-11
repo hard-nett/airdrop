@@ -8,7 +8,7 @@ pub mod bindgen;
 
 pub mod init;
 pub mod wallet;
-pub use wallet::{HeadstashWallet, MemoryHeadstashDb, NoteData};
+pub use wallet::{HeadstashWallet, MemoryHeadstashDb};
 
 use wasm_bindgen::prelude::*;
 

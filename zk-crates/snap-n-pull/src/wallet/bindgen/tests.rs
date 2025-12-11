@@ -34,7 +34,7 @@ async fn test_nul_generation_basic() {
 
     // Generate note data
     let note_data_json = wallet
-        .store_note(
+        .gen_claim(
             "test_headstash".to_string(),
             esk_hex.to_string(),
             rho_hex.to_string(),
@@ -85,7 +85,7 @@ async fn test_nul_uniqueness_by_esk() {
     // Generate with ESK 1
     let esk1_hex = "0000000000000000000000000000000000000000000000000000000000000001";
     let note1_json = wallet
-        .store_note(
+        .gen_claim(
             "test".to_string(),
             esk1_hex.to_string(),
             rho_hex.to_string(),
@@ -101,7 +101,7 @@ async fn test_nul_uniqueness_by_esk() {
     // Generate with ESK 2
     let esk2_hex = "0000000000000000000000000000000000000000000000000000000000000002";
     let note2_json = wallet
-        .store_note(
+        .gen_claim(
             "test".to_string(),
             esk2_hex.to_string(),
             rho_hex.to_string(),
@@ -147,7 +147,7 @@ async fn test_nul_uniqueness_by_rho() {
     // Generate with RHO 1
     let rho1_hex = "0000000000000000000000000000000000000000000000000000000000000002";
     let note1_json = wallet
-        .store_note(
+        .gen_claim(
             "test".to_string(),
             esk_hex.to_string(),
             rho1_hex.to_string(),
@@ -163,7 +163,7 @@ async fn test_nul_uniqueness_by_rho() {
     // Generate with RHO 2
     let rho2_hex = "0000000000000000000000000000000000000000000000000000000000000003";
     let note2_json = wallet
-        .store_note(
+        .gen_claim(
             "test".to_string(),
             esk_hex.to_string(),
             rho2_hex.to_string(),
@@ -209,7 +209,7 @@ async fn test_nul_determinism() {
 
     // Generate twice with same inputs
     let note1_json = wallet
-        .store_note(
+        .gen_claim(
             "test".to_string(),
             esk_hex.to_string(),
             rho_hex.to_string(),
@@ -223,7 +223,7 @@ async fn test_nul_determinism() {
         .expect("Failed");
 
     let note2_json = wallet
-        .store_note(
+        .gen_claim(
             "test".to_string(),
             esk_hex.to_string(),
             rho_hex.to_string(),
@@ -267,7 +267,7 @@ async fn test_fdi_affects_commitment_not_nul() {
 
     // Generate with FDI 0
     let note1_json = wallet
-        .store_note(
+        .gen_claim(
             "test".to_string(),
             esk_hex.to_string(),
             rho_hex.to_string(),
@@ -282,7 +282,7 @@ async fn test_fdi_affects_commitment_not_nul() {
 
     // Generate with FDI 1
     let note2_json = wallet
-        .store_note(
+        .gen_claim(
             "test".to_string(),
             esk_hex.to_string(),
             rho_hex.to_string(),
@@ -323,7 +323,7 @@ async fn test_invalid_hex_input() {
 
     // Invalid hex string
     let result = wallet
-        .store_note(
+        .gen_claim(
             "test".to_string(),
             "INVALID_HEX".to_string(),
             "0000000000000000000000000000000000000000000000000000000000000002".to_string(),
@@ -346,7 +346,7 @@ async fn test_invalid_value() {
         .expect("Failed to create wallet");
 
     let result = wallet
-        .store_note(
+        .gen_claim(
             "test".to_string(),
             "0000000000000000000000000000000000000000000000000000000000000001".to_string(),
             "0000000000000000000000000000000000000000000000000000000000000002".to_string(),

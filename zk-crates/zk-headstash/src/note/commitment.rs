@@ -87,6 +87,14 @@ impl ExtractedNoteCommitment {
     }
 }
 
+impl From<cosmwasm_std::Binary> for ExtractedNoteCommitment {
+    fn from(cm: cosmwasm_std::Binary) -> Self {
+        ExtractedNoteCommitment::from_bytes(
+            cm.as_slice().try_into().expect("Invalid commitment bytes"),
+        ).expect("bad cw -> pallas::Base")
+    }
+}
+
 impl From<NoteCommitment> for ExtractedNoteCommitment {
     fn from(cm: NoteCommitment) -> Self {
         ExtractedNoteCommitment(extract_p(&cm.0))

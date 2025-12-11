@@ -382,7 +382,7 @@ mod tests {
             EMPTY_ROOTS[MERKLE_DEPTH_ORCHARD].into(),
         );
         builder
-            .add_output(None, recipient, NoteValue::from_raw(5000), [0u8; 512])
+            .add_output(None, recipient, NoteValue::from(5000), [0u8; 512])
             .unwrap();
         let balance: i64 = builder.value_balance().unwrap();
         assert_eq!(balance, -5000);
@@ -437,7 +437,7 @@ mod tests {
         .unwrap();
 
         // Pretend we already received a note.
-        let value = NoteValue::from_raw(15_000);
+        let value = NoteValue::from(15_000);
         let nd = NoteDenom::new_for_proof("dang jroc");
         let note = {
             let rho = Rho::from_bytes(&pallas::Base::random(&mut rng).to_repr()).unwrap();
@@ -488,13 +488,13 @@ mod tests {
             .add_spend(fvk.clone(), note, merkle_path.into())
             .unwrap();
         builder
-            .add_output(None, recipient, NoteValue::from_raw(10_000), [0u8; 512])
+            .add_output(None, recipient, NoteValue::from(10_000), [0u8; 512])
             .unwrap();
         builder
             .add_output(
                 Some(fvk.to_ovk(Scope::Internal)),
                 fvk.address_at(0u32, Scope::Internal),
-                NoteValue::from_raw(5_000),
+                NoteValue::from(5_000),
                 [0u8; 512],
             )
             .unwrap();

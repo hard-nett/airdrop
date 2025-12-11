@@ -16,7 +16,6 @@ use zk_headstash::keys::{EligiblePk, EligibleSk};
 use zk_headstash::note::ExtractedNoteCommitment;
 use zk_headstash::r#gen::snp::v1::*;
 
-use crate::wallet::NoteData;
 use crate::Error;
 
 /// Plaintext nullifier state for serialization
@@ -26,22 +25,6 @@ pub struct NullifierState {
     pub headstash_id: String,
     /// List of spent notes
     pub spent_notes: Vec<SerializedNoteData>,
-}
-
-impl From<&NoteData> for SerializedNoteData {
-    fn from(note: &NoteData) -> Self {
-        Self {
-            nk: note.nk.to_bytes().to_vec(),
-            nul: note.nullifier.to_bytes().to_vec(),
-            cm: ExtractedNoteCommitment::from(note.commitment.clone())
-                .to_bytes()
-                .to_vec(),
-            v: note.hv.raw_amount().to_string(),
-            nd: note.hv.denom_str().to_string(),
-            fdi: note.fdi,
-            spent: note.spent,
-        }
-    }
 }
 
 /// Encrypt nullifier state for sync
