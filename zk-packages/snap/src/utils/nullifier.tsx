@@ -84,7 +84,7 @@ export async function generateNullifier(
 
   // Store the note to generate nullifier and commitment
   // This calls the Rust generate_note_data function internally
-  await wallet.store_note(
+  await wallet.gen_claim(
     'temp_headstash_id', // Temporary ID, only used for this operation
     eskHex,
     noteInputs.rho,

@@ -1,5 +1,10 @@
 # Circuit Specs
 
+## TLDFR
+
+- each action requires us to constrain the "internal action steps" as math (easy cuz all data in computers are just 1 & 0, and if you split them up (and remember the order) very precisely, letting us form numbers in binary representation, ). **headstash has 3 main internal actions, 1.key-pairing,2.note-merkle-tree-inclusion,3.nullifier/note-commitment integrity**
+-
+
 ## Canonicity Gates
 
 The note-commit circuit uses the Sinsemilla hash function to commit to a note's constituent data (recp, fdi, nd, v, rho, esk, psi). Sinsemilla processes data in 10-bit chunks.
