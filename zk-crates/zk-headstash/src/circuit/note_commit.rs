@@ -84,7 +84,7 @@ impl DecomposeB {
             // b = b0 + (2^1) b1 + (2^5)
             let decomposition_check = b - (b0 + b1.clone() * two_pow_5);
 
-            Constraints::with_selector(q_notecommit_b,[("decomposition", decomposition_check)])
+            Constraints::with_selector(q_notecommit_b, [("decomposition", decomposition_check)])
         });
 
         Self {
@@ -104,23 +104,18 @@ impl DecomposeB {
         v: &AssignedCell<NoteValue, pallas::Base>,
     ) -> Result<
         (
-            NoteCommitPiece, // b
+            NoteCommitPiece,                                                          // b
             RangeConstrained<pallas::Base, AssignedCell<pallas::Base, pallas::Base>>, // b0
-            RangeConstrained<pallas::Base, Value<pallas::Base>>, // b1
+            RangeConstrained<pallas::Base, Value<pallas::Base>>,                      // b1
         ),
         Error,
     > {
         let value_val = v.value().map(|v| pallas::Base::from(v.inner()));
 
         // Constrain b_0 to be 5 bits
-        let b0 = RangeConstrained::witness_short(
-            lc,
-            lo.namespace(|| "b_0"),
-            nd.value(),
-            250..255,
-        )?;
+        let b0 = RangeConstrained::witness_short(lc, lo.namespace(|| "b_0"), nd.value(), 250..255)?;
         let b1 = RangeConstrained::bitrange_of(value_val.value(), 0..55); // 55 v
-         println!("b: {:#?}", (b0.num_bits(), b1.num_bits()));                                                               
+        println!("b: {:#?}", (b0.num_bits(), b1.num_bits()));
         let b = MessagePiece::from_subpieces(
             chip.clone(),
             lo.namespace(|| "piece_b: nd[250..255) || v[0..55)"),
@@ -133,7 +128,7 @@ impl DecomposeB {
         &self,
         lo: &mut impl Layouter<pallas::Base>,
         b: NoteCommitPiece,
-        b0:  RangeConstrained<pallas::Base, AssignedCell<pallas::Base, pallas::Base>>,
+        b0: RangeConstrained<pallas::Base, AssignedCell<pallas::Base, pallas::Base>>,
         b1: RangeConstrained<pallas::Base, Value<pallas::Base>>,
     ) -> Result<AssignedCell<pallas::Base, pallas::Base>, Error> {
         lo.assign_region(
@@ -144,13 +139,13 @@ impl DecomposeB {
                 b.inner()
                     .cell_value()
                     .copy_advice(|| "b", &mut region, self.col_l, 0)?;
-                 // Assign b0 (5 bits from nd[250..255))
+                // Assign b0 (5 bits from nd[250..255))
                 b0.inner()
                     .copy_advice(|| "b0", &mut region, self.col_m, 0)?;
                 // Assign b1 (55 bits from v[0..55))
                 let b1 = region.assign_advice(|| "b1", self.col_r, 0, || *b1.inner())?;
 
-                Ok(  b1)
+                Ok(b1)
             },
         )
     }
@@ -244,7 +239,7 @@ impl DecomposeC {
         c: NoteCommitPiece,
         c0: RangeConstrained<pallas::Base, Value<pasta_curves::Fp>>,
         c1: RangeConstrained<pallas::Base, Value<pallas::Base>>,
-    ) -> Result<AssignedCell<pallas::Base, pallas::Base>, Error> {
+    ) -> Result<[AssignedCell<pallas::Base, pallas::Base>; 2], Error> {
         lo.assign_region(
             || "NoteCommit MessagePiece c: assign",
             |mut region| {
@@ -256,7 +251,7 @@ impl DecomposeC {
                 let c0 = region.assign_advice(|| "c", self.col_m, 0, || *c0.inner())?;
                 let c1 = region.assign_advice(|| "c1", self.col_r, 0, || *c1.inner())?;
 
-                Ok(c1)
+                Ok([c0, c1])
             },
         )
     }
@@ -299,7 +294,7 @@ impl DecomposeD {
             // d = d0 + 2^13 * d1
             let decomposition_check = d - (d0 + d1 * two_pow_13);
 
-            Constraints::with_selector(q_notecommit_d,[("decomposition", decomposition_check)])
+            Constraints::with_selector(q_notecommit_d, [("decomposition", decomposition_check)])
         });
 
         Self {
@@ -342,7 +337,7 @@ impl DecomposeD {
         d0: RangeConstrained<pallas::Base, Value<pallas::Base>>,
         d1: RangeConstrained<pallas::Base, Value<pallas::Base>>,
         z1_d: AssignedCell<pallas::Base, pallas::Base>,
-    ) -> Result<AssignedCell<pallas::Base, pallas::Base>, Error> {
+    ) -> Result<[AssignedCell<pallas::Base, pallas::Base>; 2], Error> {
         lo.assign_region(
             || "NoteCommit MessagePiece d",
             |mut region| {
@@ -351,16 +346,14 @@ impl DecomposeD {
                     .cell_value()
                     .copy_advice(|| "d", &mut region, self.col_l, 0)?;
                 let d0 = region.assign_advice(|| "d0", self.col_m, 0, || *d0.inner())?;
-                region.assign_advice(|| "d1", self.col_r, 0, || *d1.inner())?;
+                let d1 = region.assign_advice(|| "d1", self.col_r, 0, || *d1.inner())?;
                 z1_d.copy_advice(|| "d_3 = z1_d", &mut region, self.col_r, 1)?;
 
-                Ok(d0)
+                Ok([d0, d1])
             },
         )
     }
 }
-
-
 
 #[derive(Clone, Debug)]
 struct DecomposeF {
@@ -384,12 +377,12 @@ impl DecomposeF {
             let q_notecommit_f = meta.query_selector(q_notecommit_f);
             // f is the full 10-bit value
             let f = meta.query_advice(col_l, Rotation::cur());
-            // f0: bits 247..255 of recp (8 bits)  
+            // f0: bits 247..255 of recp (8 bits)
             let f0 = meta.query_advice(col_m, Rotation::cur());
             // f1: bits 0..2 of esk (2 bits)
             let f1 = meta.query_advice(col_r, Rotation::cur());
 
-             // f = f0 + 2^8 * f1
+            // f = f0 + 2^8 * f1
             let decomposition_check = f - (f0 + f1 * two_pow_8);
 
             Constraints::with_selector(q_notecommit_f, Some(("decomposition", decomposition_check)))
@@ -411,7 +404,7 @@ impl DecomposeF {
         esk: &AssignedCell<pallas::Base, pallas::Base>,
     ) -> Result<
         (
-         NoteCommitPiece,
+            NoteCommitPiece,
             [RangeConstrained<pallas::Base, Value<pallas::Base>>; 2],
         ),
         Error,
@@ -419,22 +412,21 @@ impl DecomposeF {
         // Piece f: bits 247..255 of recp (8) || 0..2 of esk (8 + 2 = 10 bits)
         let (f0, f1) = (
             RangeConstrained::bitrange_of(recp.value(), 247..255), // 8
-            RangeConstrained::bitrange_of(esk.value(), 0..2), // 2
-            
+            RangeConstrained::bitrange_of(esk.value(), 0..2),      // 2
         );
-        println!("f: {:#?}",(f0.num_bits(),f1.num_bits()));
-        
-       let f = MessagePiece::from_subpieces(chip.clone(), lo.namespace(|| "f"), [f0,f1])?;
+        println!("f: {:#?}", (f0.num_bits(), f1.num_bits()));
 
-        Ok((f, [f0,f1]))
+        let f = MessagePiece::from_subpieces(chip.clone(), lo.namespace(|| "f"), [f0, f1])?;
+
+        Ok((f, [f0, f1]))
     }
 
     fn assign(
         &self,
         lo: &mut impl Layouter<pallas::Base>,
         f: NoteCommitPiece,
-        f_ranges: [RangeConstrained<pallas::Base, Value<pallas::Base>>; 2],  
-    ) -> Result<AssignedCell<pallas::Base, pallas::Base>, Error> {
+        f_ranges: [RangeConstrained<pallas::Base, Value<pallas::Base>>; 2],
+    ) -> Result<[AssignedCell<pallas::Base, pallas::Base>; 2], Error> {
         lo.assign_region(
             || "NoteCommit MessagePiece e",
             |mut region| {
@@ -442,16 +434,17 @@ impl DecomposeF {
                 // Enable selector on the row
                 self.q_notecommit_f.enable(&mut region, 0)?;
                 // Copy f to col_l
-                f.inner().cell_value().copy_advice(|| "f", &mut region, self.col_l, 0)?;
+                f.inner()
+                    .cell_value()
+                    .copy_advice(|| "f", &mut region, self.col_l, 0)?;
                 // Assign f0 and f1
                 let f0_assigned = region.assign_advice(|| "f0", self.col_m, 0, || *f0.inner())?;
-                region.assign_advice(|| "f1", self.col_r, 0, || *f1.inner())?;
-                Ok(f0_assigned)
+                let f1_assigned = region.assign_advice(|| "f1", self.col_r, 0, || *f1.inner())?;
+                Ok([f0_assigned, f1_assigned])
             },
         )
     }
 }
-
 
 #[derive(Clone, Debug)]
 struct DecomposeH {
@@ -482,7 +475,10 @@ impl DecomposeH {
             let h1 = meta.query_advice(col_r, Rotation::cur());
             // h = h0 + 2^8 * h1
             let decomposition_check = h - (h0 + h1 * two_pow_3);
-            Constraints::with_selector(q_notecommit_h, Some(("h decomposition", decomposition_check)))
+            Constraints::with_selector(
+                q_notecommit_h,
+                Some(("h decomposition", decomposition_check)),
+            )
         });
         Self {
             q_notecommit_h,
@@ -500,7 +496,7 @@ impl DecomposeH {
         rho: &AssignedCell<pallas::Base, pallas::Base>,
     ) -> Result<
         (
-           NoteCommitPiece,
+            NoteCommitPiece,
             [RangeConstrained<pallas::Base, Value<pallas::Base>>; 2],
         ),
         Error,
@@ -508,14 +504,13 @@ impl DecomposeH {
         // Piece h: bits 252..255 of esk (3) || bits 0..7 of rho (7) (7+3 = 10 bits)
         let (h0, h1) = (
             RangeConstrained::bitrange_of(esk.value(), 252..255), //  3 bits
-            RangeConstrained::bitrange_of(rho.value(), 0..7), //  7 bits  
+            RangeConstrained::bitrange_of(rho.value(), 0..7),     //  7 bits
         );
 
-        let h = MessagePiece::from_subpieces(chip.clone(), lo.namespace(|| "h"), [h0,h1])?;
-        println!("h: {:#?}",(h0.num_bits(),h1.num_bits())
-        );
+        let h = MessagePiece::from_subpieces(chip.clone(), lo.namespace(|| "h"), [h0, h1])?;
+        println!("h: {:#?}", (h0.num_bits(), h1.num_bits()));
 
-        Ok((h, [h0, h1,  ]))
+        Ok((h, [h0, h1]))
     }
 
     fn assign(
@@ -527,11 +522,13 @@ impl DecomposeH {
         lo.assign_region(
             || "NoteCommit MessagePiece h",
             |mut region| {
-                   let [h0, h1] = h_ranges;
+                let [h0, h1] = h_ranges;
                 // Enable selector on the row
                 self.q_notecommit_h.enable(&mut region, 0)?;
                 // Copy h to col_l
-                h.inner().cell_value().copy_advice(|| "h", &mut region, self.col_l, 0)?;
+                h.inner()
+                    .cell_value()
+                    .copy_advice(|| "h", &mut region, self.col_l, 0)?;
                 // Assign h0 and h1
                 let h0_cell = region.assign_advice(|| "h0", self.col_m, 0, || *h0.inner())?;
                 let h1_cell = region.assign_advice(|| "h1", self.col_r, 0, || *h1.inner())?;
@@ -562,7 +559,7 @@ impl DecomposeJ {
 
         meta.create_gate("NoteCommit MessagePiece i", |meta| {
             let q_notecommit_j = meta.query_selector(q_notecommit_j);
-     // j is the full 10-bit value
+            // j is the full 10-bit value
             let j = meta.query_advice(col_l, Rotation::cur());
             // j0: bits 247..255 of rho (8 bits)
             let j0 = meta.query_advice(col_m, Rotation::cur());
@@ -570,7 +567,10 @@ impl DecomposeJ {
             let j1 = meta.query_advice(col_r, Rotation::cur());
             // j = j0 + 2^3 * j1
             let decomposition_check = j - (j0 + j1 * two_pow_8);
-            Constraints::with_selector(q_notecommit_j, Some(("j decomposition", decomposition_check)))
+            Constraints::with_selector(
+                q_notecommit_j,
+                Some(("j decomposition", decomposition_check)),
+            )
         });
 
         Self {
@@ -589,24 +589,20 @@ impl DecomposeJ {
         psi: &AssignedCell<pallas::Base, pallas::Base>,
     ) -> Result<
         (
-           NoteCommitPiece,
-            [RangeConstrained<pallas::Base, Value<pallas::Base>>;2],
+            NoteCommitPiece,
+            [RangeConstrained<pallas::Base, Value<pallas::Base>>; 2],
         ),
         Error,
     > {
         // Piece j: bits 247..255 of rho (8) || bits 0..2 of psi (8+2 = 10 bits)
-        let (j0,j1) = (
-            RangeConstrained::bitrange_of(rho.value(),247..255),
-            RangeConstrained::bitrange_of(psi.value(),0..2),
+        let (j0, j1) = (
+            RangeConstrained::bitrange_of(rho.value(), 247..255),
+            RangeConstrained::bitrange_of(psi.value(), 0..2),
         );
-        println!("j: {:#?}",(j0.num_bits(),j1.num_bits()));
-        let j  = MessagePiece::from_subpieces(
-            chip.clone(),
-            lo.namespace(|| "j"),
-            [j0,j1],
-        )?;
+        println!("j: {:#?}", (j0.num_bits(), j1.num_bits()));
+        let j = MessagePiece::from_subpieces(chip.clone(), lo.namespace(|| "j"), [j0, j1])?;
 
-        Ok((j, [j0,j1]))
+        Ok((j, [j0, j1]))
     }
 
     fn assign(
@@ -614,15 +610,17 @@ impl DecomposeJ {
         lo: &mut impl Layouter<pallas::Base>,
         j: NoteCommitPiece,
         j_ranges: [RangeConstrained<pallas::Base, Value<pallas::Base>>; 2], // [j0, j1]
-     ) -> Result<[AssignedCell<pallas::Base, pallas::Base>; 2], Error> {
+    ) -> Result<[AssignedCell<pallas::Base, pallas::Base>; 2], Error> {
         lo.assign_region(
             || "NoteCommit MessagePiece i",
             |mut region| {
-               let [j0, j1] = j_ranges;
+                let [j0, j1] = j_ranges;
                 // Enable selector on the row
                 self.q_notecommit_j.enable(&mut region, 0)?;
                 // Copy j to col_l
-                j.inner().cell_value().copy_advice(|| "j", &mut region, self.col_l, 0)?;
+                j.inner()
+                    .cell_value()
+                    .copy_advice(|| "j", &mut region, self.col_l, 0)?;
                 // Assign j0 and j1
                 let j0_cell = region.assign_advice(|| "j0", self.col_m, 0, || *j0.inner())?;
                 let j1_cell = region.assign_advice(|| "j1", self.col_r, 0, || *j1.inner())?;
@@ -661,7 +659,10 @@ impl DecomposeL {
             let l1 = meta.query_advice(col_r, Rotation::cur());
             // l = l0 + 2^8 * l1
             let decomposition_check = l - (l0 + l1 * two_pow_3);
-            Constraints::with_selector(q_notecommit_l, Some(("l decomposition", decomposition_check)))
+            Constraints::with_selector(
+                q_notecommit_l,
+                Some(("l decomposition", decomposition_check)),
+            )
         });
 
         Self {
@@ -676,33 +677,28 @@ impl DecomposeL {
     fn decompose(
         chip: SinsemillaChip<OrchardHashDomains, OrchardCommitDomains, OrchardFixedBases>,
         lo: &mut impl Layouter<pallas::Base>,
-       
+
         psi: &AssignedCell<pallas::Base, pallas::Base>,
     ) -> Result<
         (
-           NoteCommitPiece,
-            [RangeConstrained<pallas::Base, Value<pallas::Base>>;2],
+            NoteCommitPiece,
+            [RangeConstrained<pallas::Base, Value<pallas::Base>>; 2],
         ),
         Error,
     > {
-    
         // Piece l: bits 252..255 of psi (3 bits) || 7 bit padding (3+7 = 10 bits)
-        let (l0,l1,) = (
-                 RangeConstrained::bitrange_of(psi.value(), 252..255), //  3
-                 RangeConstrained::bitrange_of(Value::known(&pallas::Base::zero()), 0..7), // two bit padding
+        let (l0, l1) = (
+            RangeConstrained::bitrange_of(psi.value(), 252..255), //  3
+            RangeConstrained::bitrange_of(Value::known(&pallas::Base::zero()), 0..7), // two bit padding
         );
 
-        println!("l: {:#?}",(l0.num_bits(),l1.num_bits()));
+        println!("l: {:#?}", (l0.num_bits(), l1.num_bits()));
 
-        let l  = MessagePiece::from_subpieces(
-            chip.clone(),
-            lo.namespace(|| "l"),
-            [l0,l1],
-        )?;
-        Ok((l, [l0,l1]))
+        let l = MessagePiece::from_subpieces(chip.clone(), lo.namespace(|| "l"), [l0, l1])?;
+        Ok((l, [l0, l1]))
     }
 
-   fn assign(
+    fn assign(
         &self,
         lo: &mut impl Layouter<pallas::Base>,
         l: NoteCommitPiece,
@@ -711,11 +707,13 @@ impl DecomposeL {
         lo.assign_region(
             || "NoteCommit MessagePiece i",
             |mut region| {
-              let [l0, l1] = l_ranges;
+                let [l0, l1] = l_ranges;
                 // Enable selector on the row
                 self.q_notecommit_l.enable(&mut region, 0)?;
                 // Copy l to col_l
-                l.inner().cell_value().copy_advice(|| "l", &mut region, self.col_l, 0)?;
+                l.inner()
+                    .cell_value()
+                    .copy_advice(|| "l", &mut region, self.col_l, 0)?;
                 // Assign l0 and l1
                 let l0_cell = region.assign_advice(|| "l0", self.col_m, 0, || *l0.inner())?;
                 let l1_cell = region.assign_advice(|| "l1", self.col_r, 0, || *l1.inner())?;
@@ -747,7 +745,6 @@ impl NdCanonicity {
         col_m: Column<Advice>,
         col_r: Column<Advice>,
         col_z: Column<Advice>,
-        two_pow_130: Expression<pallas::Base>,
         two_pow_250: pallas::Base,
         t_p: Expression<pallas::Base>,
     ) -> Self {
@@ -767,9 +764,11 @@ impl NdCanonicity {
             let z13_a_prime = meta.query_advice(col_z, Rotation::next());
             // Decomposition: nd = a + b0 * 2^250
             let decomposition_check = a.clone() + b0.clone() * two_pow_250 - nd;
-            // a_prime = a + 2^130 - t_P
-            let a_prime_check = a + two_pow_130 - t_p - a_prime;
-            
+
+            // a_prime = a + 2^250 - t_P  ← FIXED: Use 2^250, not 2^130
+            let two_pow_250_expr = Expression::Constant(two_pow_250);
+            let a_prime_check = a + two_pow_250_expr - t_p - a_prime;
+
             // Check if nd >= 2^254 (i.e., b0 >= 2^4)
             let b0_high_bit = b0.clone() - Expression::Constant(pallas::Base::from(16));
 
@@ -817,7 +816,7 @@ impl NdCanonicity {
 
                 b0.inner()
                     .copy_advice(|| "b0", &mut region, self.col_m, 0)?;
-                
+
                 a.inner()
                     .cell_value()
                     .copy_advice(|| "a", &mut region, self.col_r, 0)?;
@@ -832,9 +831,9 @@ impl NdCanonicity {
     }
 }
 
-/// |  A_6  | A_7 | A_8 | A_9 | q_notecommit_v |
-/// -------------------------------------------
-/// | value | c0  | z1_c| b1  |       1        |
+/// |  A_6  | A_7 | A_8 | q_notecommit_v |
+/// ---------------------------------------
+/// | value | b1  | c0  |       1        |
 ///
 #[derive(Clone, Debug)]
 struct ValueCanonicity {
@@ -842,7 +841,6 @@ struct ValueCanonicity {
     col_l: Column<Advice>,
     col_m: Column<Advice>,
     col_r: Column<Advice>,
-    col_z: Column<Advice>,
 }
 
 impl ValueCanonicity {
@@ -851,8 +849,8 @@ impl ValueCanonicity {
         col_l: Column<Advice>,
         col_m: Column<Advice>,
         col_r: Column<Advice>,
-        col_z: Column<Advice>,
-        two_pow_55: pallas::Base,  // 2^55 for c0 (v[0..55), 55 bits)
+
+        two_pow_55: pallas::Base, // 2^55 for c0 (v[0..55), 55 bits)
     ) -> Self {
         let q_notecommit_v = meta.selector();
 
@@ -860,16 +858,13 @@ impl ValueCanonicity {
             let q_notecommit_v = meta.query_selector(q_notecommit_v);
             // full 64 bits of v
             let value = meta.query_advice(col_l, Rotation::cur());
-            // c0 (last 9 bits of v) has been constrained to 9 bits outside this gate (DecomposeC).
-            let c0 = meta.query_advice(col_m, Rotation::cur());
-            // z1_c has been constrained to 50 bits by the Sinsemilla hash (after piece c).
-            // Using result from sinsemilla commit z1_c as proxy for b1 position, applying constraint with field elements
-            let b1_prime = meta.query_advice(col_r, Rotation::cur());
-            // b1 has been constrained to 9 bits outside this gate (DecomposeB).
-            let b1 = meta.query_advice(col_z, Rotation::cur());
+            // b1 (bottom 55 bits of v, bits 0..55) - assigned as witness
+            let b1 = meta.query_advice(col_m, Rotation::cur());
+            // c0 (top 9 bits of v, bits 55..64) - constrained to 9 bits in DecomposeC
+            let c0 = meta.query_advice(col_r, Rotation::cur());
 
-            // value = c0 + (2^55)b1
-            let value_check = c0 + b1_prime * two_pow_55 - value;
+            // value = b1 + 2^55 * c0
+            let value_check = b1 + c0 * two_pow_55 - value;
 
             Constraints::with_selector(q_notecommit_v, Some(("value_check", value_check)))
         });
@@ -879,7 +874,6 @@ impl ValueCanonicity {
             col_l,
             col_m,
             col_r,
-            col_z,
         }
     }
 
@@ -887,21 +881,19 @@ impl ValueCanonicity {
         &self,
         lo: &mut impl Layouter<pallas::Base>,
         value: AssignedCell<NoteValue, pallas::Base>,
-        c0: RangeConstrained<pallas::Base, AssignedCell<pallas::Base, pallas::Base>>, // v[0..55)
-        z1_c: AssignedCell<pallas::Base, pallas::Base>,                               // Sinsemilla after piece c
-        b1: RangeConstrained<pallas::Base, AssignedCell<pallas::Base, pallas::Base>>, // v[55..64)
+        b1: RangeConstrained<pallas::Base, Value<pallas::Base>>, // v[0..55) - 55 bits
+        c0: AssignedCell<pallas::Base, pallas::Base>, // CHANGED: bare AssignedCell instead of RangeConstrained
     ) -> Result<(), Error> {
         lo.assign_region(
             || "NoteCommit input value",
             |mut region| {
+                self.q_notecommit_v.enable(&mut region, 0)?;
                 value.copy_advice(|| "value", &mut region, self.col_l, 0)?;
-                c0.inner()
-                    .copy_advice(|| "c0", &mut region, self.col_m, 0)?;
-                z1_c.copy_advice(|| "b1_prime = z1_c", &mut region, self.col_r, 0)?;
-                b1.inner()
-                    .copy_advice(|| "b1", &mut region, self.col_z, 0)?;
-
-                self.q_notecommit_v.enable(&mut region, 0)
+                // Assign b1 as a witness (it's a Value from bitrange_of)
+                region.assign_advice(|| "b1", self.col_m, 0, || *b1.inner())?;
+                // Copy c0 - no .inner() needed since it's already an AssignedCell
+                c0.copy_advice(|| "c0", &mut region, self.col_r, 0)?;
+                Ok(())
             },
         )
     }
@@ -909,7 +901,7 @@ impl ValueCanonicity {
 
 /// | A_6  | A_7 | A_8 |  q_notecommit_fdi |
 /// --------------------------------------------
-/// | fdi  | c1  |  d0  |        0         |
+/// | fdi  | c1  | d0  |        1         |
 ///
 #[derive(Clone, Debug)]
 struct FdiCanonicity {
@@ -917,7 +909,6 @@ struct FdiCanonicity {
     col_l: Column<Advice>,
     col_m: Column<Advice>,
     col_r: Column<Advice>,
-    col_z: Column<Advice>,
 }
 
 impl FdiCanonicity {
@@ -926,7 +917,6 @@ impl FdiCanonicity {
         col_l: Column<Advice>,
         col_m: Column<Advice>,
         col_r: Column<Advice>,
-        col_z: Column<Advice>,
         two_pow_51: pallas::Base,
     ) -> Self {
         let q_notecommit_fdi = meta.selector();
@@ -951,7 +941,6 @@ impl FdiCanonicity {
             col_l,
             col_m,
             col_r,
-            col_z,
         }
     }
 
@@ -959,18 +948,19 @@ impl FdiCanonicity {
         &self,
         lo: &mut impl Layouter<pallas::Base>,
         fdi: AssignedCell<pallas::Base, pallas::Base>,
-        c1: AssignedCell<pallas::Base, pallas::Base>, // From DecomposeC.assign()[1]
-        d0: AssignedCell<pallas::Base, pallas::Base>, // From DecomposeD.assign()[0]
-        z1_d: AssignedCell<pallas::Base, pallas::Base>,
+        c1: AssignedCell<pallas::Base, pallas::Base>,
+        d0: AssignedCell<pallas::Base, pallas::Base>, // This comes from DecomposeD::assign
     ) -> Result<(), Error> {
         lo.assign_region(
-            || "NoteCommit input value",
+            || "NoteCommit input fdi",
             |mut region| {
+                self.q_notecommit_fdi.enable(&mut region, 0)?;
+
                 fdi.copy_advice(|| "fdi", &mut region, self.col_l, 0)?;
-                c1.copy_advice(|| "c1 (bits 0-50)", &mut region, self.col_m, 0)?;
-                // z1_d.copy_advice(|| "d3 = z1_d", &mut region, self.col_r, 0)?;
-                d0.copy_advice(|| "d0 (bits 51-63)", &mut region, self.col_z, 0)?;
-                self.q_notecommit_fdi.enable(&mut region, 0)
+                c1.copy_advice(|| "c1 (bits 0..51)", &mut region, self.col_m, 0)?;
+                d0.copy_advice(|| "d0 (bits 51..64)", &mut region, self.col_r, 0)?;
+
+                Ok(())
             },
         )
     }
@@ -993,27 +983,23 @@ impl RecpCanonicity {
         col_r: Column<Advice>,
         col_z: Column<Advice>,
         two_pow_7: pallas::Base,
+        two_pow_247: pallas::Base,
     ) -> Self {
         let q_notecommit_recp = meta.selector();
         // recp = bits 0..7 of (d1) || 67..127 of recp (60)  || 127..187 of recp (60)  || 187..247 of recp  (20) || 247..255 recp 8
         meta.create_gate("NoteCommit input value", |meta| {
             let q_notecommit_recp = meta.query_selector(q_notecommit_recp);
 
-            let recp = meta.query_advice(col_l, Rotation::cur()); // full recp row 0
-            let d1 = meta.query_advice(col_m, Rotation::cur()); // row 0: bits 0-6
-            let e0 = meta.query_advice(col_r, Rotation::cur()); // row 0: bits 7-66
-            let e1 = meta.query_advice(col_m, Rotation::next()); // row 1: bits 67-126
-            let e2 = meta.query_advice(col_r, Rotation::next()); // row 1: bits 127-186
-            let e3 = meta.query_advice(col_z, Rotation::cur()); // row 0: bits 187-246 (adjust position if row1)
-
-            let two_pow_60 = pallas::Base::from(1u64 << 60); // or param
-            let two_pow_67 = two_pow_7 * two_pow_60;
-            let two_pow_127 = two_pow_67 * two_pow_60;
-            let two_pow_187 = two_pow_127 * two_pow_60;
-
-            // value = d2 + (2^8)d_3 + (2^58)e_0
-            let recp_check = recp
-                - (d1 + e0 * two_pow_7 + e1 * two_pow_67 + e2 * two_pow_127 + e3 * two_pow_187);
+            // Full 255-bit recp
+            let recp = meta.query_advice(col_l, Rotation::cur());
+            // d1: bits 0..7 of recp (7 bits, from DecomposeD)
+            let d1 = meta.query_advice(col_m, Rotation::cur());
+            // e: bits 7..247 of recp (240 bits, assigned as witness)
+            let e = meta.query_advice(col_r, Rotation::cur());
+            // f0: bits 247..255 of recp (8 bits, from DecomposeF)
+            let f0 = meta.query_advice(col_z, Rotation::cur());
+            // recp = d1 + e * 2^7 + f0 * 2^247
+            let recp_check = d1 + e * two_pow_7 + f0 * two_pow_247 - recp;
 
             Constraints::with_selector(q_notecommit_recp, Some(("recp_check", recp_check)))
         });
@@ -1031,24 +1017,22 @@ impl RecpCanonicity {
         &self,
         lo: &mut impl Layouter<pallas::Base>,
         recp: AssignedCell<pallas::Base, pallas::Base>,
-        d1: AssignedCell<pallas::Base, pallas::Base>,
-        e0: AssignedCell<pallas::Base, pallas::Base>,
-        e1: AssignedCell<pallas::Base, pallas::Base>,
-        e2: AssignedCell<pallas::Base, pallas::Base>,
-        e3: AssignedCell<pallas::Base, pallas::Base>,
+        d1: AssignedCell<pallas::Base, pallas::Base>, // From DecomposeD::assign
+        e: RangeConstrained<pallas::Base, Value<pallas::Base>>, // bitrange_of(recp, 7..247)
+        f0: AssignedCell<pallas::Base, pallas::Base>, // From DecomposeF::assign
     ) -> Result<(), Error> {
         lo.assign_region(
             || "NoteCommit recp canonicity",
             |mut region| {
-                // Row 0
+                self.q_notecommit_recp.enable(&mut region, 0)?;
+
                 recp.copy_advice(|| "recp full", &mut region, self.col_l, 0)?;
-                d1.copy_advice(|| "d1 (0-6)", &mut region, self.col_m, 0)?;
-                e0.copy_advice(|| "e0 (7-66)", &mut region, self.col_r, 0)?;
-                e3.copy_advice(|| "e3 (187-246)", &mut region, self.col_z, 0)?;
-                // Row 1
-                e1.copy_advice(|| "e1 (67-126)", &mut region, self.col_m, 1)?;
-                e2.copy_advice(|| "e2 (127-186)", &mut region, self.col_r, 1)?;
-                self.q_notecommit_recp.enable(&mut region, 0)
+                d1.copy_advice(|| "d1 (bits 0..7)", &mut region, self.col_m, 0)?;
+                // Assign e as witness (it's a Value from bitrange_of)
+                region.assign_advice(|| "e (bits 7..247)", self.col_r, 0, || *e.inner())?;
+                f0.copy_advice(|| "f0 (bits 247..255)", &mut region, self.col_z, 0)?;
+
+                Ok(())
             },
         )
     }
@@ -1056,7 +1040,7 @@ impl RecpCanonicity {
 
 /// | A_6 | A_7 | A_8 | A_9 | q_notecommit_esk |
 /// -------------------------------------------
-/// | esk | e5  |  f  | g0  |       1          |
+/// | esk | f1  |  g  | h0  |       1          |
 #[derive(Clone, Debug)]
 struct EskCanonicity {
     q_notecommit_esk: Selector,
@@ -1074,7 +1058,7 @@ impl EskCanonicity {
         col_r: Column<Advice>,
         col_z: Column<Advice>,
         two_pow_2: pallas::Base,
-        two_pow_252: pallas::Base,
+        two_pow_252: pallas::Base, // FIXED: was two_pow_252
     ) -> Self {
         let q_notecommit_esk = meta.selector();
 
@@ -1082,12 +1066,12 @@ impl EskCanonicity {
             let q_notecommit_esk = meta.query_selector(q_notecommit_esk);
 
             let esk = meta.query_advice(col_l, Rotation::cur());
-            let e5 = meta.query_advice(col_m, Rotation::cur()); // bits 0-1 (piece e5)
-            let f = meta.query_advice(col_r, Rotation::cur()); // bits 2-251 (piece f)
-            let g0 = meta.query_advice(col_z, Rotation::cur()); // bits 252-254 (piece g0)
+            let f1 = meta.query_advice(col_m, Rotation::cur()); // bits 0..2 (2 bits, from DecomposeF)
+            let g = meta.query_advice(col_r, Rotation::cur()); // bits 2..247 (245 bits, assigned as witness)
+            let h0 = meta.query_advice(col_z, Rotation::cur()); // bits 247..255 (8 bits, from DecomposeH)
 
-            // esk = e5 + f * 2^2 + g0 * 2^252
-            let esk_check = esk - (e5 + f * two_pow_2 + g0 * two_pow_252);
+            // esk = f1 + g * 2^2 + h0 * 2^247
+            let esk_check = f1 + g * two_pow_2 + h0 * two_pow_252 - esk;
 
             Constraints::with_selector(q_notecommit_esk, Some(("esk_check", esk_check)))
         });
@@ -1105,23 +1089,22 @@ impl EskCanonicity {
         &self,
         lo: &mut impl Layouter<pallas::Base>,
         esk: AssignedCell<pallas::Base, pallas::Base>,
-        e5: AssignedCell<pallas::Base, pallas::Base>, // e5 cell from DecomposeF
-        f_piece: NoteCommitPiece,                     // piece f
-        g0: AssignedCell<pallas::Base, pallas::Base>, // g0 from DecomposeG
+        f1: AssignedCell<pallas::Base, pallas::Base>, // From DecomposeF::assign (f[1])
+        g: RangeConstrained<pallas::Base, Value<pallas::Base>>, // bitrange_of(esk, 2..247)
+        h0: AssignedCell<pallas::Base, pallas::Base>, // From DecomposeH::assign (h[0])
     ) -> Result<(), Error> {
         lo.assign_region(
             || "NoteCommit esk canonicity",
             |mut region| {
+                self.q_notecommit_esk.enable(&mut region, 0)?;
+
                 esk.copy_advice(|| "esk full", &mut region, self.col_l, 0)?;
-                e5.copy_advice(|| "e5 (bits 0-2)", &mut region, self.col_m, 0)?;
-                f_piece.inner().cell_value().copy_advice(
-                    || "f (bits 2-251)",
-                    &mut region,
-                    self.col_r,
-                    0,
-                )?;
-                g0.copy_advice(|| "g0 (bits 252-255)", &mut region, self.col_z, 0)?;
-                self.q_notecommit_esk.enable(&mut region, 0)
+                f1.copy_advice(|| "f1 (bits 0..2)", &mut region, self.col_m, 0)?;
+                // Assign g as witness (it's a Value from bitrange_of)
+                region.assign_advice(|| "g (bits 2..247)", self.col_r, 0, || *g.inner())?;
+                h0.copy_advice(|| "h0 (bits 247..255)", &mut region, self.col_z, 0)?;
+
+                Ok(())
             },
         )
     }
@@ -1149,55 +1132,23 @@ impl RhoCanonicity {
         col_m: Column<Advice>,
         col_r: Column<Advice>,
         col_z: Column<Advice>,
-        two_pow_57: pallas::Base,
-        two_pow_117: pallas::Base,
-        two_pow_177: pallas::Base,
-        two_pow_237: pallas::Base,
+        two_pow_7: pallas::Base,
         two_pow_247: pallas::Base,
-        t_p: Expression<pallas::Base>,
     ) -> Self {
         let q_notecommit_rho = meta.selector();
 
         meta.create_gate("NoteCommit input rho", |meta| {
             let q_notecommit_rho = meta.query_selector(q_notecommit_rho);
 
-            let rho = meta.query_advice(col_l, Rotation::cur());  // full 255-bit rho
-            
-            // Row 0: g1(0-56,57b), ha(57-116,60b)
-            let g1 = meta.query_advice(col_m, Rotation::cur());
-            let ha = meta.query_advice(col_r, Rotation::cur());
-            
-            // Row 1: hb(117-176,60b), hc(177-236,60b)  
-            let hb = meta.query_advice(col_m, Rotation::next());
-            let hc = meta.query_advice(col_r, Rotation::next());
-            
-            // Row 0: z13_h (sinsemilla proxy for h pieces)
-            let z13_h = meta.query_advice(col_z, Rotation::cur());
-            
-            // Row 2: i0(247-254,8b) - high bit proxy
-            let i0 = meta.query_advice(col_m, Rotation(2));
+            let rho = meta.query_advice(col_l, Rotation::cur()); // full 255-bit rho
+            let h1 = meta.query_advice(col_m, Rotation::cur()); // bits 0..7 (7 bits, from DecomposeH)
+            let i = meta.query_advice(col_r, Rotation::cur()); // bits 7..247 (240 bits, assigned as witness)
+            let j0 = meta.query_advice(col_z, Rotation::cur()); // bits 247..255 (8 bits, from DecomposeJ)
 
-            // Full decomposition: rho = g1 + ha*2^57 + hb*2^117 + hc*2^177 + hd*2^237 + i0*2^247
-            let decomposition_check = rho - (
-                g1 + 
-                ha * two_pow_57 +
-                hb * two_pow_117 + 
-                hc * two_pow_177 +
-                z13_h.clone() * two_pow_237 +  // proxy for hd
-                i0.clone() * two_pow_247
-            );
+            // rho = h1 + i * 2^7 + j0 * 2^247
+            let rho_check = h1 + i * two_pow_7 + j0 * two_pow_247 - rho;
 
-            // e1_f_prime = e_1 + (2^4)f + 2^140 - t_P
-            // let e1_f_prime_check = g1 + (f * two_pow_4) + two_pow_140 - t_p - e1_f_prime;
-                // Conditional canonicity: if i0 msb=1 then z13_h=0 (high bits canonical)
-            let i0_msb = i0.clone() - Expression::Constant(pallas::Base::from(128u64));  
-            let canonicity_check = i0_msb * z13_h;
-
-
-            Constraints::with_selector(q_notecommit_rho, [
-                ("decomposition", decomposition_check),
-                ("i0_msb => z13_h=0", canonicity_check),
-            ])
+            Constraints::with_selector(q_notecommit_rho, Some(("rho_check", rho_check)))
         });
 
         Self {
@@ -1214,29 +1165,21 @@ impl RhoCanonicity {
         &self,
         lo: &mut impl Layouter<pallas::Base>,
         rho: AssignedCell<pallas::Base, pallas::Base>,
-        g1_cell: AssignedCell<pallas::Base, pallas::Base>,  // DecomposeG g1
-        ha_cell: AssignedCell<pallas::Base, pallas::Base>, // DecomposeH ha
-        hb_cell: AssignedCell<pallas::Base, pallas::Base>, // DecomposeH hb  
-        hc_cell: AssignedCell<pallas::Base, pallas::Base>, // DecomposeH hc
-        z13_h: AssignedCell<pallas::Base, pallas::Base>,   // sinsemilla zs[13] for h
-        i0_cell: AssignedCell<pallas::Base, pallas::Base>, // DecomposeJ i0
+        h1: AssignedCell<pallas::Base, pallas::Base>, // From DecomposeH::assign (h[1])
+        i: RangeConstrained<pallas::Base, Value<pallas::Base>>, // bitrange_of(rho, 7..247)
+        j0: AssignedCell<pallas::Base, pallas::Base>, // From DecomposeJ::assign (j[0])
     ) -> Result<(), Error> {
-        lo.assign_region(|| "NoteCommit rho canonicity", |mut region| {
-            // Row 0
-            rho.copy_advice(|| "rho full", &mut region, self.col_l, 0)?;
-            g1_cell.copy_advice(|| "g1 (0-56)", &mut region, self.col_m, 0)?;
-            ha_cell.copy_advice(|| "ha (57-116)", &mut region, self.col_r, 0)?;
-            z13_h.copy_advice(|| "z13_h", &mut region, self.col_z, 0)?;
-            
-            // Row 1
-            hb_cell.copy_advice(|| "hb (117-176)", &mut region, self.col_m, 1)?;
-            hc_cell.copy_advice(|| "hc (177-236)", &mut region, self.col_r, 1)?;
-            
-            // Row 2  
-            i0_cell.copy_advice(|| "i0 (247-254)", &mut region, self.col_m, 2)?;
-            
-            self.q_notecommit_rho.enable(&mut region, 0)
-        })
+        lo.assign_region(
+            || "NoteCommit rho canonicity",
+            |mut region| {
+                rho.copy_advice(|| "rho full", &mut region, self.col_l, 0)?;
+                h1.copy_advice(|| "h1 (bits 0..7)", &mut region, self.col_m, 0)?;
+                region.assign_advice(|| "i (bits 7..247)", self.col_r, 0, || *i.inner())?;
+                j0.copy_advice(|| "j0 (bits 247..255)", &mut region, self.col_z, 0)?;
+
+                self.q_notecommit_rho.enable(&mut region, 0)
+            },
+        )
     }
 }
 
@@ -1262,42 +1205,23 @@ impl PsiCanonicity {
         col_m: Column<Advice>,
         col_r: Column<Advice>,
         col_z: Column<Advice>,
-      two_pow_2: pallas::Base,
+        two_pow_2: pallas::Base,
         two_pow_252: pallas::Base,
-        t_p: Expression<pallas::Base>,
     ) -> Self {
         let q_notecommit_psi = meta.selector();
 
         meta.create_gate("NoteCommit input psi", |meta| {
-      let q_notecommit_psi = meta.query_selector(q_notecommit_psi);
+            let q_notecommit_psi = meta.query_selector(q_notecommit_psi);
 
-            let psi = meta.query_advice(col_l, Rotation::cur());  // full 255-bit psi
-            
-            // Row 0: i1(0-1,2bits), i2(2-251,250bits)
-            let i1 = meta.query_advice(col_m, Rotation::cur());
-            let i2 = meta.query_advice(col_r, Rotation::cur());
-            
-            // Row 1: i3(252-254,3bits) - high bit proxy
-            let i3 = meta.query_advice(col_m, Rotation::next());
-            
-            // Row 0: z13_i (sinsemilla proxy for i pieces)
-            let z13_i = meta.query_advice(col_z, Rotation::cur());
+            let psi = meta.query_advice(col_l, Rotation::cur()); // full 255-bit psi
+            let j1 = meta.query_advice(col_m, Rotation::cur()); // bits 0..2 (2 bits, from DecomposeJ)
+            let k = meta.query_advice(col_r, Rotation::cur()); // bits 2..252 (250 bits, assigned as witness)
+            let l0 = meta.query_advice(col_z, Rotation::cur()); // bits 252..255 (3 bits, from DecomposeL)
 
-            // psi = i1 + i2 * 2^2 + i3 * 2^252
-            let decomposition_check = psi - (
-                i1 + 
-                i2 * two_pow_2 + 
-                i3.clone() * two_pow_252
-            );
+            // psi = j1 + k * 2^2 + l0 * 2^252
+            let psi_check = j1 + k * two_pow_2 + l0 * two_pow_252 - psi;
 
-            // Conditional canonicity: if i3 msb=1 then z13_i=0 (high bits canonical)
-            let i3_msb = i3.clone() - Expression::Constant(pallas::Base::from(4u64));  // i3 >= 4 (msb set)
-            let canonicity_check = i3_msb * z13_i;
-
-            Constraints::with_selector(q_notecommit_psi, [
-                ("decomposition", decomposition_check),
-                ("i3_msb => z13_i=0", canonicity_check),
-            ])
+            Constraints::with_selector(q_notecommit_psi, Some(("psi_check", psi_check)))
         });
 
         Self {
@@ -1309,28 +1233,28 @@ impl PsiCanonicity {
         }
     }
 
-    #[allow(clippy::too_many_arguments)]
     fn assign(
         &self,
         lo: &mut impl Layouter<pallas::Base>,
         psi: AssignedCell<pallas::Base, pallas::Base>,
-        i1_cell: AssignedCell<pallas::Base, pallas::Base>,  // DecomposeJ i1 (0-1)
-        i2_cell: AssignedCell<pallas::Base, pallas::Base>,  // DecomposeJ i2 (2-251)
-        i3_cell: AssignedCell<pallas::Base, pallas::Base>,  // DecomposeJ i3 (252-254)
-        z13_i: AssignedCell<pallas::Base, pallas::Base>,    // sinsemilla zs[13] for i pieces
+        j1: AssignedCell<pallas::Base, pallas::Base>, // From DecomposeJ::assign (j[1])
+        k: RangeConstrained<pallas::Base, Value<pallas::Base>>, // bitrange_of(psi, 2..252)
+        l0: AssignedCell<pallas::Base, pallas::Base>, // From DecomposeL::assign (l[0])
     ) -> Result<(), Error> {
-        lo.assign_region(|| "NoteCommit psi canonicity", |mut region| {
-            // Row 0
-            psi.copy_advice(|| "psi full", &mut region, self.col_l, 0)?;
-            i1_cell.copy_advice(|| "i1 (0-1)", &mut region, self.col_m, 0)?;
-            i2_cell.copy_advice(|| "i2 (2-251)", &mut region, self.col_r, 0)?;
-            z13_i.copy_advice(|| "z13_i", &mut region, self.col_z, 0)?;
-            
-            // Row 1
-            i3_cell.copy_advice(|| "i3 (252-254)", &mut region, self.col_m, 1)?;
-            
-            self.q_notecommit_psi.enable(&mut region, 0)
-        })
+        lo.assign_region(
+            || "NoteCommit psi canonicity",
+            |mut region| {
+                self.q_notecommit_psi.enable(&mut region, 0)?;
+
+                psi.copy_advice(|| "psi full", &mut region, self.col_l, 0)?;
+                j1.copy_advice(|| "j1 (bits 0..2)", &mut region, self.col_m, 0)?;
+                // Assign k as witness (it's a Value from bitrange_of)
+                region.assign_advice(|| "k (bits 2..252)", self.col_r, 0, || *k.inner())?;
+                l0.copy_advice(|| "l0 (bits 252..255)", &mut region, self.col_z, 0)?;
+
+                Ok(())
+            },
+        )
     }
 }
 
@@ -1346,11 +1270,11 @@ pub struct NoteCommitConfig {
     l: DecomposeL,
     nd: NdCanonicity,
     v: ValueCanonicity,
-    // fdi: FdiCanonicity,
-    // recp: RecpCanonicity,
-    // esk: EskCanonicity,
-    // rho: RhoCanonicity,
-    // psi: PsiCanonicity,
+    fdi: FdiCanonicity,
+    recp: RecpCanonicity,
+    esk: EskCanonicity,
+    rho: RhoCanonicity,
+    psi: PsiCanonicity,
     advices: [Column<Advice>; 10],
     sinsemilla_config:
         SinsemillaConfig<OrchardHashDomains, OrchardCommitDomains, OrchardFixedBases>,
@@ -1376,37 +1300,30 @@ impl NoteCommitChip {
         // Useful constants
         let two = pallas::Base::from(2);
         let two_pow_2 = pallas::Base::from(1 << 2);
-        let two_pow_3: pasta_curves::Fp =  two_pow_2 * two;
+        let two_pow_3: pasta_curves::Fp = two_pow_2 * two;
         let two_pow_4 = two_pow_2.square();
         let two_pow_5 = two_pow_4 * two;
         let two_pow_8 = two_pow_4.square();
+        let two_pow_7 = pallas::Base::from(1 << 7);
         let two_pow_9 = two_pow_8 * two;
         let two_pow_13 = pallas::Base::from(1 << 13);
-        // let two = pallas::Base::from(2);
-        // let two_pow_2 = pallas::Base::from(1 << 2);
-        // let two_pow_3: pasta_curves::Fp =  two_pow_2 * two;
-        // let two_pow_4 = two_pow_2.square();
-        // let two_pow_5 = two_pow_4 * two;
-        // let two_pow_6 = two_pow_5 * two;
-        // let two_pow_7 = two_pow_6 * two;
-        // let two_pow_8 = two_pow_4.square();
-        // let two_pow_9 = two_pow_8 * two;
         // let two_pow_10 = two_pow_9 * two;
         // let two_pow_13 = pallas::Base::from(1 << 13);
-        // let two_pow_51 = pallas::Base::from(1 << 51);
+        let two_pow_51 = pallas::Base::from(1 << 51);
         let two_pow_55 = pallas::Base::from(1 << 55);
-        // let two_pow_57  = pallas::Base::from(1 << 57);
+        let two_pow_57 = pallas::Base::from(1 << 57);
+        let two_pow_60 = pallas::Base::from(1 << 60);
         // let two_pow_58 = pallas::Base::from(1 << 58);
-        // let two_pow_60 = pallas::Base::from(1 << 60);
         // let two_pow_117 = two_pow_57.square() * two_pow_3;
         let two_pow_130 = Expression::Constant(pallas::Base::from_u128(1 << 65).square());
-        // let two_pow_140 = Expression::Constant(pallas::Base::from_u128(1 << 70).square());9=
+        let two_pow_120 = two_pow_60.square();
+        let two_pow_240 = two_pow_120.square();
         // let two_pow_177 = two_pow_117 * two_pow_60;
         // let two_pow_237 = two_pow_177 * two_pow_60;
-        // let two_pow_247 = two_pow_237 * two_pow_10;
+        let two_pow_247 = two_pow_240 * two_pow_7;
         let two_pow_249 = pallas::Base::from_u128(1 << 124).square() * two;
         let two_pow_250 = two_pow_249 * two;
-        // let two_pow_252 = two_pow_250 * two_pow_2;
+        let two_pow_252 = two_pow_250 * two_pow_2;
         // let two_pow_254 = pallas::Base::from_u128(1 << 127).square();
 
         let t_p = Expression::Constant(pallas::Base::from_u128(T_P));
@@ -1420,10 +1337,10 @@ impl NoteCommitChip {
         let b = DecomposeB::configure(meta, col_l, col_m, col_r, two_pow_5);
         let c = DecomposeC::configure(meta, col_l, col_m, col_r, two_pow_9);
         let d = DecomposeD::configure(meta, col_l, col_m, col_r, two_pow_13);
-        let f = DecomposeF::configure(meta, col_l, col_m, col_r, two_pow_3);
-        let h = DecomposeH::configure(meta, col_l, col_m, col_r, two_pow_8);
-        let j = DecomposeJ::configure(meta, col_l, col_m, col_r, two_pow_3);
-        let l = DecomposeL::configure(meta, col_l, col_m, col_r, two_pow_8);
+        let f = DecomposeF::configure(meta, col_l, col_m, col_r, two_pow_8);
+        let h = DecomposeH::configure(meta, col_l, col_m, col_r, two_pow_3);
+        let j = DecomposeJ::configure(meta, col_l, col_m, col_r, two_pow_8);
+        let l = DecomposeL::configure(meta, col_l, col_m, col_r, two_pow_3);
 
         let nd = NdCanonicity::configure(
             meta,
@@ -1431,40 +1348,22 @@ impl NoteCommitChip {
             col_m,
             col_r,
             col_z,
-            two_pow_130.clone(),
             two_pow_250.clone(),
             t_p.clone(),
         );
-        
-        let v = ValueCanonicity::configure(meta, col_l, col_m, col_r, col_z, two_pow_55);
-        // let fdi = FdiCanonicity::configure(meta, col_l, col_m, col_r, col_z, two_pow_51);
-        // let recp = RecpCanonicity::configure(meta, col_l, col_m, col_r, col_z, two_pow_7);
-        // let esk = EskCanonicity::configure(meta, col_l, col_m, col_r, col_z, two_pow_8, two_pow_58);
 
-        // let rho = RhoCanonicity::configure(
-        //     meta,
-        //     col_l,
-        //     col_m,
-        //     col_r,
-        //     col_z,
-        //     two_pow_57,
-        //     two_pow_117.clone(),
-        //     two_pow_177,
-        //     two_pow_237,
-        //     two_pow_247,
-        //     t_p.clone(),
-        // );
+        let v = ValueCanonicity::configure(meta, col_l, col_m, col_r, two_pow_55);
+        let fdi = FdiCanonicity::configure(meta, col_l, col_m, col_r, two_pow_51);
+        let recp =
+            RecpCanonicity::configure(meta, col_l, col_m, col_r, col_z, two_pow_7, two_pow_247);
+        let esk =
+            EskCanonicity::configure(meta, col_l, col_m, col_r, col_z, two_pow_2, two_pow_252);
 
-        // let psi = PsiCanonicity::configure(
-        //     meta,
-        //     col_l,
-        //     col_m,
-        //     col_r,
-        //     col_z,
-        //  two_pow_2,
-        //   two_pow_252,
-        //     t_p.clone(),
-        // );
+        let rho =
+            RhoCanonicity::configure(meta, col_l, col_m, col_r, col_z, two_pow_7, two_pow_247);
+
+        let psi =
+            PsiCanonicity::configure(meta, col_l, col_m, col_r, col_z, two_pow_2, two_pow_252);
 
         NoteCommitConfig {
             b,
@@ -1476,11 +1375,11 @@ impl NoteCommitChip {
             l,
             nd,
             v,
-            // fdi,
-            // recp,
-            // rho,
-            // esk,
-            // psi,
+            fdi,
+            recp,
+            esk,
+            rho,
+            psi,
             advices,
             sinsemilla_config,
         }
@@ -1528,42 +1427,36 @@ pub(in crate::circuit) mod gadgets {
         // Piece b: bits 250..255 of nd || 0..55 of v  (5 + 55 = 60 bits)
         let (b, b0, b1) = DecomposeB::decompose(&lc, chip.clone(), &mut lo, &nd, &v)?;
         // Piece c: bits 55-64 of v || 0-51 of fdi  (9 + 51 = 60 bits)
-        let (c, c0, c1) = DecomposeC::decompose( chip.clone(), &mut lo, &v, &fdi)?;
+        let (c, c0, c1) = DecomposeC::decompose(chip.clone(), &mut lo, &v, &fdi)?;
         // Piece d: bits  51-64 of fdi || 0..7 of recp (13 + 7 = 20 bits)
-        let (d, d0, d1) = DecomposeD::decompose( chip.clone(), &mut lo, &fdi, &recp)?;
-        // Piece e:  bits 7..247 of recp (240 bits) 
-        let e  = MessagePiece::from_subpieces(
+        let (d, d0, d1) = DecomposeD::decompose(chip.clone(), &mut lo, &fdi, &recp)?;
+        // Piece e:  bits 7..247 of recp (240 bits)
+        // First, create and save the value for e
+        let e_value = RangeConstrained::bitrange_of(recp.value(), 7..247);
+        let e = MessagePiece::from_subpieces(
             chip.clone(),
             lo.namespace(|| "piece_e: recp[7..247)"),
-            [RangeConstrained::bitrange_of(recp.value(), 7..247)],
+            [e_value],
         )?;
         // Piece f:  bits 247..255 of recp (8) || 0..2 of esk (8 + 2 = 10 bits)
-        let (f, [f0, f1]) = DecomposeF::decompose(chip.clone(), &mut lo, &recp,&esk)?;
+        let (f, [f0, f1]) = DecomposeF::decompose(chip.clone(), &mut lo, &recp, &esk)?;
         // Piece g: bits 2..252 of esk (250 bits)
-        let g  = MessagePiece::from_subpieces(
-            chip.clone(),
-            lo.namespace(|| "g: "),
-            [RangeConstrained::bitrange_of(esk.value(), 2..252)],
-        )?;
+        let g_value = RangeConstrained::bitrange_of(esk.value(), 2..252);
+        let g = MessagePiece::from_subpieces(chip.clone(), lo.namespace(|| "g: "), [g_value])?;
         // Piece h: bits 252..255 of esk (3) || bits 0..7 of rho (7) (7+3 = 10 bits)
-        let (h, [h0, h1, ]) = DecomposeH::decompose(chip.clone(), &mut lo, &esk,&rho)?;
+        let (h, [h0, h1]) = DecomposeH::decompose(chip.clone(), &mut lo, &esk, &rho)?;
         // Piece i: bits 7..247 of rho (240 bits)
-        let i  = MessagePiece::from_subpieces(
-            chip.clone(),
-            lo.namespace(|| "g: "),
-            [RangeConstrained::bitrange_of(rho.value(), 7..247)],
-        )?;
+        // Save the value for canonicity check
+        let i_value = RangeConstrained::bitrange_of(rho.value(), 7..247);
+        let i = MessagePiece::from_subpieces(chip.clone(), lo.namespace(|| "g: "), [i_value])?;
         // Piece j: bits 247..255 of rho (8) || bits 0..2 of psi (8+2 = 10 bits)
-        let (j, [j0,j1]) = DecomposeJ::decompose(chip.clone(), &mut lo, &rho,&psi)?;
+        let (j, [j0, j1]) = DecomposeJ::decompose(chip.clone(), &mut lo, &rho, &psi)?;
         // Piece k: bits 2..252 psi
-        let k  = MessagePiece::from_subpieces(
-            chip.clone(),
-            lo.namespace(|| "k"),
-            [ RangeConstrained::bitrange_of(psi.value(), 2..252)],
-        )?;
+        let k_value = RangeConstrained::bitrange_of(psi.value(), 2..252);
+        let k = MessagePiece::from_subpieces(chip.clone(), lo.namespace(|| "k"), [k_value])?;
         // Piece l: bits 252..255 of psi (3 bits) || 7 bit padding (3+7 = 10 bits)
-        let (l, [l0,l1]) = DecomposeL::decompose(chip.clone(), &mut lo, &psi)?;
- 
+        let (l, [l0, l1]) = DecomposeL::decompose(chip.clone(), &mut lo, &psi)?;
+
         println!("Message pieces:");
         println!("a: {:?}", a);
         println!("b: {:?}", b);
@@ -1591,7 +1484,7 @@ pub(in crate::circuit) mod gadgets {
         println!("l0: {:?}", l0);
         println!("l1: {:?}", l1);
         println!("l: {:?}", l);
-      
+
         // cm = NoteCommit^Headstash_rcm( nd || i2lebsp_{64}(v) || i2lebsp_{64}(fdi) || recp || esk  || rho || psi )
         //
         // `cm = ⊥` is handled internally to `CommitDomain::commit`: incomplete addition
@@ -1635,7 +1528,7 @@ pub(in crate::circuit) mod gadgets {
         println!("zs[9]:{:#?}", zs[9].len());
         println!("zs[10]:{:#?}", zs[10].len());
         println!("zs[11]:{:#?}", zs[11].len());
- 
+
         // `CommitDomain::commit` returns the running sum for each `MessagePiece`. Grab
         // the outputs that we will need for canonicity checks.
 
@@ -1643,43 +1536,42 @@ pub(in crate::circuit) mod gadgets {
 
         // ===== ND CANONICITY (piece a, b) =====
         // Piece a: nd[0..250) = 250 bits = 25 ten-bit words → zs[0] has 26 elements
-        let z13_a = zs[0][13].clone();  // Midpoint check for nd's low 250 bits
-        let z25_a = zs[0][24].clone();  // End of piece a
-        // ===== VALUE CANONICITY (piece b, c) =====
-        // Piece b: nd[250..255) || v[0..55) = 60 bits = 6 words → zs[1] has 7 elements
-        let z1_b = zs[1][1].clone();    // After first word boundary in piece b
-        let z6_b = zs[1][5].clone();    // End of piece b (end of v's low 55 bits)
-        // Piece c: v[55..64) || fdi[0..51) = 60 bits = 6 words → zs[2] has 7 elements  
-        let z1_c = zs[2][1].clone();    // After v[55..64) completes (9 bits → in first word)
-        let z6_c = zs[2][5].clone();    // End of piece c
-        // ===== FDI CANONICITY (piece c, d) =====
-        // Piece d: fdi[51..64) || recp[0..7) = 20 bits = 2 words → zs[3] has 3 elements
-        let z1_d = zs[3][0].clone();    // After fdi[51..64) completes (13 bits → in second word)
-        let z2_d = zs[3][1].clone();    // End of piece d
-        // ===== RECP CANONICITY (piece d, e, f) =====
-        // Piece e: recp[7..247) = 240 bits = 24 words → zs[4] has 25 elements
-        let z13_e = zs[4][13].clone();  // Midpoint check for recp middle bits
-        let z24_e = zs[4][23].clone();  // End of piece e
-        // Piece f: recp[247..255) || esk[0..2) = 10 bits = 1 word → zs[5] has 2 elements
-        let z1_f = zs[5][0].clone();    // End of piece f (completes recp high 8 bits)
-        // ===== ESK CANONICITY (piece f, g, h) =====
-        // Piece g: esk[2..247) = 245 bits = 24.5 words → zs[6] has 25 or 26 elements (check actual)
-        let z13_g = zs[6][13].clone();  // Midpoint check for esk middle bits
-        let z24_g = zs[6][24].clone();  // Near end of piece g
-        // Piece h: esk[247..255) || rho[0..2) = 10 bits = 1 word → zs[7] has 2 elements
-        let z1_h = zs[7][0].clone();    // End of piece h (completes esk high 8 bits)
-        // ===== RHO CANONICITY (piece h, i, j) =====
-        // Piece i: rho[2..252) = 250 bits = 25 words → zs[8] has 26 elements
-        let z13_i = zs[8][13].clone();  // Midpoint check for rho middle bits
-        let z25_i = zs[8][23].clone();  // End of piece i
-        // Piece j: rho[252..255) || psi[0..7) = 10 bits = 1 word → zs[9] has 2 elements
-        let z1_j = zs[9][0].clone();    // End of piece j (completes rho high 3 bits)
-        // ===== PSI CANONICITY (piece j, k, l) =====
-        // Piece k: psi[7..247) = 240 bits = 24 words → zs[10] has 25 elements
+        let z13_a = zs[0][13].clone(); // Midpoint check for nd's low 250 bits
+        let z25_a = zs[0][24].clone(); // End of piece a
+                                       // ===== VALUE CANONICITY (piece b, c) =====
+                                       // Piece b: nd[250..255) || v[0..55) = 60 bits = 6 words → zs[1] has 7 elements
+        let z1_b = zs[1][1].clone(); // After first word boundary in piece b
+        let z6_b = zs[1][5].clone(); // End of piece b (end of v's low 55 bits)
+                                     // Piece c: v[55..64) || fdi[0..51) = 60 bits = 6 words → zs[2] has 7 elements
+        let z1_c = zs[2][1].clone(); // After v[55..64) completes (9 bits → in first word)
+        let z6_c = zs[2][5].clone(); // End of piece c
+                                     // ===== FDI CANONICITY (piece c, d) =====
+                                     // Piece d: fdi[51..64) || recp[0..7) = 20 bits = 2 words → zs[3] has 3 elements
+        let z1_d = zs[3][0].clone(); // After fdi[51..64) completes (13 bits → in second word)
+        let z2_d = zs[3][1].clone(); // End of piece d
+                                     // ===== RECP CANONICITY (piece d, e, f) =====
+                                     // Piece e: recp[7..247) = 240 bits = 24 words → zs[4] has 25 elements
+        let z13_e = zs[4][13].clone(); // Midpoint check for recp middle bits
+        let z24_e = zs[4][23].clone(); // End of piece e
+                                       // Piece f: recp[247..255) || esk[0..2) = 10 bits = 1 word → zs[5] has 2 elements
+        let z1_f = zs[5][0].clone(); // End of piece f (completes recp high 8 bits)
+                                     // ===== ESK CANONICITY (piece f, g, h) =====
+                                     // Piece g: esk[2..247) = 245 bits = 24.5 words → zs[6] has 25 or 26 elements (check actual)
+        let z13_g = zs[6][13].clone(); // Midpoint check for esk middle bits
+        let z24_g = zs[6][24].clone(); // Near end of piece g
+                                       // Piece h: esk[247..255) || rho[0..2) = 10 bits = 1 word → zs[7] has 2 elements
+        let z1_h = zs[7][0].clone(); // End of piece h (completes esk high 8 bits)
+                                     // ===== RHO CANONICITY (piece h, i, j) =====
+                                     // Piece i: rho[2..252) = 250 bits = 25 words → zs[8] has 26 elements
+        let z13_i = zs[8][13].clone(); // Midpoint check for rho middle bits
+        let z25_i = zs[8][23].clone(); // End of piece i
+                                       // Piece j: rho[252..255) || psi[0..7) = 10 bits = 1 word → zs[9] has 2 elements
+        let z1_j = zs[9][0].clone(); // End of piece j (completes rho high 3 bits)
+                                     // Piece k: psi[7..247) = 240 bits = 24 words → zs[10] has 25 elements
         let z13_k = zs[10][13].clone(); // Midpoint check for psi middle bits
         let z24_k = zs[10][24].clone(); // End of piece k
-        // Piece l: psi[247..255) || padding(2) = 10 bits = 1 word → zs[11] has 2 elements
-        let z1_l = zs[11][0].clone();   // End of piece l (completes psi high 8 bits)
+                                        // Piece l: psi[247..255) || padding(2) = 10 bits = 1 word → zs[11] has 2 elements
+        let z1_l = zs[11][0].clone(); // End of piece l (completes psi high 8 bits)
 
         println!("Running sums:");
         // ===== ND CANONICITY =====
@@ -1716,72 +1608,75 @@ pub(in crate::circuit) mod gadgets {
             lo.namespace(|| "nd canonicity"),
             a.inner().cell_value(),
         )?;
-        
+
         // Check decomposition of v (b1, c0)
-        let (b1_c0_prime, z6_b1_c0_prime) = v_canonicity(
-            &lc,
-            lo.namespace(|| "v canonicity"),
-            b1.clone(),
-            c0.clone(),
-        )?;
-        
+        let (b1_c0_prime, z6_b1_c0_prime) =
+            v_canonicity(&lc, lo.namespace(|| "v canonicity"), b1.clone(), c0.clone())?;
+
         // Check decomposition of fdi (c1,d0)
         let (c1_d0_prime, z6_c1_d0_prime) = fdi_canonicity(
             &lc,
-            lo.namespace(|| "fdi canonicity"),  // Also updated namespace for clarity
+            lo.namespace(|| "fdi canonicity"),
             c1.clone(),
             d0.clone(),
         )?;
-                
-        
+
         // Check decomposition of recp (d1,e,f0)
         let (e1_f_prime, z14_e1_f_prime) = recp_canonicity(
             &lc,
             lo.namespace(|| "v canonicity"),
-         d1.clone(),e.inner().cell_value(),f0.clone()
+            d1.clone(),
+            e.inner().cell_value(),
+            f0.clone(),
         )?;
-        
+
         // Check decomposition of esk (f1,g,h0)
         let (esk_prime, z25_esk) = esk_canonicity(
-            &lc, lo.namespace(|| "esk canonicity"), 
-            f1.clone(), g.inner().cell_value(), h0.clone(),
+            &lc,
+            lo.namespace(|| "esk canonicity"),
+            f1.clone(),
+            g.inner().cell_value(),
+            h0.clone(),
         )?;
 
         // Check decomposition of rho (h1,i,j0)
         let (rho_prime, z25_rho) = rho_canonicity(
-            &lc, lo.namespace(|| "rho canonicity"), 
-            h1.clone(), i.inner().cell_value(), j0.clone(),
+            &lc,
+            lo.namespace(|| "rho canonicity"),
+            h1.clone(),
+            i.inner().cell_value(),
+            j0.clone(),
         )?;
 
         // Check decomposition of psi (j1, k, l0)
         let (psi_prime, z25_psi) = psi_canonicity(
-            &lc, lo.namespace(|| "psi canonicity"), 
-            j1.clone(), k.inner().cell_value(), l0.clone(),
+            &lc,
+            lo.namespace(|| "psi canonicity"),
+            j1.clone(),
+            k.inner().cell_value(),
+            l0.clone(),
         )?;
 
         // Finally, assign vs to all of the NoteCommit regions.
         let cfg = note_commit_chip.config;
 
-        // let b1 = cfg.b.assign(&mut lo, b, b0.clone(), b1)?;
-        // let c1 = cfg.c.assign(&mut lo, c, c0.clone(), c1)?;
-        // let d = cfg.d.assign(&mut lo, d, d0, d1, z1_d)?;
-        // let e = cfg
-        //     .e
-        //     .assign(&mut lo, [ea, eb, ec, ed, ee], [e0, e1, e2, e3, e4, e5])?;
- 
-        // let g = cfg.g.assign(&mut lo,   g,g0,g1)?;
-        // let h = cfg.h.assign(&mut lo,   [ha, hb, hc, hd],[h0, h1, h2, h3])?;
-        // let i = cfg.i.assign(&mut lo, [ia,ib,ic], [i0, i1, i2, i3, i4])?;
-        // cfg.nd
-        //     .assign(&mut lo, &nd, a, b0, b1,a_prime, z13_a, z13_a_prime)?;
-        // cfg.v.assign(&mut lo, v, c0, z, b1)?;
+        let b_1 = cfg.b.assign(&mut lo, b, b0.clone(), b1)?;
+        let [c0, c1] = cfg.c.assign(&mut lo, c, c0.clone(), c1)?;
+        let [d0, d1] = cfg.d.assign(&mut lo, d, d0, d1, z1_d)?;
+        let [f0, f1] = cfg.f.assign(&mut lo, f, [f0, f1])?;
+        let [h0, h1] = cfg.h.assign(&mut lo, h, [h0, h1])?;
+        let [j0, j1] = cfg.j.assign(&mut lo, j, [j0, j1])?;
+        let [l0, l1] = cfg.l.assign(&mut lo, l, [l0, l1])?;
 
-        // cfg.fdi.assign(lo, fdi, d2, z1_d, e_0);
-        // cfg.recp.assign(lo, recp, d2, z1_d, e_0)?;
-        // cfg.esk.assign(lo, esk, d2, z1_d, e_0)?;
-        // cfg.rho
-        //     .assign(lo, rho, e_1, f, g_0, e1_f_prime, z13_f, z14_e1_f_prime)?;
-        // cfg.psi.assign(lo,psi,i1,i2,i3,z1_i)?;
+        cfg.nd
+            .assign(&mut lo, &nd, a, b0, b_1, a_prime, z13_a, z13_a_prime)?;
+        cfg.v.assign(&mut lo, v, b1, c0)?;
+        cfg.fdi.assign(&mut lo, fdi, c1, d0)?;
+        cfg.recp.assign(&mut lo, recp, d1, e_value, f0)?;
+        cfg.esk.assign(&mut lo, esk, f1, g_value, h0)?;
+        cfg.rho.assign(&mut lo, rho, h1, i_value, j0)?;
+        cfg.psi.assign(&mut lo, psi, j1, k_value, l0)?;
+
         Ok(cm)
     }
 
@@ -1813,7 +1708,7 @@ pub(in crate::circuit) mod gadgets {
         lc: &LookupRangeCheckConfig<pallas::Base, 10>,
         mut lo: impl Layouter<pallas::Base>,
         b1: RangeConstrained<pallas::Base, Value<pasta_curves::Fp>>,
-        c0: RangeConstrained<pallas::Base, Value<pasta_curves::Fp>>,  // Updated to take c0 directly
+        c0: RangeConstrained<pallas::Base, Value<pasta_curves::Fp>>, // Updated to take c0 directly
     ) -> Result<CanonicityBounds, Error> {
         // `v` = `b1 (55 bits) || c0 (9 bits)`
         // where b1 represents the lower 55 bits and c0 represents the upper 9 bits
@@ -1836,15 +1731,14 @@ pub(in crate::circuit) mod gadgets {
         Ok((b1_c0_prime, zs[6].clone()))
     }
 
-
     fn fdi_canonicity(
         lc: &LookupRangeCheckConfig<pallas::Base, 10>,
         mut lo: impl Layouter<pallas::Base>,
-        c1: RangeConstrained<pallas::Base, Value<pasta_curves::Fp>>,  // bits 0..51 fdi
-        d0: RangeConstrained<pallas::Base, Value<pasta_curves::Fp>>,  // bits 51..64 fdi
+        c1: RangeConstrained<pallas::Base, Value<pasta_curves::Fp>>, // bits 0..51 fdi
+        d0: RangeConstrained<pallas::Base, Value<pasta_curves::Fp>>, // bits 51..64 fdi
     ) -> Result<CanonicityBounds, Error> {
         // Check canonicity of `fdi` encoding.
-        // 
+        //
         // `fdi` = `c1 (51 bits) || d0 (13 bits)`
         let c1_d0_prime = {
             let two_pow_51 = Value::known(pallas::Base::from(1u64 << 51));
@@ -1867,19 +1761,18 @@ pub(in crate::circuit) mod gadgets {
     fn recp_canonicity(
         lc: &LookupRangeCheckConfig<pallas::Base, 10>,
         mut lo: impl Layouter<pallas::Base>,
-        d1: RangeConstrained<pallas::Base, Value<pasta_curves::Fp>>,   
+        d1: RangeConstrained<pallas::Base, Value<pasta_curves::Fp>>,
         e: AssignedCell<pallas::Base, pallas::Base>,
-        f0: RangeConstrained<pallas::Base, Value<pasta_curves::Fp>>,  
+        f0: RangeConstrained<pallas::Base, Value<pasta_curves::Fp>>,
     ) -> Result<CanonicityBounds, Error> {
- 
         // Compute full recp value from decomposed pieces for verification
         let recp_full = {
-        let two_pow_7 = Value::known(pallas::Base::from(1u64 << 7));
-        let two_pow_2 = Value::known(pallas::Base::from(1u64 << 2));
-        let two_pow_250 = Value::known(pallas::Base::from_u128(1u128 << 60).square().square() * pallas::Base::from_u128(1u128 << 10) );  
-        let two_pow_252 = two_pow_250.value() * two_pow_2.value();
+            let two_pow_7 = Value::known(pallas::Base::from(1u64 << 7));
+            let two_pow_240 = Value::known(pallas::Base::from(1u64 << 60).square().square());
+            let two_pow_247 = two_pow_240 * two_pow_7;
 
-        d1.inner().value() + e.value() * two_pow_7 + f0.inner().value() * two_pow_252};
+            d1.inner().value() + e.value() * two_pow_7 + f0.inner().value() * two_pow_247
+        };
         // Decompose the low 254 bits of recp_prime = recp + 2^254 - t_P,
         // and output the running sum at the end of it.
         // If recp_prime < 2^254, the running sum will be 0.
@@ -1891,35 +1784,32 @@ pub(in crate::circuit) mod gadgets {
         let zs = lc.witness_check(
             lo.namespace(|| "Decompose low 254 bits of (recp + 2^254 - t_P)"),
             recp_prime,
-            25,  // 26 zs total: [z0..z25], z25=0 if recp_prime < 2^254
+            25,
             false,
         )?;
         let recp_prime_cell = zs[0].clone();
-        assert_eq!(zs.len(), 26); // [z_0, z_1, ..., z_25]
+        assert_eq!(zs.len(), 26);
         Ok((recp_prime_cell, zs[25].clone()))
     }
-
 
     /// Check canonicity of `esk` encoding.
     fn esk_canonicity(
         lc: &LookupRangeCheckConfig<pallas::Base, 10>,
         mut lo: impl Layouter<pallas::Base>,
-        f1: RangeConstrained<pallas::Base, Value<pallas::Base>>,  // bits 0..7 of esk
-        g: AssignedCell<pallas::Base, pallas::Base>,              // bits 7..247 of esk (240 bits)
-        h0: RangeConstrained<pallas::Base, Value<pallas::Base>>,  // bits 247..255 of esk
+        f1: RangeConstrained<pallas::Base, Value<pallas::Base>>, // bits 0..7 of esk
+        g: AssignedCell<pallas::Base, pallas::Base>,             // bits 7..247 of esk (240 bits)
+        h0: RangeConstrained<pallas::Base, Value<pallas::Base>>, // bits 247..255 of esk
     ) -> Result<CanonicityBounds, Error> {
         let esk_full = {
-            let two_pow_7 = Value::known(pallas::Base::from(1u64 << 7));
-            let two_pow_240 = Value::known(pallas::Base::from(1u64 << 60).square().square());
-            let two_pow_247 = two_pow_240.value() * two_pow_7.value();
-            f1.inner().value() +
-            g.value() * two_pow_7 +
-            h0.inner().value() * two_pow_247
+            let two_pow_2 = Value::known(pallas::Base::from(1u64 << 2));
+            let two_pow_245 = Value::known(
+                pallas::Base::from(1u64 << 61).square().square() * pallas::Base::from(1u64 << 5),
+            );
+            let two_pow_247 = two_pow_245 * two_pow_2;
+            f1.inner().value() + g.value() * two_pow_2 + h0.inner().value() * two_pow_247
         };
-        
-            // Decompose the low 254 bits of esk_prime = esk_full + 2^254 - t_P,
-        // and output the running sum at the end of it.
-        // If esk_prime < 2^254, the running sum will be 0.
+
+        // Decompose the low 254 bits of esk_prime = esk + 2^254 - t_P
         let esk_prime = {
             let two_pow_254 = Value::known(pallas::Base::from_u128(1u128 << 127).square());
             let t_p = Value::known(pallas::Base::from_u128(T_P));
@@ -1928,13 +1818,11 @@ pub(in crate::circuit) mod gadgets {
         let zs = lc.witness_check(
             lo.namespace(|| "Decompose low 254 bits of (esk + 2^254 - t_P)"),
             esk_prime,
-            25,  // 26 zs total: [z0..z25], z25=0 if esk_prime < 2^254
+            25,
             false,
         )?;
         let esk_prime_cell = zs[0].clone();
-        assert_eq!(zs.len(), 26); // [z_0, z_1, ..., z_25]
-        // g0 msb = 1 => z25_esk = 0 (high bits canonical)
-        // Note: g0 msb check handled in EskCanonicity gate using decompose constraints
+        assert_eq!(zs.len(), 26);
         Ok((esk_prime_cell, zs[25].clone()))
     }
 
@@ -1942,19 +1830,19 @@ pub(in crate::circuit) mod gadgets {
     fn rho_canonicity(
         lc: &LookupRangeCheckConfig<pallas::Base, 10>,
         mut lo: impl Layouter<pallas::Base>,
-        h1: RangeConstrained<pallas::Base, Value<pallas::Base>>,  // bits 0..2 of rho
-        i: AssignedCell<pallas::Base, pallas::Base>,              // bits 2..252 of rho (250 bits)
-        j0: RangeConstrained<pallas::Base, Value<pallas::Base>>,  // bits 252..255 of rho
+        h1: RangeConstrained<pallas::Base, Value<pallas::Base>>, // bits 0..2 of rho
+        i: AssignedCell<pallas::Base, pallas::Base>,             // bits 2..252 of rho (250 bits)
+        j0: RangeConstrained<pallas::Base, Value<pallas::Base>>, // bits 252..255 of rho
     ) -> Result<CanonicityBounds, Error> {
-            
-    let rho_full = {
-        let two_pow_2 = Value::known(pallas::Base::from(1u64 << 2));
-        let two_pow_250 = Value::known(pallas::Base::from_u128(1u128 << 10).square() * pallas::Base::from(1u64 << 60).square().square());  // 2^252
-        let two_pow_252 = two_pow_2.value() * two_pow_250.value();
-        h1.inner().value() +
-        i.value() * two_pow_2 +
-        j0.inner().value() * two_pow_252
-    };
+        let rho_full = {
+            let two_pow_2 = Value::known(pallas::Base::from(1u64 << 2));
+            let two_pow_250 = Value::known(
+                pallas::Base::from_u128(1u128 << 10).square()
+                    * pallas::Base::from(1u64 << 60).square().square(),
+            ); // 2^252
+            let two_pow_252 = two_pow_2.value() * two_pow_250.value();
+            h1.inner().value() + i.value() * two_pow_2 + j0.inner().value() * two_pow_252
+        };
 
         // Decompose the low 254 bits of rho_prime = g1 + 2^57*h0 + 2^117*h1 + 2^177*h2 + 2^237*h3 + 2^247*i0 + 2^254 - t_P,
         // and output the running sum at the end of it.
@@ -1968,10 +1856,10 @@ pub(in crate::circuit) mod gadgets {
         let zs = lc.witness_check(
             lo.namespace(|| "Decompose low 254 bits of (rho + 2^254 - t_P)"),
             rho_prime,
-            25,  // 26 zs total: [z0..z25], z25=0 if rho_prime < 2^254
+            25, // 26 zs total: [z0..z25], z25=0 if rho_prime < 2^254
             false,
         )?;
-        
+
         let rho_prime_cell = zs[0].clone();
         assert_eq!(zs.len(), 26); // [z_0, z_1, ..., z_25]
 
@@ -1982,17 +1870,15 @@ pub(in crate::circuit) mod gadgets {
     fn psi_canonicity(
         lc: &LookupRangeCheckConfig<pallas::Base, 10>,
         mut lo: impl Layouter<pallas::Base>,
-        j1: RangeConstrained<pallas::Base, Value<pallas::Base>>,   
-        k: AssignedCell<pallas::Base, pallas::Base>,     
-        l0: RangeConstrained<pallas::Base, Value<pallas::Base>>,  
+        j1: RangeConstrained<pallas::Base, Value<pallas::Base>>,
+        k: AssignedCell<pallas::Base, pallas::Base>,
+        l0: RangeConstrained<pallas::Base, Value<pallas::Base>>,
     ) -> Result<CanonicityBounds, Error> {
         let psi_full = {
             let two_pow_7 = Value::known(pallas::Base::from(1u64 << 7));
             let two_pow_240 = Value::known(pallas::Base::from(1u64 << 60).square().square());
             let two_pow_247 = two_pow_240.value() * two_pow_7.value();
-            j1.inner().value() +
-            k.value() * two_pow_7 +
-            l0.inner().value() * two_pow_247
+            j1.inner().value() + k.value() * two_pow_7 + l0.inner().value() * two_pow_247
         };
         // Decompose the low 254 bits of psi_prime = psi_full + 2^254 - t_P,
         // and output the running sum at the end of it.
@@ -2005,7 +1891,7 @@ pub(in crate::circuit) mod gadgets {
         let zs = lc.witness_check(
             lo.namespace(|| "Decompose low 254 bits of (psi + 2^254 - t_P)"),
             psi_prime,
-            25,  // 26 zs total: [z0..z25], z25=0 if psi_prime < 2^254
+            25, // 26 zs total: [z0..z25], z25=0 if psi_prime < 2^254
             false,
         )?;
         let psi_prime_cell = zs[0].clone();
