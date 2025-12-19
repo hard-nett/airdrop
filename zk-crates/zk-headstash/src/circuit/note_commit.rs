@@ -831,16 +831,17 @@ impl NdCanonicity {
     }
 }
 
-/// |  A_6  | A_7 | A_8 | q_notecommit_v |
-/// ---------------------------------------
-/// | value | b1  | c0  |       1        |
-///
+/// | A_6  | A_7 | A_8 | A_9      | q_notecommit_v |
+/// -------------------------------------------------
+/// | value| b1  | c0  | b1_c0'   |       1        |
+/// |      |     |     | z6_b1_c0'|       0        |
 #[derive(Clone, Debug)]
 struct ValueCanonicity {
     q_notecommit_v: Selector,
     col_l: Column<Advice>,
     col_m: Column<Advice>,
     col_r: Column<Advice>,
+    col_z: Column<Advice>,
 }
 
 impl ValueCanonicity {
@@ -849,8 +850,10 @@ impl ValueCanonicity {
         col_l: Column<Advice>,
         col_m: Column<Advice>,
         col_r: Column<Advice>,
-
+        col_z: Column<Advice>,
         two_pow_55: pallas::Base, // 2^55 for c0 (v[0..55), 55 bits)
+        two_pow_64: pallas::Base,
+        t_p: Expression<pallas::Base>,
     ) -> Self {
         let q_notecommit_v = meta.selector();
 
@@ -862,11 +865,23 @@ impl ValueCanonicity {
             let b1 = meta.query_advice(col_m, Rotation::cur());
             // c0 (top 9 bits of v, bits 55..64) - constrained to 9 bits in DecomposeC
             let c0 = meta.query_advice(col_r, Rotation::cur());
+            let b1_c0_prime = meta.query_advice(col_z, Rotation::cur());
+            let z6_b1_c0_prime = meta.query_advice(col_z, Rotation::next());
 
             // value = b1 + 2^55 * c0
-            let value_check = b1 + c0 * two_pow_55 - value;
+            let value_check = b1.clone() + c0.clone() * two_pow_55 - value;
 
-            Constraints::with_selector(q_notecommit_v, Some(("value_check", value_check)))
+            // Canonicity check: b1_c0_prime = b1 + c0 * 2^55 + 2^64 - t_P
+            let b1_c0_prime_check =
+                b1 + c0 * two_pow_55 + Expression::Constant(two_pow_64) - t_p - b1_c0_prime.clone();
+
+            Constraints::with_selector(
+                q_notecommit_v,
+                [
+                    ("value_check", value_check),
+                    ("b1_c0_prime_check", b1_c0_prime_check),
+                ],
+            )
         });
 
         Self {
@@ -874,6 +889,7 @@ impl ValueCanonicity {
             col_l,
             col_m,
             col_r,
+            col_z,
         }
     }
 
@@ -882,17 +898,24 @@ impl ValueCanonicity {
         lo: &mut impl Layouter<pallas::Base>,
         value: AssignedCell<NoteValue, pallas::Base>,
         b1: RangeConstrained<pallas::Base, Value<pallas::Base>>, // v[0..55) - 55 bits
-        c0: AssignedCell<pallas::Base, pallas::Base>, // CHANGED: bare AssignedCell instead of RangeConstrained
+        c0: AssignedCell<pallas::Base, pallas::Base>,
+        b1_c0_prime: AssignedCell<pallas::Base, pallas::Base>,
+        z6_b1_c0_prime: AssignedCell<pallas::Base, pallas::Base>,
     ) -> Result<(), Error> {
         lo.assign_region(
             || "NoteCommit input value",
             |mut region| {
                 self.q_notecommit_v.enable(&mut region, 0)?;
+
+                // Row 0
                 value.copy_advice(|| "value", &mut region, self.col_l, 0)?;
-                // Assign b1 as a witness (it's a Value from bitrange_of)
                 region.assign_advice(|| "b1", self.col_m, 0, || *b1.inner())?;
-                // Copy c0 - no .inner() needed since it's already an AssignedCell
                 c0.copy_advice(|| "c0", &mut region, self.col_r, 0)?;
+                b1_c0_prime.copy_advice(|| "b1_c0_prime", &mut region, self.col_z, 0)?;
+
+                // Row 1
+                z6_b1_c0_prime.copy_advice(|| "z6_b1_c0_prime", &mut region, self.col_z, 1)?;
+
                 Ok(())
             },
         )
@@ -1311,11 +1334,10 @@ impl NoteCommitChip {
         // let two_pow_13 = pallas::Base::from(1 << 13);
         let two_pow_51 = pallas::Base::from(1 << 51);
         let two_pow_55 = pallas::Base::from(1 << 55);
-        let two_pow_57 = pallas::Base::from(1 << 57);
         let two_pow_60 = pallas::Base::from(1 << 60);
+        let two_pow_64 = two_pow_60 * two_pow_4;
         // let two_pow_58 = pallas::Base::from(1 << 58);
         // let two_pow_117 = two_pow_57.square() * two_pow_3;
-        let two_pow_130 = Expression::Constant(pallas::Base::from_u128(1 << 65).square());
         let two_pow_120 = two_pow_60.square();
         let two_pow_240 = two_pow_120.square();
         // let two_pow_177 = two_pow_117 * two_pow_60;
@@ -1352,7 +1374,9 @@ impl NoteCommitChip {
             t_p.clone(),
         );
 
-        let v = ValueCanonicity::configure(meta, col_l, col_m, col_r, two_pow_55);
+        let v = ValueCanonicity::configure(
+            meta, col_l, col_m, col_r, col_z, two_pow_55, two_pow_64, t_p,
+        );
         let fdi = FdiCanonicity::configure(meta, col_l, col_m, col_r, two_pow_51);
         let recp =
             RecpCanonicity::configure(meta, col_l, col_m, col_r, col_z, two_pow_7, two_pow_247);
@@ -1670,7 +1694,8 @@ pub(in crate::circuit) mod gadgets {
 
         cfg.nd
             .assign(&mut lo, &nd, a, b0, b_1, a_prime, z13_a, z13_a_prime)?;
-        cfg.v.assign(&mut lo, v, b1, c0)?;
+        cfg.v
+            .assign(&mut lo, v, b1, c0, b1_c0_prime, z6_b1_c0_prime)?;
         cfg.fdi.assign(&mut lo, fdi, c1, d0)?;
         cfg.recp.assign(&mut lo, recp, d1, e_value, f0)?;
         cfg.esk.assign(&mut lo, esk, f1, g_value, h0)?;
@@ -1711,12 +1736,11 @@ pub(in crate::circuit) mod gadgets {
         c0: RangeConstrained<pallas::Base, Value<pasta_curves::Fp>>, // Updated to take c0 directly
     ) -> Result<CanonicityBounds, Error> {
         // `v` = `b1 (55 bits) || c0 (9 bits)`
-        // where b1 represents the lower 55 bits and c0 represents the upper 9 bits
-        //
         // Canonicity check: b1 + 2^55 * c0 < t_P
+
         let b1_c0_prime = {
             let two_pow_55 = Value::known(pallas::Base::from(1u64 << 55));
-            let two_pow_64 = Value::known(pallas::Base::from_u128(1u64 as u128));
+            let two_pow_64 = two_pow_55.value() * Value::known(pallas::Base::from(1u64 << 9));
             let t_p = Value::known(pallas::Base::from_u128(T_P));
             b1.inner().value() + (two_pow_55 * c0.inner().value()) + two_pow_64 - t_p
         };
