@@ -6,20 +6,19 @@ use std::{
 };
 
 use alloc::vec::Vec;
-use anybuf::Anybuf;
-use ff::PrimeField;
-use group::{Curve, GroupEncoding};
+
+use group::Curve;
 use halo2_proofs::{
     circuit::{floor_planner, Layouter, Value},
     plonk::{
         self, Advice, Column, Constraints, Expression, Instance as InstanceColumn, Selector,
-        SingleVerifier, VerifyingKey as Halo2Vk,
+        SingleVerifier,
     },
-    poly::{EvaluationDomain, Rotation},
+    poly::Rotation,
     transcript::{Blake2bRead, Blake2bWrite},
 };
-use pasta_curves::EqAffine;
-use pasta_curves::{arithmetic::CurveAffine, pallas, vesta};
+
+use pasta_curves::{pallas, vesta};
 use rand::RngCore;
 
 use self::{
@@ -35,26 +34,21 @@ use crate::{
     builder::SpendInfo,
     circuit::gadget::secp256k1_chip::{Secp256k1Chip, Secp256k1Config, Secp256k1Fp, Secp256k1Fq},
     constants::{
-        OrchardCommitDomains, OrchardFixedBases, OrchardFixedBasesFull, OrchardHashDomains,
-        MERKLE_DEPTH_ORCHARD,
+        OrchardCommitDomains, OrchardFixedBases, OrchardHashDomains, MERKLE_DEPTH_ORCHARD,
     },
-    keys::{
-        CommitIvkRandomness, DiversifiedTransmissionKey, NullifierDerivingKey, SpendValidatingKey,
-    },
+    keys::NullifierDerivingKey,
     note::{
         commitment::{NoteCommitTrapdoor, NoteCommitment},
         nullifier::Nullifier,
         ExtractedNoteCommitment, Note, Rho,
     },
-    primitives::redpallas::{SpendAuth, VerificationKey},
-    spec::NonIdentityPallasPoint,
     tree::{Anchor, MerkleHashOrchard},
-    value::{NoteDenom, NoteValue, ValueCommitTrapdoor, ValueCommitment},
+    value::{NoteDenom, NoteValue},
 };
 use halo2_gadgets::{
     ecc::{
         chip::{EccChip, EccConfig},
-        FixedPoint, NonIdentityPoint, Point, ScalarFixed, ScalarFixedShort, ScalarVar,
+        Point, ScalarFixed,
     },
     poseidon::{primitives as poseidon, Pow5Chip as PoseidonChip, Pow5Config as PoseidonConfig},
     sinsemilla::{
@@ -482,13 +476,6 @@ impl plonk::Circuit<pallas::Base> for Circuit {
                 self.nk.map(|nk| nk.inner()),
             )?;
 
-            // Witness v_old.
-            let v = assign_free_advice(
-                layouter.namespace(|| "witness v_old"),
-                config.advices[0],
-                self.v,
-            )?;
-
             (nd, v, fdi, recp, psi_old, rho_old, cm_old, nk)
         };
 
@@ -506,6 +493,9 @@ impl plonk::Circuit<pallas::Base> for Circuit {
             let leaf = cm_old.extract_p().inner().clone();
             merkle_inputs.calculate_root(layouter.namespace(|| "Merkle path"), leaf)?
         };
+
+        // constrain hashCommit root to public input
+        layouter.constrain_instance(root.cell(), config.primary, ANCHOR)?;
 
         // Nullifier integrity (https://p.z.cash/ZKS:action-nullifier-integrity).
         let nf_old = {
@@ -534,8 +524,6 @@ impl plonk::Circuit<pallas::Base> for Circuit {
                 self.rcm_old.as_ref().map(|rcm_old| rcm_old.inner()),
             )?;
 
-            // g★_d || pk★_d || i2lebsp_{64}(v) || i2lebsp_{255}(rho) || i2lebsp_{255}(psi)
-
             // // g★_d || pk★_d || i2lebsp_{64}(v) || i2lebsp_{255}(rho) || i2lebsp_{255}(psi)
             let derived_cm_old = gadget::note_commit(
                 layouter.namespace(|| {
@@ -556,6 +544,10 @@ impl plonk::Circuit<pallas::Base> for Circuit {
 
             // Constrain derived cm_old to equal witnessed cm_old
             derived_cm_old.constrain_equal(layouter.namespace(|| "cm_old equality"), &cm_old)?;
+
+            let cmx = cm_old.extract_p();
+            // Constrain cmx to equal public input
+            layouter.constrain_instance(cmx.inner().cell(), config.primary, CMX)?;
         }
 
         Ok(())
@@ -638,9 +630,6 @@ pub struct Instance {
     pub(crate) nf: Nullifier,
     pub(crate) recp: RecpAddr,
     pub(crate) cmx: ExtractedNoteCommitment,
-    // pub(crate) rk: VerificationKey<SpendAuth>,
-    // pub(crate) enable_spend: bool,
-    // pub(crate) enable_output: bool,
 }
 
 impl Instance {
@@ -774,30 +763,28 @@ mod tests {
 
     fn generate_circuit_instance<R: RngCore>(mut rng: R) -> (Circuit, Instance) {
         let (_, fvk, esk, spent_note) = Note::dummy(&mut rng, None);
-        // 1. Generate secp256k1 key pair (esk, epk)
-
         let (epkx, epky) = esk.epk().xy();
+        // 1. Generate secp256k1 key pair (esk, epk)
         let e_sk_fq = Secp256k1Fq::from_bytes(&esk.0.secret_bytes()).expect("valid Fq");
         let epkx = Secp256k1Fp::from_bytes(&epkx).expect("valid Fp");
         let epky = Secp256k1Fp::from_bytes(&epky).expect("valid Fp");
-
         let sender_address = spent_note.recipient();
         let nk = *fvk.nk();
-        // let rivk = fvk.rivk(fvk.scope_for_address(&spent_note.recipient()).unwrap());
         let nf = spent_note.nullifier();
         let rho = Rho::from_nf_old(nf);
-        let (_, _, esk, output_note) = Note::dummy(&mut rng, Some(rho));
-        let ak: SpendValidatingKey = fvk.into();
-        let alpha = pallas::Scalar::random(&mut rng);
-        let rk = ak.randomize(&alpha);
 
-        let cmx = output_note.commitment().into();
+        // let rivk = fvk.rivk(fvk.scope_for_address(&spent_note.recipient()).unwrap());
+        // let ak: SpendValidatingKey = fvk.into();
+        // let alpha = pallas::Scalar::random(&mut rng);
+        // let rk = ak.randomize(&alpha);
+        // let vsum = spent_note.value() - output_note.value();
+        // let cv_net = ValueCommitment::derive(vsum, rcv.clone());
+        // let rcv = ValueCommitTrapdoor::random(&mut rng);
+
+        let cmx = spent_note.commitment().into();
         let nd = spent_note.nd();
         let v = spent_note.value();
         let recp = spent_note.recipient();
-        let vsum = spent_note.value() - output_note.value();
-        let rcv = ValueCommitTrapdoor::random(&mut rng);
-        let cv_net = ValueCommitment::derive(vsum, rcv.clone());
 
         let path = MerklePath::dummy(&mut rng);
         let anchor = path.root(spent_note.commitment().into());
@@ -807,7 +794,7 @@ mod tests {
                 path: Value::known(path.auth_path()),
                 pos: Value::known(path.position()),
                 nk: Value::known(nk),
-                nd: Value::known(crate::spec::nd_to_fp(&spent_note.nd())),
+                nd: Value::known(spent_note.nd().to_fp()),
                 v: Value::known(spent_note.value()),
                 fdi: Value::known(pallas::Base::from(spent_note.fdi())),
                 recp: Value::known(recp.to_pallas()),
