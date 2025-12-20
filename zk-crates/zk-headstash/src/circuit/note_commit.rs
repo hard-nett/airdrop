@@ -1136,22 +1136,41 @@ impl EskCanonicity {
         col_r: Column<Advice>,
         col_z: Column<Advice>,
         two_pow_2: pallas::Base,
-        two_pow_252: pallas::Base, // FIXED: was two_pow_252
+        two_pow_252: pallas::Base,
+        two_pow_254: pallas::Base,
+        t_p: Expression<pallas::Base>,
     ) -> Self {
         let q_notecommit_esk = meta.selector();
 
         meta.create_gate("NoteCommit input value", |meta| {
             let q_notecommit_esk = meta.query_selector(q_notecommit_esk);
 
+            // Row 0
             let esk = meta.query_advice(col_l, Rotation::cur());
-            let f1 = meta.query_advice(col_m, Rotation::cur()); // bits 0..2 (2 bits, from DecomposeF)
-            let g = meta.query_advice(col_r, Rotation::cur()); // bits 2..247 (245 bits, assigned as witness)
-            let h0 = meta.query_advice(col_z, Rotation::cur()); // bits 247..255 (8 bits, from DecomposeH)
+            let f1 = meta.query_advice(col_m, Rotation::cur()); // bits 0..2
+            let g = meta.query_advice(col_r, Rotation::cur()); // bits 2..252
+            let f1_g_h0_prime = meta.query_advice(col_z, Rotation::cur());
 
-            // esk = f1 + g * 2^2 + h0 * 2^247
-            let esk_check = f1 + g * two_pow_2 + h0 * two_pow_252 - esk;
+            // Row 1
+            let h0 = meta.query_advice(col_m, Rotation::next());
+            let z26_f1_g_h0_prime = meta.query_advice(col_z, Rotation::next());
 
-            Constraints::with_selector(q_notecommit_esk, Some(("esk_check", esk_check)))
+            // Decomposition check: esk = f1 + g * 2^2 + h0 * 2^252
+            let esk_check = f1.clone() + g.clone() * two_pow_2 + h0.clone() * two_pow_252 - esk;
+
+            // Canonicity check: f1_g_h0_prime = f1 + g * 2^2 + h0 * 2^252 + 2^254 - t_P
+            let f1_g_h0_prime_check =
+                f1 + g * two_pow_2 + h0 * two_pow_252 + Expression::Constant(two_pow_254)
+                    - t_p
+                    - f1_g_h0_prime;
+
+            Constraints::with_selector(
+                q_notecommit_esk,
+                [
+                    ("esk_check", esk_check),
+                    ("f1_g_h0_prime_check", f1_g_h0_prime_check),
+                ],
+            )
         });
 
         Self {
@@ -1167,20 +1186,31 @@ impl EskCanonicity {
         &self,
         lo: &mut impl Layouter<pallas::Base>,
         esk: AssignedCell<pallas::Base, pallas::Base>,
-        f1: AssignedCell<pallas::Base, pallas::Base>, // From DecomposeF::assign (f[1])
-        g: RangeConstrained<pallas::Base, Value<pallas::Base>>, // bitrange_of(esk, 2..247)
-        h0: AssignedCell<pallas::Base, pallas::Base>, // From DecomposeH::assign (h[0])
+        f1: AssignedCell<pallas::Base, pallas::Base>,
+        g: RangeConstrained<pallas::Base, Value<pallas::Base>>,
+        h0: AssignedCell<pallas::Base, pallas::Base>,
+        f1_g_h0_prime: AssignedCell<pallas::Base, pallas::Base>,
+        z26_f1_g_h0_prime: AssignedCell<pallas::Base, pallas::Base>,
     ) -> Result<(), Error> {
         lo.assign_region(
             || "NoteCommit esk canonicity",
             |mut region| {
                 self.q_notecommit_esk.enable(&mut region, 0)?;
 
+                // Row 0
                 esk.copy_advice(|| "esk full", &mut region, self.col_l, 0)?;
                 f1.copy_advice(|| "f1 (bits 0..2)", &mut region, self.col_m, 0)?;
-                // Assign g as witness (it's a Value from bitrange_of)
-                region.assign_advice(|| "g (bits 2..247)", self.col_r, 0, || *g.inner())?;
-                h0.copy_advice(|| "h0 (bits 247..255)", &mut region, self.col_z, 0)?;
+                region.assign_advice(|| "g (bits 2..252)", self.col_r, 0, || *g.inner())?;
+                f1_g_h0_prime.copy_advice(|| "f1_g_h0_prime", &mut region, self.col_z, 0)?;
+
+                // Row 1
+                h0.copy_advice(|| "h0 (bits 252..255)", &mut region, self.col_m, 1)?;
+                z26_f1_g_h0_prime.copy_advice(
+                    || "z26_f1_g_h0_prime",
+                    &mut region,
+                    self.col_z,
+                    1,
+                )?;
 
                 Ok(())
             },
@@ -1461,8 +1491,17 @@ impl NoteCommitChip {
             t_p.clone(),
         );
 
-        let esk =
-            EskCanonicity::configure(meta, col_l, col_m, col_r, col_z, two_pow_2, two_pow_252);
+        let esk = EskCanonicity::configure(
+            meta,
+            col_l,
+            col_m,
+            col_r,
+            col_z,
+            two_pow_2,
+            two_pow_252,
+            two_pow_254,
+            t_p.clone(),
+        );
 
         let rho =
             RhoCanonicity::configure(meta, col_l, col_m, col_r, col_z, two_pow_7, two_pow_247);
@@ -1736,7 +1775,7 @@ pub(in crate::circuit) mod gadgets {
         )?;
 
         // Check decomposition of esk (f1,g,h0)
-        let (esk_prime, z25_esk) = esk_canonicity(
+        let (f1_g_h0_prime, z26_f1_g_h0_prime) = esk_canonicity(
             &lc,
             lo.namespace(|| "esk canonicity"),
             f1.clone(),
@@ -1788,7 +1827,15 @@ pub(in crate::circuit) mod gadgets {
             d1_e_f0_prime,
             z26_d1_e_f0_prime,
         )?;
-        cfg.esk.assign(&mut lo, esk, f1, g_value, h0)?;
+        cfg.esk.assign(
+            &mut lo,
+            esk,
+            f1,
+            g_value,
+            h0,
+            f1_g_h0_prime,
+            z26_f1_g_h0_prime,
+        )?;
         cfg.rho.assign(&mut lo, rho, h1, i_value, j0)?;
         cfg.psi.assign(&mut lo, psi, j1, k_value, l0)?;
 
@@ -1917,27 +1964,34 @@ pub(in crate::circuit) mod gadgets {
         g: AssignedCell<pallas::Base, pallas::Base>,             // bits 7..247 of esk (240 bits)
         h0: RangeConstrained<pallas::Base, Value<pallas::Base>>, // bits 247..255 of esk
     ) -> Result<CanonicityBounds, Error> {
-        let esk_full = {
-            let two_pow_2 = Value::known(pallas::Base::from(1u64 << 2));
-            let two_pow_245 = Value::known(
-                pallas::Base::from(1u64 << 61).square().square() * pallas::Base::from(1u64 << 5),
-            );
-            let two_pow_247 = two_pow_245 * two_pow_2;
-            f1.inner().value() + g.value() * two_pow_2 + h0.inner().value() * two_pow_247
+        let f1_g_h0_prime = {
+            let two = pallas::Base::from(1u64 << 2);
+            let five = pallas::Base::from(1u64 << 5);
+            let seven = pallas::Base::from(1u64 << 7);
+            let sixty = pallas::Base::from(1u64 << 60);
+            let two_pow_2 = Value::known(two);
+            let two_pow_5 = Value::known(five);
+            let two_pow_7 = Value::known(seven);
+            let two_pow_240 = Value::known(sixty.square().square());
+            let two_pow_247 = two_pow_240 * two_pow_7;
+            let two_pow_252 = two_pow_247 * two_pow_5;
+            let two_pow_254 = two_pow_247 * two_pow_7;
+            let t_p = Value::known(pallas::Base::from_u128(T_P));
+
+            f1.inner().value()
+                + two_pow_2 * g.value()
+                + two_pow_252 * h0.inner().value()
+                + two_pow_254
+                - t_p
         };
 
-        // Decompose the low 254 bits of esk_prime = esk + 2^254 - t_P
-        let esk_prime = {
-            let two_pow_254 = Value::known(pallas::Base::from_u128(1u128 << 127).square());
-            let t_p = Value::known(pallas::Base::from_u128(T_P));
-            esk_full + two_pow_254 - t_p
-        };
         let zs = lc.witness_check(
-            lo.namespace(|| "Decompose low 254 bits of (esk + 2^254 - t_P)"),
-            esk_prime,
+            lo.namespace(|| "Decompose (f1 + g * 2^2 + h0 * 2^252 + 2^254 - t_P)"),
+            f1_g_h0_prime,
             25,
             false,
         )?;
+
         let esk_prime_cell = zs[0].clone();
         assert_eq!(zs.len(), 26);
         Ok((esk_prime_cell, zs[25].clone()))
@@ -2055,9 +2109,9 @@ mod tests {
     use halo2_proofs::{
         circuit::{Layouter, SimpleFloorPlanner, Value},
         dev::MockProver,
-        plonk::{Circuit, ConstraintSystem, Error},
+        plonk::{ConstraintSystem, Error},
     };
-    use pasta_curves::{arithmetic::CurveAffine, pallas};
+    use pasta_curves::pallas;
 
     use rand::{rngs::OsRng, RngCore};
 
