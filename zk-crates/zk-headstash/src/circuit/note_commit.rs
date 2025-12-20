@@ -1218,11 +1218,11 @@ impl EskCanonicity {
     }
 }
 
-/// | A_6 | A_7 | A_8 | A_9 | q_notecommit_rho |
-/// -------------------------------------------
-/// | rho | g1  | ha  | z13_h|        1         |
-/// |     | hb  | hc  | hd   |        0         |
-/// |     | i0  |     |      |        0         |
+/// | A_6 | A_7 | A_8 | A_9          | q_notecommit_rho |
+/// -----------------------------------------------------
+/// | rho | h1  |  i  | h1_i_j0'     |        1         |
+/// |     | j0  |     | z26_h1_i_j0' |        0         |
+///
 #[derive(Clone, Debug)]
 struct RhoCanonicity {
     q_notecommit_rho: Selector,
@@ -1242,6 +1242,8 @@ impl RhoCanonicity {
         col_z: Column<Advice>,
         two_pow_7: pallas::Base,
         two_pow_247: pallas::Base,
+        two_pow_254: pallas::Base,
+        t_p: Expression<pallas::Base>,
     ) -> Self {
         let q_notecommit_rho = meta.selector();
 
@@ -1251,12 +1253,29 @@ impl RhoCanonicity {
             let rho = meta.query_advice(col_l, Rotation::cur()); // full 255-bit rho
             let h1 = meta.query_advice(col_m, Rotation::cur()); // bits 0..7 (7 bits, from DecomposeH)
             let i = meta.query_advice(col_r, Rotation::cur()); // bits 7..247 (240 bits, assigned as witness)
-            let j0 = meta.query_advice(col_z, Rotation::cur()); // bits 247..255 (8 bits, from DecomposeJ)
 
-            // rho = h1 + i * 2^7 + j0 * 2^247
-            let rho_check = h1 + i * two_pow_7 + j0 * two_pow_247 - rho;
+            let h1_i_j0_prime = meta.query_advice(col_z, Rotation::cur());
+            let j0 = meta.query_advice(col_m, Rotation::next());
 
-            Constraints::with_selector(q_notecommit_rho, Some(("rho_check", rho_check)))
+            // Row 1
+            let z26_h1_i_j0_prime = meta.query_advice(col_z, Rotation::next());
+
+            // Decomposition check: rho = h1 + i * 2^7 + j0 * 2^247
+            let rho_check = h1.clone() + i.clone() * two_pow_7 + j0.clone() * two_pow_247 - rho;
+
+            // Canonicity check: h1_i_j0_prime = h1 + i * 2^7 + j0 * 2^247 + 2^254 - t_P
+            let h1_i_j0_prime_check =
+                h1 + i * two_pow_7 + j0 * two_pow_247 + Expression::Constant(two_pow_254)
+                    - t_p
+                    - h1_i_j0_prime;
+
+            Constraints::with_selector(
+                q_notecommit_rho,
+                [
+                    ("rho_check", rho_check),
+                    ("h1_i_j0_prime_check", h1_i_j0_prime_check),
+                ],
+            )
         });
 
         Self {
@@ -1276,16 +1295,28 @@ impl RhoCanonicity {
         h1: AssignedCell<pallas::Base, pallas::Base>, // From DecomposeH::assign (h[1])
         i: RangeConstrained<pallas::Base, Value<pallas::Base>>, // bitrange_of(rho, 7..247)
         j0: AssignedCell<pallas::Base, pallas::Base>, // From DecomposeJ::assign (j[0])
+        h1_i_j0_prime: AssignedCell<pallas::Base, pallas::Base>,
+        z26_h1_i_j0_prime: AssignedCell<pallas::Base, pallas::Base>,
     ) -> Result<(), Error> {
         lo.assign_region(
             || "NoteCommit rho canonicity",
             |mut region| {
+                self.q_notecommit_rho.enable(&mut region, 0);
+                // Row 0
                 rho.copy_advice(|| "rho full", &mut region, self.col_l, 0)?;
                 h1.copy_advice(|| "h1 (bits 0..7)", &mut region, self.col_m, 0)?;
                 region.assign_advice(|| "i (bits 7..247)", self.col_r, 0, || *i.inner())?;
-                j0.copy_advice(|| "j0 (bits 247..255)", &mut region, self.col_z, 0)?;
+                h1_i_j0_prime.copy_advice(|| "h1_i_j0_prime", &mut region, self.col_z, 0)?;
 
-                self.q_notecommit_rho.enable(&mut region, 0)
+                // Row 1
+                j0.copy_advice(|| "j0 (bits 247..255)", &mut region, self.col_m, 1)?;
+                z26_h1_i_j0_prime.copy_advice(
+                    || "z26_h1_i_j0_prime",
+                    &mut region,
+                    self.col_z,
+                    1,
+                )?;
+                Ok(())
             },
         )
     }
@@ -1503,8 +1534,17 @@ impl NoteCommitChip {
             t_p.clone(),
         );
 
-        let rho =
-            RhoCanonicity::configure(meta, col_l, col_m, col_r, col_z, two_pow_7, two_pow_247);
+        let rho = RhoCanonicity::configure(
+            meta,
+            col_l,
+            col_m,
+            col_r,
+            col_z,
+            two_pow_7,
+            two_pow_247,
+            two_pow_254,
+            t_p.clone(),
+        );
 
         let psi =
             PsiCanonicity::configure(meta, col_l, col_m, col_r, col_z, two_pow_2, two_pow_252);
@@ -1784,7 +1824,7 @@ pub(in crate::circuit) mod gadgets {
         )?;
 
         // Check decomposition of rho (h1,i,j0)
-        let (rho_prime, z25_rho) = rho_canonicity(
+        let (h1_i_j0_prime, z26_h1_i_j0_prime) = rho_canonicity(
             &lc,
             lo.namespace(|| "rho canonicity"),
             h1.clone(),
@@ -1836,7 +1876,15 @@ pub(in crate::circuit) mod gadgets {
             f1_g_h0_prime,
             z26_f1_g_h0_prime,
         )?;
-        cfg.rho.assign(&mut lo, rho, h1, i_value, j0)?;
+        cfg.rho.assign(
+            &mut lo,
+            rho,
+            h1,
+            i_value,
+            j0,
+            h1_i_j0_prime,
+            z26_h1_i_j0_prime,
+        )?;
         cfg.psi.assign(&mut lo, psi, j1, k_value, l0)?;
 
         Ok(cm)
@@ -2001,40 +2049,33 @@ pub(in crate::circuit) mod gadgets {
     fn rho_canonicity(
         lc: &LookupRangeCheckConfig<pallas::Base, 10>,
         mut lo: impl Layouter<pallas::Base>,
-        h1: RangeConstrained<pallas::Base, Value<pallas::Base>>, // bits 0..2 of rho
-        i: AssignedCell<pallas::Base, pallas::Base>,             // bits 2..252 of rho (250 bits)
-        j0: RangeConstrained<pallas::Base, Value<pallas::Base>>, // bits 252..255 of rho
+        h1: RangeConstrained<pallas::Base, Value<pallas::Base>>, // bits 0..7 of rho
+        i: AssignedCell<pallas::Base, pallas::Base>,             // bits 7..247 of rho (240 bits)
+        j0: RangeConstrained<pallas::Base, Value<pallas::Base>>, // bits 247..255 of rho (8 bits)
     ) -> Result<CanonicityBounds, Error> {
-        let rho_full = {
-            let two_pow_2 = Value::known(pallas::Base::from(1u64 << 2));
-            let two_pow_250 = Value::known(
-                pallas::Base::from_u128(1u128 << 10).square()
-                    * pallas::Base::from(1u64 << 60).square().square(),
-            ); // 2^252
-            let two_pow_252 = two_pow_2.value() * two_pow_250.value();
-            h1.inner().value() + i.value() * two_pow_2 + j0.inner().value() * two_pow_252
-        };
-
-        // Decompose the low 254 bits of rho_prime = g1 + 2^57*h0 + 2^117*h1 + 2^177*h2 + 2^237*h3 + 2^247*i0 + 2^254 - t_P,
-        // and output the running sum at the end of it.
-        // If rho_prime < 2^254, the running sum will be 0.
-        let rho_prime = {
-            let two_pow_254 = Value::known(pallas::Base::from_u128(1u128 << 127).square());
+        let h1_i_j0_prime = {
+            let two_pow_7 = Value::known(pallas::Base::from(1u64 << 7));
+            let two_pow_240 = Value::known(pallas::Base::from(1u64 << 60).square().square());
+            let two_pow_247 = two_pow_240 * two_pow_7;
+            let two_pow_254 = two_pow_247 * two_pow_7;
             let t_p = Value::known(pallas::Base::from_u128(T_P));
-            rho_full + two_pow_254 - t_p
+            h1.inner().value()
+                + two_pow_7 * i.value()
+                + two_pow_247 * j0.inner().value()
+                + two_pow_254
+                - t_p
         };
 
         let zs = lc.witness_check(
             lo.namespace(|| "Decompose low 254 bits of (rho + 2^254 - t_P)"),
-            rho_prime,
-            25, // 26 zs total: [z0..z25], z25=0 if rho_prime < 2^254
+            h1_i_j0_prime,
+            25,
             false,
         )?;
 
-        let rho_prime_cell = zs[0].clone();
-        assert_eq!(zs.len(), 26); // [z_0, z_1, ..., z_25]
-
-        Ok((rho_prime_cell, zs[25].clone()))
+        let h1_i_j0_prime_cell = zs[0].clone();
+        assert_eq!(zs.len(), 26); // [z_0, z_1, ..., z_26]
+        Ok((h1_i_j0_prime_cell, zs[25].clone()))
     }
 
     // Check canonicity of `psi` encoding.
