@@ -1346,6 +1346,8 @@ impl PsiCanonicity {
         col_z: Column<Advice>,
         two_pow_2: pallas::Base,
         two_pow_252: pallas::Base,
+        two_pow_254: pallas::Base,
+        t_p: Expression<pallas::Base>,
     ) -> Self {
         let q_notecommit_psi = meta.selector();
 
@@ -1355,12 +1357,27 @@ impl PsiCanonicity {
             let psi = meta.query_advice(col_l, Rotation::cur()); // full 255-bit psi
             let j1 = meta.query_advice(col_m, Rotation::cur()); // bits 0..2 (2 bits, from DecomposeJ)
             let k = meta.query_advice(col_r, Rotation::cur()); // bits 2..252 (250 bits, assigned as witness)
-            let l0 = meta.query_advice(col_z, Rotation::cur()); // bits 252..255 (3 bits, from DecomposeL)
+            let j1_k_l0_prime = meta.query_advice(col_z, Rotation::cur());
 
-            // psi = j1 + k * 2^2 + l0 * 2^252
-            let psi_check = j1 + k * two_pow_2 + l0 * two_pow_252 - psi;
+            let l0 = meta.query_advice(col_m, Rotation::next()); // bits 252..255 (3 bits, from DecomposeL)
+            let z26_j1_k_l0_prime = meta.query_advice(col_z, Rotation::next());
 
-            Constraints::with_selector(q_notecommit_psi, Some(("psi_check", psi_check)))
+            // Decomposition check: psi = j1 + k * 2^2 + l0 * 2^252
+            let psi_check = j1.clone() + k.clone() * two_pow_2 + l0.clone() * two_pow_252 - psi;
+
+            // Canonicity check: j1_k_l0_prime = j1 + k * 2^2 + l0 * 2^252 + 2^254 - t_P
+            let j1_k_l0_prime_check =
+                j1 + k * two_pow_2 + l0 * two_pow_252 + Expression::Constant(two_pow_254)
+                    - t_p
+                    - j1_k_l0_prime;
+
+            Constraints::with_selector(
+                q_notecommit_psi,
+                [
+                    ("psi_check", psi_check),
+                    ("j1_k_l0_prime_check", j1_k_l0_prime_check),
+                ],
+            )
         });
 
         Self {
@@ -1379,17 +1396,27 @@ impl PsiCanonicity {
         j1: AssignedCell<pallas::Base, pallas::Base>, // From DecomposeJ::assign (j[1])
         k: RangeConstrained<pallas::Base, Value<pallas::Base>>, // bitrange_of(psi, 2..252)
         l0: AssignedCell<pallas::Base, pallas::Base>, // From DecomposeL::assign (l[0])
+        j1_k_l0_prime: AssignedCell<pallas::Base, pallas::Base>,
+        z26_j1_k_l0_prime: AssignedCell<pallas::Base, pallas::Base>,
     ) -> Result<(), Error> {
         lo.assign_region(
             || "NoteCommit psi canonicity",
             |mut region| {
                 self.q_notecommit_psi.enable(&mut region, 0)?;
-
+                // Row 0
                 psi.copy_advice(|| "psi full", &mut region, self.col_l, 0)?;
                 j1.copy_advice(|| "j1 (bits 0..2)", &mut region, self.col_m, 0)?;
-                // Assign k as witness (it's a Value from bitrange_of)
                 region.assign_advice(|| "k (bits 2..252)", self.col_r, 0, || *k.inner())?;
-                l0.copy_advice(|| "l0 (bits 252..255)", &mut region, self.col_z, 0)?;
+                j1_k_l0_prime.copy_advice(|| "j1_k_l0_prime", &mut region, self.col_z, 0)?;
+
+                // Row 1
+                l0.copy_advice(|| "l0 (bits 252..255)", &mut region, self.col_m, 1)?;
+                z26_j1_k_l0_prime.copy_advice(
+                    || "z26_j1_k_l0_prime",
+                    &mut region,
+                    self.col_z,
+                    1,
+                )?;
 
                 Ok(())
             },
@@ -1546,8 +1573,17 @@ impl NoteCommitChip {
             t_p.clone(),
         );
 
-        let psi =
-            PsiCanonicity::configure(meta, col_l, col_m, col_r, col_z, two_pow_2, two_pow_252);
+        let psi = PsiCanonicity::configure(
+            meta,
+            col_l,
+            col_m,
+            col_r,
+            col_z,
+            two_pow_2,
+            two_pow_252,
+            two_pow_254,
+            t_p,
+        );
 
         NoteCommitConfig {
             b,
@@ -1833,7 +1869,7 @@ pub(in crate::circuit) mod gadgets {
         )?;
 
         // Check decomposition of psi (j1, k, l0)
-        let (psi_prime, z25_psi) = psi_canonicity(
+        let (j1_k_l0_prime, z26_j1_k_l0_prime) = psi_canonicity(
             &lc,
             lo.namespace(|| "psi canonicity"),
             j1.clone(),
@@ -1885,8 +1921,15 @@ pub(in crate::circuit) mod gadgets {
             h1_i_j0_prime,
             z26_h1_i_j0_prime,
         )?;
-        cfg.psi.assign(&mut lo, psi, j1, k_value, l0)?;
-
+        cfg.psi.assign(
+            &mut lo,
+            psi,
+            j1,
+            k_value,
+            l0,
+            j1_k_l0_prime,
+            z26_j1_k_l0_prime,
+        )?;
         Ok(cm)
     }
 
@@ -2082,33 +2125,40 @@ pub(in crate::circuit) mod gadgets {
     fn psi_canonicity(
         lc: &LookupRangeCheckConfig<pallas::Base, 10>,
         mut lo: impl Layouter<pallas::Base>,
-        j1: RangeConstrained<pallas::Base, Value<pallas::Base>>,
-        k: AssignedCell<pallas::Base, pallas::Base>,
-        l0: RangeConstrained<pallas::Base, Value<pallas::Base>>,
+        j1: RangeConstrained<pallas::Base, Value<pallas::Base>>, // bits 0..2 (2 bits)
+        k: AssignedCell<pallas::Base, pallas::Base>,             // bits 2..252 (250 bits)
+        l0: RangeConstrained<pallas::Base, Value<pallas::Base>>, // bits 252..255 (3 bits)
     ) -> Result<CanonicityBounds, Error> {
-        let psi_full = {
-            let two_pow_7 = Value::known(pallas::Base::from(1u64 << 7));
-            let two_pow_240 = Value::known(pallas::Base::from(1u64 << 60).square().square());
-            let two_pow_247 = two_pow_240.value() * two_pow_7.value();
-            j1.inner().value() + k.value() * two_pow_7 + l0.inner().value() * two_pow_247
-        };
-        // Decompose the low 254 bits of psi_prime = psi_full + 2^254 - t_P,
-        // and output the running sum at the end of it.
-        // If psi_prime < 2^254, the running sum will be 0.
-        let psi_prime = {
-            let two_pow_254 = Value::known(pallas::Base::from_u128(1u128 << 127).square());
+        let j1_k_l0_prime = {
+            let two = pallas::Base::from(1u64 << 2);
+            let five = pallas::Base::from(1u64 << 5);
+            let seven = pallas::Base::from(1u64 << 7);
+            let sixty = pallas::Base::from(1u64 << 60);
+            let two_pow_2 = Value::known(two);
+            let two_pow_5 = Value::known(five);
+            let two_pow_7 = Value::known(seven);
+            let two_pow_240 = Value::known(sixty.square().square());
+            let two_pow_247 = two_pow_240 * two_pow_7;
+            let two_pow_252 = two_pow_247 * two_pow_5;
+            let two_pow_254 = two_pow_247 * two_pow_7;
             let t_p = Value::known(pallas::Base::from_u128(T_P));
-            psi_full + two_pow_254 - t_p
+            j1.inner().value()
+                + two_pow_2 * k.value()
+                + two_pow_252 * l0.inner().value()
+                + two_pow_254
+                - t_p
         };
+
         let zs = lc.witness_check(
-            lo.namespace(|| "Decompose low 254 bits of (psi + 2^254 - t_P)"),
-            psi_prime,
-            25, // 26 zs total: [z0..z25], z25=0 if psi_prime < 2^254
+            lo.namespace(|| "Decompose (j1 + k * 2^2 + l0 * 2^252 + 2^254 - t_P)"),
+            j1_k_l0_prime,
+            25,
             false,
         )?;
-        let psi_prime_cell = zs[0].clone();
-        assert_eq!(zs.len(), 26); // [z_0, z_1, ..., z_25]
-        Ok((psi_prime_cell, zs[25].clone()))
+
+        let j1_k_l0_prime_cell = zs[0].clone();
+        assert_eq!(zs.len(), 26); // [z_0, z_1, ..., z_26]
+        Ok((j1_k_l0_prime_cell, zs[25].clone()))
     }
 }
 
