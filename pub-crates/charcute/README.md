@@ -1,5 +1,5 @@
 # Charcute
-<!-- Charcuterie me madamouselle! -->
+<!-- Charcuterie me Mademoiselle! -->
 
 Public Suite for verifying and generating verifiable instances of headstashes.
 

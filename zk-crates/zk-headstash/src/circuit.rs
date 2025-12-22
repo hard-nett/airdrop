@@ -168,9 +168,6 @@ impl Circuit {
         let (epkx, epky) = spend.note.elig_sk().epk().xy();
         let recp = spend.note.recipient();
         let nd = spend.note.nd();
-        // let rho_new = output_note.rho();
-        // let psi_new = output_note.rseed().psi(&rho_new);
-        // let rcm_new = output_note.rseed().rcm(&rho_new);
 
         Circuit {
             path: Value::known(spend.merkle_path.auth_path()),
@@ -181,8 +178,7 @@ impl Circuit {
             rcm_old: Value::known(rcm_old),
             cm_old: Value::known(spend.note.commitment()),
             nk: Value::known(*spend.fvk.nk()),
-            // rcv: Value::known(rcv),
-            esk: Value::known(Secp256k1Fq::from_bytes(&esk.0.secret_bytes()).expect("valid Fq")),
+            esk: Value::known(Secp256k1Fq::from_bytes(&esk.secret_bytes()).expect("valid Fq")),
             epkx: Value::known(Secp256k1Fp::from_bytes(&epkx).expect("valid Fp")),
             epky: Value::known(Secp256k1Fp::from_bytes(&epky).expect("valid Fp")),
             fdi: Value::known(fdi.into()),
@@ -557,8 +553,10 @@ impl plonk::Circuit<pallas::Base> for Circuit {
 /// The verifying key for the Orchard Action circuit.
 #[derive(Debug)]
 pub struct VerifyingKey {
-    pub(crate) params: halo2_proofs::poly::commitment::Params<vesta::Affine>,
-    pub(crate) vk: plonk::VerifyingKey<vesta::Affine>,
+    /// params
+    pub params: halo2_proofs::poly::commitment::Params<vesta::Affine>,
+    /// vk
+    pub vk: plonk::VerifyingKey<vesta::Affine>,
 }
 
 impl VerifyingKey {
@@ -568,16 +566,6 @@ impl VerifyingKey {
         VerifyingKey { params, vk }
     }
 
-    /// loads a key from raw bytes for cosmswasm contracts.
-    pub fn load_cosmwasm(b: &[u8]) -> Self {
-        let params = halo2_proofs::poly::commitment::Params::new(K);
-        let circuit: Circuit = Default::default();
-        let vk = plonk::keygen_vk(&params, &circuit).unwrap();
-
-        // TODO: read params & vk from raw file
-
-        VerifyingKey { params, vk }
-    }
     /// Builds the verifying key.
     pub fn build() -> Self {
         let params = halo2_proofs::poly::commitment::Params::new(K);
@@ -646,8 +634,8 @@ impl Instance {
         v: NoteValue,
         recp: RecpAddr,
         nf: Nullifier,
-        // rk: VerificationKey<SpendAuth>,
         cmx: ExtractedNoteCommitment,
+        // rk: VerificationKey<SpendAuth>,
         // enable_spend: bool,
         // enable_output: bool,
     ) -> Self {
@@ -661,6 +649,47 @@ impl Instance {
             // rk,
             // enable_spend,
             // enable_output,
+        }
+    }
+    /// Constructs an [`Instance`] from its constituent parts in bytes.
+    pub fn from_bytes(bytes: Vec<u8>) -> Self {
+        const THREETWO: usize = 32;
+        const EIGHT: usize = 8;
+
+        const TOTAL_SIZE: usize = (5 * THREETWO) + EIGHT;
+
+        let mut offset = 0;
+        // Parse anchor (32 bytes)
+        let anchor: &[u8; 32] = &bytes[offset..offset + THREETWO].try_into().expect("anchor");
+        offset += THREETWO;
+
+        // Parse nd (32 bytes)
+        let nd: &[u8; 32] = &bytes[offset..offset + THREETWO].try_into().expect("nd");
+        offset += THREETWO;
+
+        // Parse v (u64, 8 bytes, little-endian)
+        let v_bytes = &bytes[offset..offset + EIGHT];
+        let v = u64::from_le_bytes(v_bytes.try_into().expect("v"));
+        offset += EIGHT;
+
+        // Parse nf (32 bytes)
+        let nf: &[u8; 32] = &bytes[offset..offset + THREETWO].try_into().expect("nf");
+        offset += THREETWO;
+
+        // Parse recp (32 bytes)
+        let recp = &bytes[offset..offset + THREETWO];
+        offset += THREETWO;
+
+        // Parse cmx (32 bytes)
+        let cmx: &[u8; 32] = &bytes[offset..offset + THREETWO].try_into().expect("cmx");
+
+        Instance {
+            anchor: Anchor::from_bytes(*anchor).expect("anchor"),
+            nd: NoteDenom::from(*nd),
+            v: NoteValue::from(v),
+            nf: Nullifier::from_bytes(nf).expect("msg"),
+            recp: RecpAddr::try_from(recp).expect(""),
+            cmx: ExtractedNoteCommitment::from_bytes(cmx).expect(""),
         }
     }
 
@@ -744,9 +773,7 @@ impl Proof {
 mod tests {
     use alloc::vec::Vec;
     use core::iter;
-    use secp256k1::{PublicKey, Secp256k1, SecretKey};
 
-    use ff::Field;
     use halo2_proofs::{circuit::Value, dev::MockProver};
     use pasta_curves::pallas;
     use rand::{rngs::OsRng, RngCore};
@@ -765,7 +792,7 @@ mod tests {
         let (_, fvk, esk, spent_note) = Note::dummy(&mut rng, None);
         let (epkx, epky) = esk.epk().xy();
         // 1. Generate secp256k1 key pair (esk, epk)
-        let e_sk_fq = Secp256k1Fq::from_bytes(&esk.0.secret_bytes()).expect("valid Fq");
+        let e_sk_fq = Secp256k1Fq::from_bytes(&esk.secret_bytes()).expect("valid Fq");
         let epkx = Secp256k1Fp::from_bytes(&epkx).expect("valid Fp");
         let epky = Secp256k1Fp::from_bytes(&epky).expect("valid Fp");
         let sender_address = spent_note.recipient();

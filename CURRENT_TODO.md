@@ -2,47 +2,30 @@
 
 ## Objective
 
-Refactor the `snap-n-pull` MetaMask Snap wallet implementation to integrate with the HeadstashSuite trait system, replacing Zcash-specific types and operations with Headstash-compatible equivalents.
+finish snap-n-pull optimization to just what we need:
+
+Specify our merkle path concretly four our custom circuit.
+
+- anchor: hashDomain root
+- MerklePath: 
+
+use hashdomain as anchor to have the correct root calulated for our merkle path validaity check This will ensure that this note is a part of the headstash instance.
+> -
+
+`hashDomain_root`
+`spent_note`
+
+- generate new mnemonic/save to encrypted snap state (for ephemeral cosmos keys will )
+- optional `MsgAddAuthenticator` during claiming
 
 ## Context
-
-- **Current State**: snap-n-pull is based on Zcash libraries (ZcashAddress, Zatoshis, Orchard/Sapling protocols)
-- **Target State**: Use HeadstashSuite traits (HeadstashInstance, HeadstashBitwiseInstance, HeadstashLaunchpadInstance)
-- **Reference Documentation**:
-  - HeadstashSuite specification: `docs/zk-headstash/suite.md`
-  - MetaMask Snap specification: `docs/zk-headstash/metamask-snap.md`
-  - Implementation location: `zk-crates/snap-n-pull/`
-  - Suite implementation: `zk-crates/zk-headstash/src/deploy/suite.rs`
 
 ## Tasks
 
 ### 1. Type System Migration
-<!-- 
-
-#### 1.1 Replace Zcash Address Types
-
-- **Current**: `ZcashAddress` (ZIP-316 unified addresses)
-- **Target**: Headstash-compatible address format (secp256k1 public keys)
-- **Files**:
-  - `src/wallet/wallet.rs`
-  - `src/wallet/bindgen/wallet.rs`
-  - `src/req/requests.rs`
-- **Action**:
-  - Create `HeadstashAddress` wrapper for secp256k1 public keys
-  - Support both hex (0x-prefixed) and base64 encoding (per suite.rs:215-222)
-  - Update all `ZcashAddress::try_from_encoded()` calls
-
-#### 1.2 Replace Value Types
-
-- **Current**: `Zatoshis` (Zcash atomic units)
-- **Target**: Multi-denomination support (uterp, IBC tokens, tokenfactory)
-- **Files**: `src/wallet/wallet.rs`
-- **Action**:
-  - Create `HeadstashValue { v: u64, nd: NoteDenom }` struct
-  - Replace all `Zatoshis::from_u64()` calls
-  - Update proposal/transaction methods to accept denomination parameter -->
 
 ### 2. Key Management Integration
+
 <!-- 
 #### 2.1 Adapt Key Derivation
 
@@ -75,7 +58,8 @@ Refactor the `snap-n-pull` MetaMask Snap wallet implementation to integrate with
   - Replace protocol-specific signing with generating spent note values, requireing derivation from secret-key -->
 
 ### 3. Wallet Database Integration
-<!-- #### 3.1 Note Management
+
+#### 3.1 Note Management
 
 - **Current**: `MemoryWalletDb` tracking Orchard/Sapling notes
 - **Target**: Track Headstash `Note` instances (unspent/spent)
@@ -116,20 +100,21 @@ await snap.request({
     encrypted: false,
   },
 });
-``` -->
-<!-- 
+```
+
 ### Important Considerations
 
-1. **Permission Required**:
+ **Permission Required**:
 
 You must request the `snap_manageState` permission in your Snap's manifest file
 
-3. **Encrypted Access**: Accessing encrypted state requires MetaMask to be unlocked
+  **Encrypted Access**: Accessing encrypted state requires MetaMask to be unlocked
 
 This approach provides flexibility for both sensitive and non-sensitive data storage needs in your Snap.
 
 #### 3.2 Headstash Discovery
 
+<!-- 
 - **Current**: N/A (direct blockchain sync)
 - **Target**: Query headstash market contract
 - **Files**: `src/wallet/wallet.rs`
@@ -330,3 +315,25 @@ This approach provides flexibility for both sensitive and non-sensitive data sto
 - Suite Spec: `docs/zk-headstash/suite.md`
 - Snap Spec: `docs/zk-headstash/metamask-snap.md`
 - Current Implementation: `zk-crates/snap-n-pull/`
+
+
+<!-- ## BACKUP
+
+Offchain aggregate:
+
+
+Verifiable Proof Engine
+
+// Smart Contract State Access By Vote Extensions
+1  smart contract input: Deploy Sdl
+1a pending/confirm/reject
+2  smart contract input: select provider (5 min window)
+2a pending/confirm/reject
+3  poll bitmap (will only ever increment per block change of akash network)
+4  trigger provider liveness down/expired  
+
+// validators runtime must communicate with headstash-api. They can set manually or query api-forum contract.
+
+// x/headstash 
+// - wasm-vm 
+ -->

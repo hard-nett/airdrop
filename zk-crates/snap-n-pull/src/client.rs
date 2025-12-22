@@ -25,6 +25,7 @@ use zk_headstash::gen::headstash::snp::v1::{
     headstash_snap_service_client::HeadstashSnapServiceClient, DownloadNullifierStateRequest,
     DownloadNullifierStateResponse, UploadNullifierStateRequest, UploadNullifierStateResponse,
 };
+use zk_headstash::r#gen::actions::v1::MsgPrepareNoteNullifier;
 
 use crate::wallet::wallet::{ClaimResponse, HeadstashInstance, HeadstashMetadata, ProofData};
 use crate::Error;
@@ -118,60 +119,6 @@ impl HeadstashClient {
         serde_json::from_slice(&vec![])
             .map_err(|e| Error::Js(format!("Failed to deserialize response: {}", e).into()))
     }
-
-    // /// Upload encrypted nullifier state to headstash-api
-    // ///
-    // /// This allows syncing spent nullifiers across devices.
-    // /// The data is encrypted to the user's public key before upload.
-    // ///
-    // /// # Arguments
-    // /// * `headstash_id` - Contract address (used as key prefix)
-    // /// * `encrypted_data` - Encrypted nullifier state
-    // /// * `signature` - Signature proving ownership of public key
-    // pub async fn upload_nullifier_state(
-    //     &self,
-    //     headstash_id: &str,
-    //     encrypted_data: Vec<u8>,
-    //     signature: Vec<u8>,
-    // ) -> Result<(), Error> {
-    //     let channel = self
-    //         .api_channel
-    //         .as_ref()
-    //         .ok_or_else(|| Error::Js("No API channel configured".into()))?;
-
-    //     let request = UploadNullifierStateRequest {
-    //         id: headstash_id.to_string(),
-    //         data: encrypted_data,
-    //         sig: signature,
-    //     };
-
-    //     Ok(())
-    // }
-
-    // /// Download encrypted nullifier state from headstash-api
-    // ///
-    // /// Retrieves the latest encrypted nullifier state for a headstash.
-    // ///
-    // /// # Arguments
-    // /// * `headstash_id` - Contract address (used as key prefix)
-    // /// * `public_key` - Public key to retrieve data for
-    // pub async fn download_nullifier_state(
-    //     &self,
-    //     headstash_id: &str,
-    //     public_key: &[u8],
-    // ) -> Result<Vec<u8>, Error> {
-    //     let channel = self
-    //         .api_channel
-    //         .as_ref()
-    //         .ok_or_else(|| Error::Js("No API channel configured".into()))?;
-
-    //     let request = DownloadNullifierStateRequest {
-    //         id: headstash_id.to_string(),
-    //         pk: public_key.to_vec(),
-    //     };
-
-    //     Ok(vec![])
-    // }
 
     /// Request feegrant for claiming a note
     ///
@@ -275,7 +222,7 @@ impl HeadstashClient {
     }
 }
 
-/// Feegrant request
+/// Feegrant request: Includes nullifier as each feegrant should occur just once per address
 pub struct FeegrantRequest {
     pub cosmos_msg: cosmos_sdk_proto::cosmos::feegrant::v1beta1::MsgGrantAllowance,
     pub grantee_address: String,
@@ -290,29 +237,6 @@ pub struct SmartAccountClaimRequest {
     pub signature: Vec<u8>,
 }
 
-// ============================================================================
-// Internal gRPC Functions (TODO: Replace with actual protobuf generated code)
-// ============================================================================
-
-/// Internal: Execute CosmWasm smart contract query
-///
-/// Uses cosmos-sdk-proto to query CosmWasm smart contracts
-async fn query_wasm_smart_internal(
-    channel: Channel,
-    request: CosmosQueryRequest,
-) -> Result<QuerySmartContractStateResponse, Box<dyn std::error::Error>> {
-    Ok(QuerySmartContractStateResponse {
-        data: WasmQueryClient::new(channel)
-            .smart_contract_state(CosmosQueryRequest {
-                address: request.address,
-                query_data: request.query_data,
-            })
-            .await?
-            .into_inner()
-            .data,
-    })
-}
-
 /// Internal: Submit smart account claim
 async fn submit_smart_account_claim_internal(
     channel: Channel,
@@ -322,17 +246,21 @@ async fn submit_smart_account_claim_internal(
     let mut client = HeadstashSnapServiceClient::new(channel);
 
     // Create claim request with proof data
-    let request = zk_headstash::gen::headstash::snp::v1::ClaimHeadstashRequest {};
-
-    let response = client.claim_headstash(request).await?;
+    let response = client
+        .claim_headstash(zk_headstash::gen::snp::v1::MsgClaimHeadstashRequest {
+            proof: proof_data.proof,
+            instance: proof_data.instances,
+            hid: headstash_id.to_string(),
+        })
+        .await?;
     let inner = response.into_inner();
 
     // Parse response into ClaimResponse
     Ok(ClaimResponse {
-        tx_hash: inner.id,
+        tx_hash: "inner".into(),
         height: 0, // API doesn't return height yet
         code: 0,   // Assume success if no error
-        raw_log: String::from_utf8_lossy(&inner.msg).to_string(),
+        raw_log: "inner.msg".to_string(),
     })
 }
 

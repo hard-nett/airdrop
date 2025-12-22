@@ -21,7 +21,7 @@ In order to prevent this association between verifying ownership & claiming toke
 
 ### Q: How can someone prevent leaking where their claimed funds end up, if the total amount & distributions allocated are public?
 
-**A: Fixed Denomination Notes**: notes function as private UTXOs (Unspent Transaction Outputs) that represent claims to portions of the airdropped tokens. Each note contains sensitive data that must remain private, except for certain public components used for verification and transaction processing.
+**A: Fixed Denomination Notes**: notes function as private UTXNs (Unspent Transaction Notes) that represent claims to portions of the airdropped tokens. Each note contains sensitive data that must remain private, except for certain public components used for verification and transaction processing.
 
 A predetermined set of notes for users are generated based on initial allocations, classified by fixed-denomination amounts. Partial claims of genesis allocations are then possible, and allows eligble claimers to designate unique addresses for receiving allocations over a span of time rather than immediately.
 
@@ -622,7 +622,6 @@ Note commit chip constrains the derivation of the `cm` value, via decomposition 
 |`padding`|`i4:0..7` | 7 |
 || **`1403`** |
 
-## HeadstashAPI: Verifiable Service Mesh
 
 full docs: [Documentation](./mesh-api)
 

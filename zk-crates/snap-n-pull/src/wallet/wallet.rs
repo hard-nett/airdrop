@@ -36,15 +36,13 @@ use zk_headstash::keys::SpendingKey;
 use zk_headstash::keys::{EligiblePk, EligibleSk, NullifierDerivingKey};
 use zk_headstash::note::{Note, RandomSeed};
 use zk_headstash::note::{NoteCommitment, Nullifier, Rho};
-use zk_headstash::r#gen::snp::v1::*;
+
 use zk_headstash::tree::MerkleHashOrchard;
 use zk_headstash::tree::MerklePath;
 use zk_headstash::value::HeadstashValue;
 use zk_headstash::Anchor;
-use zk_headstash::Proof;
 
 use crate::client::HeadstashClient;
-use crate::crypto::{decrypt_nullifier_state, encrypt_nullifier_state, NullifierState};
 
 /// Response from a headstash claim submission
 #[derive(Debug, Clone, Serialize)]
@@ -173,7 +171,6 @@ impl HeadstashWallet {
         let client = HeadstashClient::new(None, api_url).await?;
 
         Ok(Self {
-            // db: Arc::new(RwLock::new(db)),
             network,
             client: Some(client),
         })
@@ -193,27 +190,30 @@ impl HeadstashWallet {
         hi: &HeadstashInstance,
         md: &HeadstashMetadata,
     ) -> Result<ProofData, Error> {
-        let a = Anchor::from_bytes(md.mr.as_slice().try_into().expect("darg")).expect("bvad");
-        let mp = MerklePath::from_parts(
-            1,
-            md.mp
-                .iter()
-                .map(|l| {
-                    MerkleHashOrchard::from_bytes(l.as_slice().try_into().unwrap()).expect("darng")
-                })
-                .collect::<Vec<_>>()
-                .try_into()
-                .expect("Expected exactly 32 merkle path elements"),
-        );
-        let recp = RecpAddr::new(md.recp.as_slice().try_into().expect("darn"));
-
-        let proof: Proof = HeadstashSuite::new()
-            .create_headstash_proof(a, mp, esk, recp, md.hv)
-            .await
-            .map_err(|e| Error::KeyDecoding(e.to_string()))?;
-
         Ok(ProofData {
-            proof: proof.as_ref().to_vec(),
+            proof: HeadstashSuite::new()
+                .create_headstash_proof(
+                    Anchor::from_bytes(md.mr.as_slice().try_into().expect("darg")).expect("bvad"),
+                    MerklePath::from_parts(
+                        1,
+                        md.mp
+                            .iter()
+                            .map(|l| {
+                                MerkleHashOrchard::from_bytes(l.as_slice().try_into().unwrap())
+                                    .expect("darng")
+                            })
+                            .collect::<Vec<_>>()
+                            .try_into()
+                            .expect("Expected exactly 32 merkle path elements"),
+                    ),
+                    esk,
+                    RecpAddr::new(md.recp.as_slice().try_into().expect("darn")),
+                    md.hv,
+                )
+                .await
+                .map_err(|e| Error::KeyDecoding(e.to_string()))?
+                .as_ref()
+                .to_vec(),
             instances: vec![],
             nullifier: md.nf.to_bytes().to_vec(),
         })
@@ -644,7 +644,7 @@ fn sign_message(message: &[u8], sk: &EligibleSk) -> Result<Vec<u8>, Error> {
         .map_err(|e| Error::Js(format!("Invalid message: {}", e).into()))?;
 
     // Sign
-    let signature = secp.sign_ecdsa(message, &sk.0);
+    let signature = secp.sign_ecdsa(message, &sk.secret_key());
 
     Ok(signature.serialize_compact().to_vec())
 }

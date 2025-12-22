@@ -14,6 +14,7 @@ use group::{
 };
 use pasta_curves::pallas;
 use rand::RngCore;
+use secp256k1::SecretKey;
 use subtle::{Choice, ConditionallySelectable, ConstantTimeEq, CtOption};
 use zcash_note_encryption::EphemeralKeyBytes;
 
@@ -919,7 +920,7 @@ impl SharedSecret {
 
 /// eligible secret key
 #[derive(Debug, Copy, Clone)]
-pub struct EligibleSk(pub secp256k1::SecretKey);
+pub struct EligibleSk(secp256k1::SecretKey);
 
 impl EligibleSk {
     /// derive from an secp256k1 crate value
@@ -948,25 +949,28 @@ impl EligibleSk {
     ///
     /// The function will `panic!` if the string is not a valid 32‑byte hex value.
     pub fn from_hex(hex_str: &str) -> Self {
-        // 1️⃣ Decode the hex string into raw bytes (expect exactly 32 bytes).
-        let bytes: [u8; 32] = hex_str
-            .as_bytes()
-            .try_into()
-            .expect("slice conversion to [u8;32] should never fail");
-
-        // 3️⃣ Convert the byte slice into a `SecretKey`.
-        // `SecretKey::from_slice` returns a Result; we unwrap because the HKDF
-        // mask guarantees the scalar is valid – adjust if you want graceful errors.
-        let secp_sk = secp256k1::SecretKey::from_byte_array(bytes)
-            .expect("invalid secp256k1 secret key material");
-
-        // 4️⃣ Wrap and return.
-        Self(secp_sk)
+        Self(
+            secp256k1::SecretKey::from_byte_array(
+                hex_str
+                    .as_bytes()
+                    .try_into()
+                    .expect("slice conversion to [u8;32] should never fail"),
+            )
+            .expect("invalid secp256k1 secret key material"),
+        )
     }
 
     /// the public key paired with this secret key
     pub fn epk(&self) -> EligiblePk {
         EligiblePk(self.0.public_key(&secp256k1::Secp256k1::new()))
+    }
+    /// the public key paired with this secret key
+    pub fn secret_bytes(&self) -> [u8; 32] {
+        self.0.secret_bytes()
+    }
+    /// the public key paired with this secret key
+    pub fn secret_key(&self) -> SecretKey {
+        self.0
     }
 
     /// derive the pallas field element representation of the secp256k1 foreign field esk

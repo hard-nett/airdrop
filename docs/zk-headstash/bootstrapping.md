@@ -1,15 +1,46 @@
-# Bootstrapping A Headstash
+# Creating A New Headstash - Step-by-Step
 
-## HeadstashAPI
+## Step 0. Specify Inital Parameters
 
-- allows headstash data to be registered and uploaded after generated
+## Step 1: Generate Headstash.Yaml
+
+### a. Collect Eligible Public Keys
+
+### b. Determine Piecewise-Linear-Curves within each collection of eligible keys
+
+### c. Determine Weighted Token Per Point for all eligible keys
+
+## Step 2: Upload Parameters to IPFS
+
+### Step 3. Register Headstash On-Chain
+
+# Step-By-Step: Claiming A Headstash
+
+## 0. Verifying Source Code Authenticity & Integrity
+
+## 1. Download Wallet Extensions: Metamask Snap & Cosmos Compatible Wallet
+
+>
+> - preinstalled with Terp Network headstash circuit proving and verification keys.
+> - support to browse/import verification keys
+
+## 2. Go to `https://app.terp.network`
+
+## 3. Approve Retrieval Of Headstash.yaml
+
+## 4. Connect Metamask & View Balances
+
+## 5. Determine Spent Note Destination
+
+## 6. Generate Spent Note Instance & Proof
+
+## 7. Broadcast Spent Proof
 
 ### 1. Genesis Distribution Tree Construction
 
 First, the tree is constructed by separating separating all distributions into the smallest amount of fixed denomination notes, for each token allocated (The Headstash Airdrop distributes TERP & THIOL, so there is a set of leaves for each address due to their allocation including 2 tokens.). We generate leaves in an non-interactive manner using the pre-known public information available:
 
 ### 2. Compiling Circuit `ProvingKey` & `VerifyKey`
-
 
 ### 2: Deploy Verifiable Proxy Service
 

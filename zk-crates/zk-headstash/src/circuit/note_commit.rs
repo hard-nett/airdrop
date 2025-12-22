@@ -1,5 +1,5 @@
 // each piece has bit length that is of multiple of 10.
-// if message is built from > 1 messagePieces, each piece must be > 64 bits
+// if message is built from > 1 messagePieces, each piece must be < 64 bits
 // we hav n pieces of data ordered in ∫ sequence to create note-commit.
 // l is length of total sum of bits in n
 // we keep track of each n bounds coordiates (start,end) in set of ∫

@@ -27,123 +27,6 @@ pub struct NullifierState {
     pub spent_notes: Vec<SerializedNoteData>,
 }
 
-/// Encrypt nullifier state for sync
-///
-/// This uses ECIES (Elliptic Curve Integrated Encryption Scheme) to encrypt
-/// spent note data to the user's public key.
-///
-/// # Arguments
-/// * `state` - Nullifier state to encrypt
-/// * `recipient_pk` - Public key to encrypt to
-/// * `sender_sk` - Secret key for signing (proves origin)
-///
-/// # Security
-/// - Uses ephemeral key for forward secrecy
-/// - Includes MAC for authentication
-/// - Signature proves data origin
-///
-/// # Example
-/// ```rust,ignore
-/// let state = NullifierState {
-///     headstash_id: "terp1contract123".to_string(),
-///     spent_notes: vec![...],
-/// };
-/// let encrypted = encrypt_nullifier_state(&state, &recipient_pk, &my_sk)?;
-/// ```
-pub fn encrypt_nullifier_state(
-    state: &NullifierState,
-    recipient_pk: &EligiblePk,
-    sender_sk: &EligibleSk,
-) -> Result<EncryptedNullifierState, Error> {
-    // 1. Serialize the state
-    let plaintext = serde_json::to_vec(state)
-        .map_err(|e| Error::Js(format!("Failed to serialize state: {}", e).into()))?;
-
-    // 2. Generate ephemeral key pair for this encryption
-    let mut ephemeral_bytes = [0u8; 32];
-
-    let ephemeral_sk = EligibleSk::from_hex(&hex::encode(ephemeral_bytes));
-    let ephemeral_pk = ephemeral_sk.epk();
-
-    // 3. Derive shared secret using ECDH
-    // shared_secret = ephemeral_sk * recipient_pk
-    let shared_secret = ecdh(&ephemeral_sk, recipient_pk)?;
-
-    // 4. Derive encryption key and MAC key from shared secret
-    let (enc_key, mac_key) = derive_keys(&shared_secret);
-
-    // 5. Encrypt plaintext with XOR (or use AES-256-GCM in production)
-    let ciphertext = xor_encrypt(&plaintext, &enc_key);
-
-    // 6. Compute MAC over ciphertext
-    let mac = compute_mac(&ciphertext, &mac_key);
-
-    // 7. Sign the entire payload
-    let message_to_sign = create_signature_message(&ephemeral_pk, &ciphertext, &mac);
-    let signature = sign_message(&message_to_sign, sender_sk)?;
-
-    Ok(EncryptedNullifierState {
-        epk: ephemeral_pk.0.to_string().into_bytes(),
-        ciphertext,
-        mac: mac.to_vec(),
-        signature,
-    })
-}
-
-/// Decrypt nullifier state received from sync
-///
-/// This verifies the signature and MAC, then decrypts the nullifier state.
-///
-/// # Arguments
-/// * `encrypted` - Encrypted payload from headstash-api
-/// * `recipient_sk` - Secret key to decrypt with
-/// * `sender_pk` - Expected sender's public key (for signature verification)
-///
-/// # Returns
-/// Decrypted and verified nullifier state
-///
-/// # Example
-/// ```rust,ignore
-/// let state = decrypt_nullifier_state(&encrypted, &my_sk, &sender_pk)?;
-/// for note in state.spent_notes {
-///     // Merge into local database
-/// }
-/// ```
-pub fn decrypt_nullifier_state(
-    encrypted: &EncryptedNullifierState,
-    recipient_sk: &EligibleSk,
-    sender_pk: &EligiblePk,
-) -> Result<NullifierState, Error> {
-    let ephemeral_pk = EligiblePk::from(&encrypted.epk);
-
-    let message_to_verify = create_signature_message(
-        &ephemeral_pk,
-        &encrypted.ciphertext,
-        encrypted.mac.as_slice().try_into().unwrap(),
-    );
-    verify_signature(&message_to_verify, &encrypted.signature, sender_pk)?;
-
-    // 2. Derive shared secret using ECDH
-    // shared_secret = recipient_sk * ephemeral_pk
-    let shared_secret = ecdh(recipient_sk, &ephemeral_pk)?;
-
-    // 3. Derive keys
-    let (enc_key, mac_key) = derive_keys(&shared_secret);
-
-    // 4. Verify MAC
-    let computed_mac = compute_mac(&encrypted.ciphertext, &mac_key);
-    if computed_mac.to_vec() != encrypted.mac {
-        return Err(Error::Js("MAC verification failed".into()));
-    }
-
-    // 5. Decrypt
-    let plaintext = xor_encrypt(&encrypted.ciphertext, &enc_key);
-
-    // 6. Deserialize
-    serde_json::from_slice(&plaintext)
-        .map_err(|e| Error::Js(format!("Failed to deserialize state: {}", e).into()))
-}
-
 // ============================================================================
 // Cryptographic Primitives
 // ============================================================================
@@ -153,7 +36,7 @@ fn ecdh(sk: &EligibleSk, pk: &EligiblePk) -> Result<[u8; 32], Error> {
     use secp256k1::ecdh::SharedSecret;
 
     let secp = secp256k1::Secp256k1::new();
-    let secret_key = sk.0;
+    let secret_key = sk.secret_key();
     let public_key = pk.0;
 
     let shared = SharedSecret::new(&public_key, &secret_key);
@@ -174,15 +57,6 @@ fn derive_keys(shared_secret: &[u8; 32]) -> ([u8; 32], [u8; 32]) {
     let mac_key: [u8; 32] = hasher.finalize().into();
 
     (enc_key, mac_key)
-}
-
-/// Simple XOR encryption (replace with AES-256-GCM in production)
-fn xor_encrypt(data: &[u8], key: &[u8; 32]) -> Vec<u8> {
-    let mut result = Vec::with_capacity(data.len());
-    for (i, byte) in data.iter().enumerate() {
-        result.push(byte ^ key[i % 32]);
-    }
-    result
 }
 
 /// Compute MAC over data
@@ -218,7 +92,7 @@ fn sign_message(message: &[u8], sk: &EligibleSk) -> Result<Vec<u8>, Error> {
         .map_err(|e| Error::Js(format!("Invalid message: {}", e).into()))?;
 
     // Sign
-    let signature = secp.sign_ecdsa(message, &sk.0);
+    let signature = secp.sign_ecdsa(message, &sk.secret_key());
 
     Ok(signature.serialize_compact().to_vec())
 }

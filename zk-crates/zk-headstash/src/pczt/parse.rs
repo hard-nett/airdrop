@@ -128,7 +128,7 @@ impl Spend {
 
         let recipient = recipient.map(|r| RecpAddr::new(r));
 
-        let value = value.map(NoteValue::from_raw);
+        let value = value.map(NoteValue::from);
         let nd = nd.map(NoteDenom::from);
         let fdi = fdi.map(u64::from);
 
@@ -247,7 +247,7 @@ impl Output {
             .as_ref()
             .map(|r| RecpAddr::try_from(r.as_slice()).unwrap());
 
-        let v = v.map(NoteValue::from_raw);
+        let v = v.map(NoteValue::from);
         let nd = nd.map(NoteDenom::from);
 
         let rseed = rseed

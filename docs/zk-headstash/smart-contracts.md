@@ -1,4 +1,4 @@
-# **Cw-Headstash v2 – CosmosWasm Authenticator + Privacy-Preserving Distribution Hub**  
+# **Cw-Headstash – on-chain manifold
 
 **A modular, BLS12-381 threshold-authenticated smart contract authenticator on a custom Cosmos SDK chain using CosmWasm Authenticators (AnteHandler extension)**
 

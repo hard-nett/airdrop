@@ -4,8 +4,7 @@ use rand_core::OsRng;
 use rayon::prelude::*;
 
 use std::error::Error;
-use std::fs::File;
-use std::io::{BufWriter, Write};
+
 use std::path::{Path, PathBuf};
 use std::string::{String, ToString};
 use std::sync::Mutex;

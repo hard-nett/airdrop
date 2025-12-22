@@ -8,7 +8,6 @@ import { fairPercentileRanges, applyNormalizationToAllProjects, generateOverview
 import { SAC_ENCODED_FILE, SAC_JSON_PATH, HEADSTASH_YAML, ETH_RPC_URL } from './constants.js';
 import { readYamlFile } from './utils.js'
 import { determineAllPubkeys } from './pubkeys.js'
-// import { generateYamlConfig } from './headstash-scripts.js'
 
 // Process command line arguments
 const args = process.argv.slice(2);

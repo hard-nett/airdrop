@@ -4,50 +4,34 @@ package headstash.snp.v1;
 
 import "google/protobuf/struct.proto";
 
+// serialized note data 
+message SerializedNoteData {
+    ///  [nk,nul,nc,v,nd,fdi,recp,spent(bool)]
+    repeated bytes set = 1;
+}
+
+// claim a headstash note and broadcast claim 
+message MsgClaimHeadstashRequest {
+      // proof bytes
+      bytes proof = 1;
+      // instances:  [nk,nul,nc,v,nd,fdi,recp,spent(bool)]
+      repeated bytes instance = 2;
+      // headstash contract address
+      string hid = 3;
+}
+
+
+// response of claiming a headhstash note
+message MsgClaimHeadstashResponse {}
 
 service HeadstashSnapService {
-      // find new headstash
-      // list headstash info 
-      // perform headstash action
-  // Gets the app parameters.
-  rpc NoteByNullifier(GetNoteByNullifierRequest) returns (GetNoteByNullifierResponse);
-  rpc ListUnspentNotes(ListUnspentNotesRequest) returns (ListUnspentNotesResponse);
-  rpc ListSpentNotes(ListSpentNotesRequest) returns (ListSpentNotesResponse);
-  rpc DownloadNullifierState(ListSpentNotesRequest) returns (DownloadNullifierStateResponse);
-  rpc ClaimHeadstash(ClaimHeadstashRequest) returns (ClaimHeadstashResponse);
+    // claim a headstash 
+    rpc ClaimHeadstash(MsgClaimHeadstashRequest) returns (MsgClaimHeadstashResponse);
+    // find new headstash
+    // list headstash info 
+    // perform headstash action
 }
-
-// Requests the list of all transactions that occurred within a given block.
-message ListSpentNotesRequest {
-
-}
-
-// Requests the list of all transactions that occurred within a given block.
-message ListSpentNotesResponse {
-
-}
-
-// Requests the list of all transactions that occurred within a given block.
-message ListUnspentNotesRequest {
- 
-}
-// Requests the list of all transactions that occurred within a given block.
-message ListUnspentNotesResponse {
- 
-}
-
-// Requests the list of all transactions that occurred within a given block.
-message GetNoteByNullifierRequest {
-    // nullifier
-    string nul = 1;
-}
-
-// A transaction that appeared within a given block.
-message GetNoteByNullifierResponse {
-         // id 
- string id =1;
-
-}
+   
 // A transaction that appeared within a given block.
 message DownloadNullifierStateResponse {
     // data
@@ -74,48 +58,4 @@ message UploadNullifierStateRequest {
 message UploadNullifierStateResponse {
  
 }
-// A transaction that appeared within a given block.
-message ClaimHeadstashRequest {
- 
-}
-// A transaction that appeared within a given block.
-message ClaimHeadstashResponse {
-    // id of claim
-    string id = 1;
-    // msg of claim
-    bytes msg = 2;
-    // signature of claim
-    bytes signature = 3;
-}
-
-// Encrypted payload for nullifier state sync
-message EncryptedNullifierState {
-    // eligible public key
-    bytes epk = 1;
-    // ciphertext
-    bytes ciphertext = 2;
-    // mac
-    bytes mac = 3;
-    // signature
-    bytes signature = 4;
-}
- 
- // serialized note data 
-message SerializedNoteData {
-    // nullifier key
-    bytes nk = 1;
-    // nullifier 
-    bytes nul = 2;
-    // note-commitment
-    bytes cm = 3;
-    // value
-    string v = 4;
-    // note-denom
-    string nd = 5;
-    // fixed index
-    uint64 fdi = 6;
-    // spent 
-    bool spent = 7;
-}
-
  

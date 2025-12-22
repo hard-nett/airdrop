@@ -1,9 +1,13 @@
 
 // inputs
+// total tokens in headstash begin distributed
+const BASE_ALLOCATION = 67000000;
+// total supply of token
 const TOTAL_SUPPLY = 420000000;
+
+// pecentrages of genesis airdrop to gaia & bcna holders
 const GAIA_PERC_SUPPLY = 0.061152;
 const BCNA_PERC_SUPPLY = 0.01911;
-const BASE_ALLOCATION = 67000000;
 
 const ETH_RPC_URL = "https://mainnet.infura.io/v3/YOUR_KEY";
 // YAML files

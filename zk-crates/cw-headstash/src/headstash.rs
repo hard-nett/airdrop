@@ -10,50 +10,18 @@ use zk_headstash::value::{NoteDenom, NoteValue};
 
 use std::collections::{HashMap, HashSet};
 use std::io::{self, Cursor};
-use std::str::FromStr;
+
 use zk_headstash::circuit::{Instance, VerifyingKey};
 use zk_headstash::{Anchor, Proof};
 
-/// lazily load the dedicated headstash circuit key to smart contract params
-pub static VK: LazyLock<VerifyingKey> = LazyLock::new(|| {
-    VerifyingKey::load_cosmwasm(include_bytes!("../../../data/keys/proving_key.bin"))
-});
-
-// Helper function to skip VK bytes (reads through VK without storing)
-fn skip_vk_bytes<R: io::Read>(reader: &mut R) -> io::Result<()> {
-    // Version byte
-    let mut version = [0u8; 1];
-    reader.read_exact(&mut version)?;
-
-    // Fixed commitments
-    let mut len_bytes = [0u8; 4];
-    reader.read_exact(&mut len_bytes)?;
-    let fixed_commitments_len = u32::from_le_bytes(len_bytes) as usize;
-    for _ in 0..fixed_commitments_len {
-        let mut commitment_bytes = [0u8; 64]; // Adjust based on your curve
-        reader.read_exact(&mut commitment_bytes)?;
-    }
-
-    // Skip permutation bytes (implement based on permutation::VerifyingKey::write)
-    // ...
-
-    // Skip selectors
-    reader.read_exact(&mut len_bytes)?;
-    let selectors_len = u32::from_le_bytes(len_bytes) as usize;
-    // Skip the actual selector bytes...
-
-    Ok(())
-}
-
 #[cosmwasm_schema::cw_serde]
 pub struct HeadstashCfg {
-    // gr: genesis tree root hash
+    // gr: genesis tree root
     pub gr: Binary,
     // ts: token strategies
     pub ts: Vec<TokenStrategy>,
     // w: wavs operator set
     pub w: WavsOperatorSet,
-    // pub created_at: u64,
 }
 
 #[cosmwasm_schema::cw_serde]
@@ -89,6 +57,7 @@ pub struct HeadstashInstances {
     pub cmx: Binary,
 }
 
+/// Implement CosmWasm Instance as a Halo2 Circuit Instance Struct
 impl Into<Instance> for HeadstashInstances {
     fn into(self) -> Instance {
         Instance::from_parts(
@@ -130,10 +99,10 @@ pub fn set_verifying_key(
 ) -> Result<Response<TokenFactoryMsg>, StdError> {
     // ensure sender is this contract owner (or this contract)
     // hash & save vk
-
     let mut r: Response<TokenFactoryMsg> = Response::new();
     Ok(r)
 }
+
 /// Validates nullifiers uniqueness & distribute funds
 pub fn process_headstash(
     deps: DepsMut,
@@ -162,7 +131,8 @@ pub fn process_headstash(
         }
 
         // verify headstash proof
-        Proof::new(claim.p.to_vec()).verify(&VK, &[claim.i.clone().into()])?;
+        // Proof::new(claim.p.to_vec()).verify(&VK, &[claim.i.clone().into()])?;
+
         // verify recp integrity
         claim.verify_recp_posiedon_hash()?;
 

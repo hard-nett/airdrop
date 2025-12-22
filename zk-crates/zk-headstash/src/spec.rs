@@ -338,7 +338,7 @@ pub(crate) fn esk_to_base(esk: &crate::keys::EligibleSk) -> pallas::Base {
         crate::spec::decompose_biguint_simple(
             &halo2_base::utils::fe_to_biguint(
                 &halo2_base::halo2_proofs::halo2curves::secq256k1::Fp::from_repr(
-                    esk.0.secret_bytes(),
+                    esk.secret_bytes(),
                 )
                 .expect("valid Fq"),
             ),

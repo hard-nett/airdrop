@@ -31,32 +31,21 @@ HeadstashWallet
 
 **Key Functions**:
 
-- `new(network, api_url, grpc_url)` - Create wallet instance
+- `new(network, api_url, grpc_url)` - new runtime instance of snap-n-pull
 - `gen_claim(...)` - Generate note data (nullifier, commitment, nk)
-- `claim_via_manual(...)` - Manual claim (pay own gas)
-- `claim_via_feegrant(...)` - Claim with fee grant
-- `claim_via_smart_account(...)` - **PRIMARY METHOD** - Gasless claim via smart account
 
 **Security Principles**:
-- Never stores secret keys
-- Only requests ESK from MetaMask when needed
-- Clears ESK from memory immediately after use
-- Only public data (nullifier, commitment, pk) returned to JavaScript
+
+- NEVER stores/exports/leaks info about secret keys
+- ONLY public data (nullifier, commitment, pk) returned to JavaScript
+- AUTHENTICATION REQUIRED for importing/exporting headstash keys from GRPC.
 
 ### 2. HeadstashWallet (Core Logic)
 
 **Location**: `src/wallet/wallet.rs`
 
 **Key Functions**:
-
-```rust
-pub async fn claim_headstash_via_smart_account(
-    headstash_id: String,
-    esk: EligibleSk,
-    nullifier: Nullifier,
-) -> Result<ClaimResponse, Error>
-```
-
+ 
 **Workflow**:
 
 1. Check for cached verification key (VK) by headstash ID
@@ -100,6 +89,7 @@ pub async fn query_wasm_smart<T>(
 ```
 
 **Fallback Chain**:
+
 1. **headstash-api** (fastest, cached)
 2. **Blockchain** via CosmWasm query (source of truth)
 3. **IPFS** direct (if CID known)
@@ -121,6 +111,7 @@ ESK (32 bytes, from MetaMask)
 ```
 
 **Key Properties**:
+
 - Same `(esk, rho)` → Same nullifier (deterministic)
 - Different `esk` → Different nullifier
 - Different `rho` → Different nullifier
@@ -189,6 +180,7 @@ use zk_headstash::{
 ```
 
 **Circuit Integration** (TODO):
+
 - Proof generation via `gen_proof_witness()` will call zk-headstash circuit
 - Uses Halo2 for zkSNARK proof generation
 - Proving key loaded from cache or downloaded

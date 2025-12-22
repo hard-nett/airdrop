@@ -128,6 +128,10 @@ impl NoteDenom {
         pallas::Base::from_repr(self.bytes).expect("darn")
     }
     /// Return the raw bytes (including unused trailing zeros).
+    pub fn to_fp(&self) -> pallas::Base {
+        crate::spec::nd_to_fp(self)
+    }
+    /// Return the raw bytes (including unused trailing zeros).
     pub fn to_cosmwasm(&self) -> cosmwasm_std::Binary {
         cosmwasm_std::Binary::new(self.as_bytes().to_vec())
     }
