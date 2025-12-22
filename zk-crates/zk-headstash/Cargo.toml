@@ -18,7 +18,6 @@ headstash-randomness  = { workspace = true,  optional = true }
 plume_rustcrypto  = { workspace = true }
 halo2_gadgets  = { workspace = true, optional = true }
 halo2_proofs  = { workspace = true , optional = true}
-halo2-ecc   = { workspace = true }
 halo2-base  = { workspace = true }
 anybuf  = { workspace = true }
 
