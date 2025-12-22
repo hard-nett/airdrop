@@ -1641,7 +1641,6 @@ dependencies = [
  "digest",
  "elliptic-curve",
  "rfc6979",
- "serdect",
  "signature",
  "spki",
 ]
@@ -1703,7 +1702,6 @@ dependencies = [
  "pkcs8",
  "rand_core 0.6.4",
  "sec1",
- "serdect",
  "subtle",
  "zeroize",
 ]
@@ -2502,12 +2500,6 @@ dependencies = [
 
 [[package]]
 name = "hex-literal"
-version = "0.3.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7ebdb29d2ea9ed0083cd8cece49bbd968021bd99b0849edb4a9a7ee0fdf6a4e0"
-
-[[package]]
-name = "hex-literal"
 version = "1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e712f64ec3850b98572bffac52e2c6f282b29fe6c5fa6d42334b30be438d95c1"
@@ -2976,7 +2968,6 @@ dependencies = [
  "ecdsa",
  "elliptic-curve",
  "once_cell",
- "serdect",
  "sha2",
  "signature",
 ]
@@ -3645,21 +3636,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "51bae2ac328883f7acdfea3d66a7c35751187f870bc81f94563733a154d7a670"
 dependencies = [
  "plotters-backend",
-]
-
-[[package]]
-name = "plume_rustcrypto"
-version = "0.2.1"
-dependencies = [
- "blake3",
- "hex",
- "hex-literal 0.3.4",
- "k256",
- "num-bigint 0.4.6",
- "num-integer",
- "rand_core 0.6.4",
- "serde",
- "signature",
 ]
 
 [[package]]
@@ -4519,7 +4495,6 @@ dependencies = [
  "der",
  "generic-array",
  "pkcs8",
- "serdect",
  "subtle",
  "zeroize",
 ]
@@ -4677,16 +4652,6 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 2.0.108",
-]
-
-[[package]]
-name = "serdect"
-version = "0.2.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a84f14a19e9a014bb9f4512488d9829a68e04ecabffb0f9904cd1ace94598177"
-dependencies = [
- "base16ct",
- "serde",
 ]
 
 [[package]]
@@ -6468,7 +6433,7 @@ dependencies = [
  "halo2_proofs",
  "headstash-randomness",
  "hex",
- "hex-literal 1.1.0",
+ "hex-literal",
  "hkdf",
  "image",
  "incrementalmerkletree",
@@ -6481,7 +6446,6 @@ dependencies = [
  "num-traits",
  "pasta_curves",
  "plotters",
- "plume_rustcrypto",
  "poseidon-rs",
  "proptest",
  "prost 0.14.1",

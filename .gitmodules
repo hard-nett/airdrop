@@ -10,16 +10,16 @@
 [submodule " submodules/orchard"]
 	path = zk-crates/submodules/orchard
 	url = https://github.com/zcash/orchard
-[submodule "zk-crates/submodules/zk-nullifier-sig"]
-	path = zk-crates/submodules/zk-nullifier-sig
-	url = https://github.com/plume-sig/zk-nullifier-sig/
+# [submodule "zk-crates/submodules/zk-nullifier-sig"]
+# 	path = zk-crates/submodules/zk-nullifier-sig
+# 	url = https://github.com/plume-sig/zk-nullifier-sig/
 [submodule "zk-crates/submodules/sapling-crypto"]
 	path = zk-crates/submodules/sapling-crypto
 	url = https://github.com/zcash/sapling-crypto
-[submodule "zk-crates/submodules/halo2-lib"]
-	path = zk-crates/submodules/halo2-lib
-	url = https://github.com/shreyas-londhe/halo2-lib
-	branch = feat/secp256k1-hash2curve-poseidon
+# [submodule "zk-crates/submodules/halo2-lib"]
+# 	path = zk-crates/submodules/halo2-lib
+# 	url = https://github.com/shreyas-londhe/halo2-lib
+# 	branch = feat/secp256k1-hash2curve-poseidon
 [submodule "zk-crates/submodules/ergors"]
 	path = zk-crates/submodules/ergors
 	url = https://github.com/permissionlessweb/ergors/

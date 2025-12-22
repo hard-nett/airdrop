@@ -13,13 +13,13 @@ dev-graph = ["halo2_proofs?/dev-graph", "image", "plotters"]
 rpc = []
 
 [dependencies]
-
 headstash-randomness  = { workspace = true,  optional = true }
-plume_rustcrypto  = { workspace = true }
 halo2_gadgets  = { workspace = true, optional = true }
 halo2_proofs  = { workspace = true , optional = true}
 halo2-base  = { workspace = true }
 anybuf  = { workspace = true }
+
+# plume_rustcrypto  = { workspace = true }
 
 commonware-runtime = "0.0.63"
 aes = "0.8"

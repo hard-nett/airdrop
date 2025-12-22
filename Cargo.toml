@@ -20,7 +20,7 @@ anybuf  = "1.0.0"
 zk-headstash = { path = "./zk-crates/zk-headstash" }
 snap-n-pull = { path = "./zk-crates/snap-n-pull" }
 headstash-randomness = { path = "./pub-crates/randomness" }
-plume_rustcrypto = {path = "./zk-crates/submodules/zk-nullifier-sig/rust-k256"}
+# plume_rustcrypto = {path = "./zk-crates/submodules/zk-nullifier-sig/rust-k256"}
 halo2_gadgets = { git = "https://github.com/permissionlessweb/halo2", branch = "mvp", default-features = false ,features = ["test-dev-graph","test-dependencies"]  } 
 halo2_proofs = { git = "https://github.com/permissionlessweb/halo2", branch = "mvp", version = "0.3.1" , default-features = false,features = ["test-dev-graph","gadget-traces", "dev-graph"]  } 
 # halo2-ecc = { git = "https://github.com/permissionlessweb/halo2-lib", package = "halo2-ecc"}
