@@ -37,6 +37,7 @@ pub mod note;
 // pub mod note_encryption;
 // pub mod pczt;
 pub mod deploy;
+pub mod example_circuits;
 pub mod gen;
 pub mod primitives;
 mod spec;

@@ -1,12 +1,12 @@
 # Zk-Crates: Private Headstash
 
+A fork of [zcash orchard protocol](https://github.com/zcash/orchard)
+
 A zk-proof circuit dedicated to public allocations, private distributions (headstshes). To learn about the specification, check out the [documentation](./docs/circuit.md)
 
-## WARNING: THIS IS A WORK IN PROGRESS. SUPER EXPERIEMENTAL TYPE BEAT. USE AT YOUR DISCRETION.
+## WARNING: THIS IS A WORK IN PROGRESS. SUPER EXPERIEMENTAL TYPE BEAT. USE AT YOUR DISCRETION
 
-
-## Examples 
-
+## Examples
 
 | Example |Description   |   |
 |---------------------------|------| -|

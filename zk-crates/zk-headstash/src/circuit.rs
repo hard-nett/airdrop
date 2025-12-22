@@ -475,7 +475,7 @@ impl plonk::Circuit<pallas::Base> for Circuit {
             (nd, v, fdi, recp, psi_old, rho_old, cm_old, nk)
         };
 
-        // Merkle path validity check (https://p.z.cash/ZKS:action-merkle-path-validity?partial).
+        // Merkle path validity check. This is a headstash genesis sinsemilla hashdomain merkle tree.
         let root = {
             let path = self
                 .path

@@ -3,14 +3,6 @@ use alloc::boxed::Box;
 use rand_core::OsRng;
 use rayon::prelude::*;
 
-use std::error::Error;
-
-use std::path::{Path, PathBuf};
-use std::string::{String, ToString};
-use std::sync::Mutex;
-use std::vec::Vec;
-use std::{env, eprintln, fs, println};
-
 use crate::address::RecpAddr;
 use crate::builder::SpendInfo;
 use crate::circuit::{Circuit, Instance, ProvingKey, VerifyingKey};
@@ -21,6 +13,16 @@ use crate::note::{ExtractedNoteCommitment, Note, RandomSeed, Rho};
 use crate::tree::MerklePath;
 use crate::value::{HeadstashValue, NoteDenom, NoteValue, ValueCommitTrapdoor};
 use crate::{spec, Anchor, Proof};
+use halo2_proofs::plonk;
+
+use std::error::Error;
+use std::fs::File;
+use std::io::{BufWriter, Write};
+use std::path::{Path, PathBuf};
+use std::string::{String, ToString};
+use std::sync::Mutex;
+use std::vec::Vec;
+use std::{env, eprintln, fs, println};
 
 use anybuf::Anybuf;
 use base64::{engine::general_purpose, Engine as _};
@@ -28,8 +30,8 @@ use cosmwasm_std::CanonicalAddr;
 use ff::{Field, FromUniformBytes, PrimeField, PrimeFieldBits};
 use hex::decode;
 use pasta_curves::pallas::Base;
-use pasta_curves::EqAffine;
 use pasta_curves::{arithmetic::CurveAffine, group::Curve, pallas, Fp};
+use pasta_curves::{vesta, EqAffine};
 use secp256k1::SecretKey;
 use serde_json::{json, Value};
 use sinsemilla::HashDomain;
@@ -533,13 +535,13 @@ pub trait HeadstashSinsemillaTree: HeadstashBitwiseInstance {
 
         // Create output file: ./data/<address>_notes.json
         let output_dir = Path::new("./data/notes");
+        fs::create_dir_all(output_dir)?;
         let safe_addr: String = addr_target
             .chars()
             .filter(|c| c.is_ascii_alphanumeric())
             .collect();
         let output_path = output_dir.join(format!("{}.json", safe_addr));
 
-        fs::create_dir_all(output_dir)?;
         fs::write(&output_path, serde_json::to_string_pretty(&address_notes)?)?;
 
         eprintln!("✅ Default Genesis Notes generated for {}", addr_target);
@@ -629,6 +631,7 @@ pub trait HeadstashIpfsInstance: HeadstashBitwiseInstance {
 /// launchpad
 pub trait HeadstashLaunchpadInstance: HeadstashBitwiseInstance + HeadstashIpfsInstance {
     /// ## [create_headstash_proof]
+    /// > #### Default method for creating a proof. Requires both the *public (instance)* & *private (witnesses)* values.
     async fn create_headstash_proof(
         &self,
         a: Anchor,
@@ -638,23 +641,22 @@ pub trait HeadstashLaunchpadInstance: HeadstashBitwiseInstance + HeadstashIpfsIn
         hv: HeadstashValue,
     ) -> Result<Proof, BoxError> {
         let mut rng = OsRng;
-        let pk = self.req_headstash_pk().await?;
-
         let r = self.rho_from_secure_random().to_bytes();
         let rho = self.rho_from_secure_random();
         let rseed = RandomSeed::from_bytes(r, &rho).expect("random seed");
 
+        let pk = self.req_headstash_pk().await?;
         let spk = SpendingKey::from_bytes(r).expect("spk");
         let fvk = FullViewingKey::from(&spk);
 
         let n = Note::from_parts(hv, recp, esk, rho, rseed).expect("note derivation");
         let nf = n.nullifier();
-
         let cmx = ExtractedNoteCommitment::from(n.commitment());
-        let instances = Instance::from_parts(a, hv.denom(), hv.amount(), recp, nf, cmx);
+
         let c = SpendInfo::new(fvk, n, mp).expect("headstash claim");
 
         // generate proof, unchecked as we rho is not deterministically derived
+        let instances = Instance::from_parts(a, hv.denom(), hv.amount(), recp, nf, cmx);
         let circuit = Circuit::from_action_context_unchecked(c, n);
         Ok(Proof::create(&pk, &[circuit], &[instances], &mut rng)?)
     }
@@ -703,6 +705,122 @@ pub trait HeadstashLaunchpadInstance: HeadstashBitwiseInstance + HeadstashIpfsIn
         fs::create_dir_all("./data/keys")?;
         let pk_path = Path::new("./data/keys").join(PK_FILE);
         ProvingKey::build_and_write(pk_path)?;
+        Ok(())
+    }
+
+    /// `gen_test_circuit_keys`: generate test circuit keys for all example circuits
+    /// This creates proving and verifying keys for demo circuits in the test suite
+    fn gen_test_circuit_keys(&self, path: &Path) -> Result<(), BoxError> {
+        eprintln!("🔑 Generating test circuit keys for example circuits...");
+        fs::create_dir_all(path)?;
+        self.gen_no_rick_circuit_keys(path)?;
+        // self.gen_sinsemilla_hashdomain_circuit_keys(path)?;
+        eprintln!("✅ All test circuit keys generated successfully");
+        Ok(())
+    }
+
+    /// Generate keys for NoRickCircuit example
+    fn gen_no_rick_circuit_keys(&self, base_path: &Path) -> Result<(), BoxError> {
+        use crate::example_circuits::no_rick::NoRickCircuit;
+
+        eprintln!("  📝 Generating NoRickCircuit keys...");
+
+        const K: u32 = 10; // Circuit size for NoRick
+        let params: halo2_proofs::poly::commitment::Params<vesta::Affine> =
+            halo2_proofs::poly::commitment::Params::new(K);
+        let circuit: NoRickCircuit<Fp> = Default::default();
+
+        // Generate verifying key
+        let vk: plonk::VerifyingKey<vesta::Affine> = plonk::keygen_vk(&params, &circuit)
+            .map_err(|e| format!("Failed to generate VK for NoRickCircuit: {:?}", e))?;
+
+        // Generate proving key
+        let pk = plonk::keygen_pk(&params, vk.clone(), &circuit)
+            .map_err(|e| format!("Failed to generate PK for NoRickCircuit: {:?}", e))?;
+
+        // Create circuit-specific directory
+        let circuit_dir = base_path.join("no_rick");
+        fs::create_dir_all(&circuit_dir)?;
+
+        // Write params
+        let params_path = circuit_dir.join("params.bin");
+        let mut params_file = BufWriter::new(File::create(&params_path)?);
+        params.write(&mut params_file)?;
+        params_file.flush()?;
+        eprintln!("    ✓ Params written to {}", params_path.display());
+
+        // Write verifying key
+        let vk_path = circuit_dir.join("verifying_key.bin");
+        let mut vk_file = BufWriter::new(File::create(&vk_path)?);
+        vk.write(&mut vk_file)?;
+        vk_file.flush()?;
+        eprintln!("    ✓ Verifying key written to {}", vk_path.display());
+
+        // Write proving key (full key)
+        let pk_path = circuit_dir.join("proving_key.bin");
+        let mut pk_file = BufWriter::new(File::create(&pk_path)?);
+        pk.get_vk().write(&mut pk_file)?;
+        pk_file.flush()?;
+        eprintln!("    ✓ Proving key written to {}", pk_path.display());
+
+        Ok(())
+    }
+
+    /// Generate keys for MySinsemillaHashDomainCircuit example
+    fn gen_sinsemilla_hashdomain_circuit_keys(&self, base_path: &Path) -> Result<(), BoxError> {
+        use crate::example_circuits::sinsemilla_hashdomain::MySinsemillaHashDomainCircuit;
+        use halo2_gadgets::utilities::lookup_range_check::PallasLookupRangeCheckConfig;
+        use halo2_proofs::plonk;
+
+        eprintln!("  📝 Generating MySinsemillaHashDomainCircuit keys...");
+
+        const K: u32 = 11; // Circuit size for Sinsemilla hash domain
+        let params: halo2_proofs::poly::commitment::Params<vesta::Affine> =
+            halo2_proofs::poly::commitment::Params::new(K);
+        let circuit: MySinsemillaHashDomainCircuit<PallasLookupRangeCheckConfig> =
+            MySinsemillaHashDomainCircuit::new();
+
+        // Generate verifying key
+        let vk = plonk::keygen_vk(&params, &circuit).map_err(|e| {
+            format!(
+                "Failed to generate VK for MySinsemillaHashDomainCircuit: {:?}",
+                e
+            )
+        })?;
+
+        // Generate proving key
+        let pk = plonk::keygen_pk(&params, vk.clone(), &circuit).map_err(|e| {
+            format!(
+                "Failed to generate PK for MySinsemillaHashDomainCircuit: {:?}",
+                e
+            )
+        })?;
+
+        // Create circuit-specific directory
+        let circuit_dir = base_path.join("sinsemilla_hashdomain");
+        fs::create_dir_all(&circuit_dir)?;
+
+        // Write params
+        let params_path = circuit_dir.join("params.bin");
+        let mut params_file = BufWriter::new(File::create(&params_path)?);
+        params.write(&mut params_file)?;
+        params_file.flush()?;
+        eprintln!("    ✓ Params written to {}", params_path.display());
+
+        // Write verifying key
+        let vk_path = circuit_dir.join("verifying_key.bin");
+        let mut vk_file = BufWriter::new(File::create(&vk_path)?);
+        vk.write(&mut vk_file)?;
+        vk_file.flush()?;
+        eprintln!("    ✓ Verifying key written to {}", vk_path.display());
+
+        // Write proving key (full key)
+        let pk_path = circuit_dir.join("proving_key.bin");
+        let mut pk_file = BufWriter::new(File::create(&pk_path)?);
+        // pk.write(&mut pk_file)?;
+        pk_file.flush()?;
+        eprintln!("    ✓ Proving key written to {}", pk_path.display());
+
         Ok(())
     }
 }
