@@ -6,7 +6,7 @@
 
 use super::wallet::WebWallet;
 use wasm_bindgen_test::*;
-use zk_headstash::gen::headstash::snp::v1::SerializedNoteData;
+use zk_headstash::r#gen::headstash::snp::v1::SerializedNoteData;
 
 wasm_bindgen_test_configure!(run_in_browser);
 

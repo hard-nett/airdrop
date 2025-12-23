@@ -247,7 +247,7 @@ async fn submit_smart_account_claim_internal(
 
     // Create claim request with proof data
     let response = client
-        .claim_headstash(zk_headstash::gen::snp::v1::MsgClaimHeadstashRequest {
+        .claim_headstash(zk_headstash::r#gen::snp::v1::MsgClaimHeadstashRequest {
             proof: proof_data.proof,
             instance: proof_data.instances,
             hid: headstash_id.to_string(),

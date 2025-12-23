@@ -7,7 +7,7 @@ use std::str::FromStr;
 use wasm_bindgen::prelude::*;
 
 use zk_headstash::address::RecpAddr;
-use zk_headstash::gen::headstash::snp::v1::SerializedNoteData;
+use zk_headstash::r#gen::headstash::snp::v1::SerializedNoteData;
 use zk_headstash::keys::EligibleSk;
 use zk_headstash::note::{Nullifier, Rho};
 use zk_headstash::value::HeadstashValue;
