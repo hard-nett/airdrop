@@ -566,7 +566,6 @@ pub trait HeadstashSinsemillaTree: HeadstashBitwiseInstance {
             .and_then(|v| v.as_array())
             .ok_or("Missing or invalid `uterp` array")?;
 
-        // 4️⃣ iterate until we find a matching entry
         for note in notes {
             let denom_match = note.get("denom").and_then(|v| v.as_str()) == Some(token);
             let amount_match = note.get("amount").and_then(|v| v.as_str()) == Some(amount);
@@ -721,42 +720,46 @@ pub trait HeadstashLaunchpadInstance: HeadstashBitwiseInstance + HeadstashIpfsIn
 
     /// Generate keys for NoRickCircuit example
     fn gen_no_rick_circuit_keys(&self, base_path: &Path) -> Result<(), BoxError> {
+        const K: u32 = 10;
         use crate::example_circuits::no_rick::NoRickCircuit;
 
         eprintln!("  📝 Generating NoRickCircuit keys...");
-
-        const K: u32 = 10; // Circuit size for NoRick
         let params: halo2_proofs::poly::commitment::Params<vesta::Affine> =
             halo2_proofs::poly::commitment::Params::new(K);
         let circuit: NoRickCircuit<Fp> = Default::default();
-
-        // Generate verifying key
         let vk: plonk::VerifyingKey<vesta::Affine> = plonk::keygen_vk(&params, &circuit)
             .map_err(|e| format!("Failed to generate VK for NoRickCircuit: {:?}", e))?;
-
-        // Generate proving key
         let pk = plonk::keygen_pk(&params, vk.clone(), &circuit)
             .map_err(|e| format!("Failed to generate PK for NoRickCircuit: {:?}", e))?;
 
-        // Create circuit-specific directory
         let circuit_dir = base_path.join("no_rick");
         fs::create_dir_all(&circuit_dir)?;
 
-        // Write params
+        // Write params (separate, for reference)
         let params_path = circuit_dir.join("params.bin");
         let mut params_file = BufWriter::new(File::create(&params_path)?);
         params.write(&mut params_file)?;
         params_file.flush()?;
         eprintln!("    ✓ Params written to {}", params_path.display());
 
-        // Write verifying key
+        // Write verifying key (separate, for reference)
         let vk_path = circuit_dir.join("verifying_key.bin");
         let mut vk_file = BufWriter::new(File::create(&vk_path)?);
         vk.write(&mut vk_file)?;
         vk_file.flush()?;
         eprintln!("    ✓ Verifying key written to {}", vk_path.display());
 
-        // Write proving key (full key)
+        let combined_path = circuit_dir.join("vk_combined.bin");
+        let mut combined_file = BufWriter::new(File::create(&combined_path)?);
+        params.write(&mut combined_file)?; // Params first
+        vk.write(&mut combined_file)?; // VK second
+        combined_file.flush()?;
+        eprintln!(
+            "    ✅ COMBINED VK (for upload) written to {}",
+            combined_path.display()
+        );
+
+        // Write proving key (for proving, not upload)
         let pk_path = circuit_dir.join("proving_key.bin");
         let mut pk_file = BufWriter::new(File::create(&pk_path)?);
         pk.get_vk().write(&mut pk_file)?;
@@ -765,7 +768,6 @@ pub trait HeadstashLaunchpadInstance: HeadstashBitwiseInstance + HeadstashIpfsIn
 
         Ok(())
     }
-
     /// Generate keys for MySinsemillaHashDomainCircuit example
     fn gen_sinsemilla_hashdomain_circuit_keys(&self, base_path: &Path) -> Result<(), BoxError> {
         use crate::example_circuits::sinsemilla_hashdomain::MySinsemillaHashDomainCircuit;

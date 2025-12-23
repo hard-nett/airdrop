@@ -14,7 +14,7 @@ use zk_headstash::Anchor;
 /// See <https://docs.rs/commonware_runtime> for traits/details.
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     Runner::default()
-        .start(|e| async move {
+        .start(|_| async move {
             let a = Anchor::empty_tree();
             let mp =
                 MerklePath::from_parts(0, [MerkleHashOrchard::from_bytes(&[69; 32]).unwrap(); 32]);
