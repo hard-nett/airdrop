@@ -12,9 +12,7 @@ library = []
 
 [dependencies]
 ark-bls12-381 = "0.5.0"
-anybuf  = { workspace = true }
 zk-headstash  = { workspace = true }
-cosmos-sdk-proto  = { workspace = true }
 btsg-account  = { workspace = true }
 token-bindings  = { workspace = true }
 btsg-auth  = { workspace = true }
