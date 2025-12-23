@@ -21,7 +21,7 @@ use cosmos_sdk_proto::Any;
 use serde::{Deserialize, Serialize};
 use tonic::transport::Channel;
 use wasm_bindgen::prelude::*;
-use zk_headstash::gen::headstash::snp::v1::{
+use zk_headstash::r#gen::headstash::snp::v1::{
     headstash_snap_service_client::HeadstashSnapServiceClient, DownloadNullifierStateRequest,
     DownloadNullifierStateResponse, UploadNullifierStateRequest, UploadNullifierStateResponse,
 };

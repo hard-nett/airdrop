@@ -21,7 +21,7 @@ anybuf  = { workspace = true }
 
 # plume_rustcrypto  = { workspace = true }
 
-commonware-runtime = "0.0.63"
+commonware-runtime   = { workspace = true }
 aes = "0.8"
 base64  = { workspace = true }
 bip39  = { workspace = true }
