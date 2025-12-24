@@ -22,7 +22,6 @@ anybuf  = { workspace = true }
 
 # plume_rustcrypto  = { workspace = true }
 
-commonware-runtime   = { workspace = true }
 aes = "0.8"
 base64  = { workspace = true }
 bitvec = { workspace = true, default-features = false }
