@@ -380,7 +380,6 @@ pub fn decompose_biguint_simple(
 
     for _ in 0..num_limbs {
         let limb_big = &remaining & &mask;
-        // Convert limb to field element
         let limb_bytes = limb_big.to_bytes_le();
         let mut limb_bytes_32 = [0u8; 32];
         limb_bytes_32[..limb_bytes.len().min(32)]
@@ -436,15 +435,21 @@ pub fn biguint_to_fe_simple(value: &BigUint) -> pallas::Base {
     let bytes = value.to_bytes_le();
     let mut bytes_32 = [0u8; 32];
     bytes_32[..bytes.len().min(32)].copy_from_slice(&bytes[..bytes.len().min(32)]);
-    pallas::Base::from_repr(bytes_32).unwrap_or(pallas::Base::ZERO)
+    pallas::Base::from_repr(bytes_32).unwrap()
 }
 
 /// Convert a generic field element to BigUint.
-///
 /// This is a generic version that works for any PrimeField, not just pallas::Base.
 pub fn fe_to_biguint_for_field<F: PrimeField>(fe: &F) -> BigUint {
     let bytes = fe.to_repr();
     BigUint::from_bytes_le(bytes.as_ref())
+}
+
+/// Compute the native Pallas::Base representation of a secp256k1 field element.
+pub fn to_native_out_of_circuit<F: PrimeField>(f: &F) -> pallas::Base {
+    let big = fe_to_biguint_for_field(f);
+    let pallas_modulus = fe_to_biguint_simple(&-pallas::Base::ONE) + 1u64;
+    biguint_to_fe_simple(&(big % pallas_modulus))
 }
 
 #[cfg(test)]

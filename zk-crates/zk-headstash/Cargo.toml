@@ -9,7 +9,7 @@ circuit = ["dep:halo2_gadgets", "dep:halo2_proofs", "std"]
 interface = ["headstash-randomness", "std", "dep:rayon", "circuit"]
 multicore = ["halo2_proofs?/multicore"]
 std = ["core2/std", "group/wnaf-memuse" , "reddsa/std"]
-dev-graph = ["halo2_proofs?/dev-graph", "image", "plotters"]
+# dev-graph = ["halo2_proofs?/dev-graph", "image", "plotters"]
 rpc = []
 test-dependencies = []
 
@@ -47,7 +47,7 @@ tonic-prost = {workspace = true }
 group = {workspace = true}
 
 sinsemilla = {workspace = true }
-image  = {workspace = true, optional = true }
+# image  = {workspace = true, optional = true }
 serde = { workspace = true, features = ["derive"] } 
 serde_json  = {workspace = true }
 subtle = { workspace = true, default-features = false }
@@ -62,12 +62,12 @@ visibility = {workspace = true }
 # Logging
 tracing = { workspace = true, default-features = false }
 # Developer tooling dependencies
-plotters = { workspace = true, optional = true }
+# plotters = { workspace = true, optional = true }
 # Boilerplate
 getset = {workspace = true }
  
 [dev-dependencies]
-criterion = "0.4" # 0.5 depends on clap 4 which has MSRV 1.70
+# criterion = "0.4" # 0.5 depends on clap 4 which has MSRV 1.70
 halo2_gadgets = { workspace = true,  version = "0.3.1", features = ["test-dependencies"] }
 hex = "0.4"
 proptest = ">=1.0.0, <1.7.0"

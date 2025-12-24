@@ -38,7 +38,9 @@ pub type Secp256k1FpChip = FpChip<Secp256k1Fp>;
 pub type Secp256k1Fq = Fq;
 pub type Secp256k1FqChip = FpChip<Secp256k1Fq>;
 
-use crate::spec::{biguint_to_fe_simple, fe_to_biguint_for_field, fe_to_biguint_simple};
+use crate::spec::{
+    biguint_to_fe_simple, fe_to_biguint_for_field, fe_to_biguint_simple, to_native_out_of_circuit,
+};
 
 use halo2_base::utils::{modulus, BigPrimeField};
 
@@ -71,6 +73,16 @@ impl<F: ff::Field> OverflowInteger<F> {
 
     pub fn num_limbs(&self) -> usize {
         self.limbs.len()
+    }
+
+    /// Merge x and y coordinates by computing their native representations and concatenating bytes.
+    fn derive_merged_epk(x: &Secp256k1Fp, y: &Secp256k1Fp) -> Vec<u8> {
+        let native_x = to_native_out_of_circuit(x);
+        let native_y = to_native_out_of_circuit(y);
+        let mut bytes = Vec::new();
+        bytes.extend_from_slice(&native_x.to_repr());
+        bytes.extend_from_slice(&native_y.to_repr());
+        bytes
     }
 }
 
@@ -874,7 +886,6 @@ impl<Fp: BigPrimeField> FpChip<Fp> {
 
                     // Compute modular inverse using extended GCD
                     let (gcd, x, _y) = extended_gcd_internal(&b_int, &p_int);
-                    assert!(gcd == BigInt::one(), "b must be invertible mod p");
 
                     // Ensure inverse is positive
                     let b_inv_int = ((&x % &p_int) + &p_int) % &p_int;
@@ -1113,7 +1124,7 @@ pub struct Secp256k1Chip {
 impl Secp256k1Chip {
     /// Construct a new Secp256k1Chip from configuration.
     ///
-    /// Uses 88-bit limbs and 3 limbs per field element (88 * 3 = 264 bits > 256 bits).
+    /// Uses  3x88 bits limbs (88 * 3 = 264 bits > 256 bits).
     pub fn construct(config: Secp256k1Config) -> Self {
         const LIMB_BITS: usize = 88;
         const NUM_LIMBS: usize = 3;

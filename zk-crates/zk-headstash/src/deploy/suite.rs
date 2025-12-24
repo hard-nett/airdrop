@@ -133,7 +133,7 @@ pub trait HeadstashBitwiseInstance {
     //     Ok(crate::spec::prf_pallas_m(fdi, esk, v, nd))
     // }
 
-    /// derive_esk
+    /// `derive_esk`: derives the 3x88 libs of a raw esk.
     fn derive_esk(&self, sk: [u8; 32]) -> [Fp; 3] {
         let skfq =
             halo2_base::halo2_proofs::halo2curves::secq256k1::Fp::from_repr(sk).expect("valid Fq");
@@ -142,6 +142,7 @@ pub trait HeadstashBitwiseInstance {
             .try_into()
             .unwrap()
     }
+
     /// derive_epk
     fn derive_epk(&self, pk: [u8; 32]) -> [Fp; 3] {
         let pkfq =
@@ -180,6 +181,7 @@ pub trait HeadstashBitwiseInstance {
         let limb1 = &bytes[2];
         limb1.add(&limb2.add(&limb3))
     }
+
     /// Note‑Denom (nd): blake3 hash of the token, 1 bit cleared.
     fn derive_nd(&self, raw_nd: &str) -> [u8; 32] {
         NoteDenom::new_for_proof(raw_nd)
@@ -446,7 +448,7 @@ pub trait HeadstashSinsemillaTree: HeadstashBitwiseInstance {
         point.to_affine().coordinates().unwrap().x().clone()
     }
 
-    /// Compute the leaf hash for an address-token-amount tuple
+    /// Compute the leaf hash
     fn leaf_hash(
         &self,
         epk: &[u8],

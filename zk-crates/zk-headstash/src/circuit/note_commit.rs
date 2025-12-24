@@ -1611,6 +1611,7 @@ impl NoteCommitChip {
 }
 
 pub(in crate::circuit) mod gadgets {
+    use halo2_gadgets::sinsemilla::HashDomain;
     use halo2_proofs::circuit::{Chip, Value};
 
     use super::*;

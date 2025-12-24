@@ -58,12 +58,14 @@ use halo2_gadgets::{
             chip::{MerkleChip, MerkleConfig},
             MerklePath,
         },
+        HashDomain,
     },
     utilities::lookup_range_check::{LookupRangeCheck, LookupRangeCheckConfig},
 };
 
 mod commit_ivk;
 pub mod gadget;
+pub mod headstash_merkle_tree;
 mod note_commit;
 #[cfg(test)]
 mod note_commit_bit_tests;
@@ -409,7 +411,7 @@ impl plonk::Circuit<pallas::Base> for Circuit {
 
         // 1. --------------- Eligible Key Pairing Constraint -------------------------
         let secp256k1_chip = Secp256k1Chip::construct(config.secp256k1.clone());
-        let (esk_crt, (_e_pk_x_crt, _e_pk_y_crt)) = secp256k1_chip.prove_key_pairing(
+        let (esk_crt, epk_crt) = secp256k1_chip.prove_key_pairing(
             layouter.namespace(|| "secp256k1 key pairing: epk = esk * G"),
             self.esk,
             self.epkx,
@@ -476,7 +478,35 @@ impl plonk::Circuit<pallas::Base> for Circuit {
             (nd, v, fdi, recp, psi_old, rho_old, cm_old, nk)
         };
 
-        // Merkle path validity check. This is a headstash genesis sinsemilla hashdomain merkle tree.
+        // hashdomain Merkle path validity check
+        // Compute epk_sum
+
+        // derive current note leaf
+        let (leaf, rs) = gadget::derive_leaf(
+            layouter.namespace(|| "derive leaf"),
+            &config.sinsemilla_chip_1(),
+            &ecc_chip,
+            epk_crt,
+            fdi.clone(),
+            v.clone(),
+            nd.clone(),
+        )?;
+
+        // constrain path to headstash genesis root
+        let genesis_root = {
+            let path = self
+                .path
+                .map(|typed_path| typed_path.map(|node| node.inner()));
+            let merkle_inputs = MerklePath::construct(
+                [config.merkle_chip_1(), config.merkle_chip_2()],
+                OrchardHashDomains::Leaf,
+                self.pos,
+                path,
+            );
+            // merkle_inputs.calculate_root(layouter.namespace(|| "Genesis merkle path"), leaf.x())?
+        };
+
+        // commitdomain Merkle path validity check. This is a headstash genesis sinsemilla hashdomain merkle tree.
         let root = {
             let path = self
                 .path

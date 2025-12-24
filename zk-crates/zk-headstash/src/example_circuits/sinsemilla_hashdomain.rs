@@ -283,7 +283,7 @@ impl<Lookup: PallasLookupRangeCheck> Circuit<pallas::Base>
             )?;
 
             // Update current to x-coordinate of parent point
-            let mut current = leaf_point.inner().x().value().copied(); // Value<Fp>
+            let current = leaf_point.inner().x().value().copied();
         }
 
         // === Step 3: Constrain computed_leaf == private_leaf ===

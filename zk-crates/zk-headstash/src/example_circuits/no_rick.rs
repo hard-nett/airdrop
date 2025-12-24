@@ -464,13 +464,13 @@ fn test_rick_circuit() {
     //     .titled("Example Circuit Layout", ("sans-serif", 60))
     //     .unwrap();
 
-    halo2_proofs::dev::CircuitLayout::default()
-        .show_equality_constraints(true)
-        // You can optionally render only a section of the circuit.
-        // .view_width()
-        // .view_height(0..16)
-        // You can hide labels, which can be useful with smaller areas.
-        .show_labels(true);
+    // halo2_proofs::dev::CircuitLayout::default()
+    //     .show_equality_constraints(true)
+    //     // You can optionally render only a section of the circuit.
+    //     // .view_width()
+    //     // .view_height(0..16)
+    //     // You can hide labels, which can be useful with smaller areas.
+    //     .show_labels(true);
     // // Render the circuit onto your area!
     // // The first argument is the size parameter for the circuit.
     // .render(10, &circuit, &root)

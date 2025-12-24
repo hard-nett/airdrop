@@ -3,6 +3,8 @@
 //! These tests verify that we can correctly represent secp256k1 field elements
 //! as 3x88-bit limbs in pallas::Base and perform elliptic curve pairing checks.
 
+use std::println;
+
 use crate::spec::biguint_to_fe_simple;
 
 use super::secp256k1_chip::*;
@@ -18,6 +20,7 @@ use halo2_proofs::{
 };
 use num_traits::Zero;
 use pasta_curves::pallas;
+use secp256k1::constants::{GENERATOR_X, GENERATOR_Y};
 
 // ============================================================================
 // Test Circuit for Secp256k1 Key Pairing
@@ -147,6 +150,66 @@ fn test_secp256k1_key_pairing_valid() {
     );
 }
 
+#[test]
+fn test_reconstruct_xy_from_limbs() {
+    use halo2_base::utils::fe_to_biguint;
+    use num_bigint::BigUint;
+
+    // Use secp256k1 generator coordinates as known values
+    let gen_x_fp = Secp256k1Fp::from_bytes(&GENERATOR_X).unwrap();
+    let gen_y_fp = Secp256k1Fp::from_bytes(&GENERATOR_Y).unwrap();
+
+    // Convert to BigUint
+    let gen_x_big = fe_to_biguint(&gen_x_fp);
+    let gen_y_big = fe_to_biguint(&gen_y_fp);
+
+    // Decompose into 3x88-bit limbs (little-endian)
+    let x_limbs = crate::spec::decompose_biguint_simple(&gen_x_big, 3, 88);
+    let y_limbs = crate::spec::decompose_biguint_simple(&gen_y_big, 3, 88);
+
+    // Display decomposed limbs
+    println!("x decomposed into limbs:");
+    for (i, limb) in x_limbs.iter().enumerate() {
+        let limb_big = crate::spec::fe_to_biguint_simple(limb);
+        println!("  limb[{}]: {} ({} bits)", i, limb_big, limb_big.bits());
+    }
+    println!("y decomposed into limbs:");
+    for (i, limb) in y_limbs.iter().enumerate() {
+        let limb_big = crate::spec::fe_to_biguint_simple(limb);
+        println!("  limb[{}]: {} ({} bits)", i, limb_big, limb_big.bits());
+    }
+
+    // Reconstruct x by summing: limb[0] + limb[1] * 2^88 + limb[2] * 2^176
+    let reconstructed_x = x_limbs
+        .iter()
+        .enumerate()
+        .fold(BigUint::zero(), |acc, (i, limb)| {
+            let limb_big = crate::spec::fe_to_biguint_simple(limb);
+            acc + (limb_big << (88 * i))
+        });
+
+    // Reconstruct y similarly
+    let reconstructed_y = y_limbs
+        .iter()
+        .enumerate()
+        .fold(BigUint::zero(), |acc, (i, limb)| {
+            let limb_big = crate::spec::fe_to_biguint_simple(limb);
+            acc + (limb_big << (88 * i))
+        });
+
+    // Display reconstructions
+    println!("Reconstructed x: {}", reconstructed_x);
+    println!("Original x:      {}", gen_x_big);
+    println!("Reconstructed y: {}", reconstructed_y);
+    println!("Original y:      {}", gen_y_big);
+
+    // Assert accuracy
+    assert_eq!(reconstructed_x, gen_x_big, "x reconstruction failed");
+    assert_eq!(reconstructed_y, gen_y_big, "y reconstruction failed");
+
+    println!("✓ CRT limb reconstruction accurate for x and y coordinates");
+}
+
 // ============================================================================
 // Test: Mismatched Secp256k1 Keys (Should Fail)
 // ============================================================================
@@ -223,11 +286,11 @@ fn test_foreign_field_limb_decomposition() {
         0x88, 0x99,
     ];
 
-    let value = Secp256k1Fp::from_repr(test_value_bytes).expect("valid Fp");
-    let value_big = halo2_base::utils::fe_to_biguint(&value);
+    let v = Secp256k1Fp::from_repr(test_value_bytes).expect("valid Fp");
+    let v_biguint = halo2_base::utils::fe_to_biguint(&v);
 
     // Decompose into 3x88-bit limbs
-    let limbs = crate::spec::decompose_biguint_simple(&value_big, 3, 88);
+    let limbs = crate::spec::decompose_biguint_simple(&v_biguint, 3, 88);
 
     println!("Foreign field decomposition test:");
     println!("  Original value: {:?}", hex::encode(test_value_bytes));
@@ -236,8 +299,6 @@ fn test_foreign_field_limb_decomposition() {
     for (i, limb) in limbs.iter().enumerate() {
         let limb_big = crate::spec::fe_to_biguint_simple(limb);
         let max_88_bit = BigUint::from(1u64) << 88;
-
-        println!("  Limb {}: {} bits", i, limb_big.bits());
         assert!(
             limb_big < max_88_bit,
             "Limb {} exceeds 88 bits: has {} bits",
@@ -256,19 +317,18 @@ fn test_foreign_field_limb_decomposition() {
 
     let reconstructed = limb_0 + limb_1 * base_88 + limb_2 * base_176;
     let reconstructed_big = crate::spec::fe_to_biguint_simple(&reconstructed);
-
     let pallas_modulus = crate::spec::fe_to_biguint_simple(&(-pallas::Base::ONE)) + 1u64;
 
     println!(
         "  Reconstructed matches: {}",
         (reconstructed_big.clone() % pallas_modulus.clone())
-            == (value_big.clone() % pallas_modulus.clone())
+            == (v_biguint.clone() % pallas_modulus.clone())
     );
 
     // Should match modulo pallas field
     assert_eq!(
         reconstructed_big % pallas_modulus.clone(),
-        value_big % pallas_modulus,
+        v_biguint % pallas_modulus,
         "Reconstruction should match original value modulo pallas"
     );
 }
@@ -460,9 +520,7 @@ fn test_non_paired_keys_detection() {
 fn test_eth_key_pairing_with_crt() {
     use halo2_base::gates::RangeChip;
     use halo2_base::utils::{fe_to_biguint, BigPrimeField};
-    use halo2_ecc::bigint::ProperCrtUint;
-    use halo2_ecc::fields::FieldChip;
-    use halo2_ecc::secp256k1::{FpChip, FqChip};
+
     use secp256k1::{PublicKey, Secp256k1, SecretKey};
 
     // 1. Generate an Ethereum-style key pair

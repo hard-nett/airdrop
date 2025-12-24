@@ -27,6 +27,8 @@ use halo2_proofs::{
 pub(in crate::circuit) mod add_chip;
 pub(in crate::circuit) mod secp256k1_chip;
 
+#[cfg(test)]
+mod secp256k1_chip_tests;
 
 impl super::Config {
     pub(super) fn add_chip(&self) -> add_chip::AddChip {
@@ -202,4 +204,5 @@ pub(in crate::circuit) fn derive_nullifier<
 }
 
 pub(in crate::circuit) use crate::circuit::commit_ivk::gadgets::commit_ivk;
+pub(in crate::circuit) use crate::circuit::headstash_merkle_tree::derive_leaf;
 pub(in crate::circuit) use crate::circuit::note_commit::gadgets::note_commit;

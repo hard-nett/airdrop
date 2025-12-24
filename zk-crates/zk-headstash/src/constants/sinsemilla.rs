@@ -1,7 +1,7 @@
 //! Sinsemilla generators
 use crate::spec::i2lebsp;
 
- #[cfg(feature = "circuit")]
+#[cfg(feature = "circuit")]
 use {
     super::{OrchardFixedBases, OrchardFixedBasesFull},
     group::ff::PrimeField,
@@ -85,12 +85,15 @@ pub enum OrchardHashDomains {
     NoteCommit,
     CommitIvk,
     MerkleCrh,
+    Leaf,
 }
 
- #[cfg(feature = "circuit")]
+#[cfg(feature = "circuit")]
 #[allow(non_snake_case)]
 impl HashDomains<pallas::Affine> for OrchardHashDomains {
     fn Q(&self) -> pallas::Affine {
+        use pasta_curves::arithmetic::CurveExt;
+
         match self {
             OrchardHashDomains::CommitIvk => pallas::Affine::from_xy(
                 pallas::Base::from_repr(Q_COMMIT_IVK_M_GENERATOR.0).unwrap(),
@@ -107,6 +110,9 @@ impl HashDomains<pallas::Affine> for OrchardHashDomains {
                 pallas::Base::from_repr(Q_MERKLE_CRH.1).unwrap(),
             )
             .unwrap(),
+            OrchardHashDomains::Leaf => {
+                pallas::Point::hash_to_curve(LEAF_PERSONALIZATION)(&[]).into()
+            }
         }
     }
 }
@@ -117,7 +123,7 @@ pub enum OrchardCommitDomains {
     CommitIvk,
 }
 
- #[cfg(feature = "circuit")]
+#[cfg(feature = "circuit")]
 impl CommitDomains<pallas::Affine, OrchardFixedBases, OrchardHashDomains> for OrchardCommitDomains {
     fn r(&self) -> OrchardFixedBasesFull {
         match self {
