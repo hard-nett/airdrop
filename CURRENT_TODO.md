@@ -4,10 +4,10 @@
 
 finish snap-n-pull optimization to just what we need:
 
-Specify our merkle path concretly four our custom circuit.
+- Specify our merkle path concretly four our custom circuit.
 
 - anchor: hashDomain root
-- MerklePath: 
+- MerklePath
 
 use hashdomain as anchor to have the correct root calulated for our merkle path validaity check This will ensure that this note is a part of the headstash instance.
 > -
@@ -316,11 +316,9 @@ This approach provides flexibility for both sensitive and non-sensitive data sto
 - Snap Spec: `docs/zk-headstash/metamask-snap.md`
 - Current Implementation: `zk-crates/snap-n-pull/`
 
-
 <!-- ## BACKUP
 
 Offchain aggregate:
-
 
 Verifiable Proof Engine
 

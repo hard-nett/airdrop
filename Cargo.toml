@@ -37,6 +37,7 @@ btsg-auth = { git = "https://github.com/permissionlessweb/bs-accounts", branch =
 cosmwasm-schema = { git = "https://github.com/permissionlessweb/cosmwasm", branch = "mvp", package = "cosmwasm-schema" }
 cosmwasm-std = { git = "https://github.com/permissionlessweb/cosmwasm", branch = "mvp", features = ["cosmwasm_1_4", "stargate"] }
 cw-storage-plus = { git = "https://github.com/permissionlessweb/cw-storage-plus", branch = "mvp" }
+cw2             = { git = "https://github.com/permissionlessweb/cw-minus", branch = "mvp" , package = "cw2"}
 
 serde = { version = "1.0.228", features = ["derive"] }
 bincode = " 2.0.1"

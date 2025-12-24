@@ -24,10 +24,10 @@ overflow-checks = true
 library = []
 
 [dependencies]
-cosmwasm-std    = { git = "https://github.com/permissionlessweb/cosmwasm", branch = "mvp" }
-cosmwasm-schema = { git = "https://github.com/permissionlessweb/cosmwasm", branch = "mvp", package = "cosmwasm-schema" }
-cw-storage-plus = { git = "https://github.com/permissionlessweb/cw-storage-plus", branch = "mvp" }
-cw2             = { git = "https://github.com/permissionlessweb/cw-minus", branch = "mvp" , package = "cw2"}
+cosmwasm-std   = { workspace = true  }
+cosmwasm-schema  = { workspace = true  }
+cw-storage-plus  = { workspace = true  }
+cw2 = { workspace = true  }
 thiserror = { version = "2.0.16" }
 
 [dev-dependencies]
