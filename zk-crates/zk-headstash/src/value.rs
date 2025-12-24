@@ -212,7 +212,7 @@ impl From<&NoteValue> for Assigned<pallas::Base> {
         pallas::Base::from(v.inner()).into()
     }
 }
-#[cfg(feature = "circuit")]
+
 impl From<u64> for NoteValue {
     fn from(v: u64) -> Self {
         Self(v)
