@@ -351,7 +351,7 @@ pub(crate) fn esk_to_base(esk: &crate::keys::EligibleSk) -> pallas::Base {
 }
 
 /// Convert a `RecpAddr` into a field element by hashing its byte payload.\
-/// posiedon params: width = 3 (t = 3) // rounds = 2 (full rounds per the spec)
+/// poseidon params: width = 3 (t = 3) // rounds = 2 (full rounds per the spec)
 pub fn recp_to_fp(ra: &crate::address::RecpAddr) -> pallas::Base {
     let bytes: [u8; 32] = ra.to_bytes();
     let first_half = &bytes[0..16];
@@ -396,7 +396,7 @@ pub fn decompose_biguint_simple(
 /// # hdkf_pallas
 /// Derives nk from the Pallas base field representation for `esk`\
 /// *(via modular big-endian byte-to-field-element conversion)*\
-/// using the posiedon hashing algorithm with a domain-separation-tag in the order (`DST`,`esk_fp`,`rho`).
+/// using the poseidon hashing algorithm with a domain-separation-tag in the order (`DST`,`esk_fp`,`rho`).
 pub fn hdkf_pallas(esk_pallas: pallas::Base, rho: pallas::Base) -> pallas::Base {
     poseidon::Hash::<_, poseidon::P128Pow5T3, poseidon::ConstantLength<3>, 3, 2>::init().hash([
         pallas::Base::from_repr(DST_HKDF).expect("invalid DST bytes"),

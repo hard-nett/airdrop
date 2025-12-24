@@ -187,7 +187,7 @@ pub trait HeadstashBitwiseInstance {
             .try_into()
             .expect("NoteDenom is always 32 bytes")
     }
-    /// Recipient (recp): posiedon hash of 2x16byte limbs
+    /// Recipient (recp): poseidon hash of 2x16byte limbs
     fn derive_recp(&self, addr: CanonicalAddr) -> pallas::Base {
         spec::recp_to_fp(&RecpAddr::try_from(addr).unwrap())
     }

@@ -11,19 +11,21 @@ Our current airdrop framework, `The Headstash Contract` powers distribution by m
 \sigma = \text{Sign}_{\text{elig}_{\text{sk}}}\big( H(m) \big), \quad \text{where } \text{recp} \in m
 ```
 
-**This creates an on-chain association between the eligible account `epk`, and the claiming address `recp`, which we want to prevent.**
+<center>
 
-In order to prevent this association between verifying ownership & claiming tokens, there are 3 major obstacles:
+> **This creates an on-chain association between the eligible account `epk`, and the claiming address `recp`, which we want to prevent.**
+
+</center>
+
+*In order to prevent this association between verifying ownership & claiming tokens, there are 3 major obstacles:*
 
 ### Q: How Does Someone Prove They Own An Eligible Wallet Without Revealing Their Signature?
 
-**A: proof of ownership**: A circuit can provide certainty that an individual knows the private key paired with their public key of an eligible account, by use of the deterministic capabilities of a hash-based key deriving function (hkdf).
+**A: proof of ownership**: A circuit can provide certainty that an individual knows a private key paired with a public key of an eligible account with certainty, via deterministic properties of a hash-based key deriving function (hkdf).
 
 ### Q: How can someone prevent leaking where their claimed funds end up, if the total amount & distributions allocated are public?
 
-**A: Fixed Denomination Notes**: notes function as private UTXNs (Unspent Transaction Notes) that represent claims to portions of the airdropped tokens. Each note contains sensitive data that must remain private, except for certain public components used for verification and transaction processing.
-
-A predetermined set of notes for users are generated based on initial allocations, classified by fixed-denomination amounts. Partial claims of genesis allocations are then possible, and allows eligble claimers to designate unique addresses for receiving allocations over a span of time rather than immediately.
+**A: Fixed Denomination Notes**: notes function as private UTXNs (Unspent Transaction Notes) that represent claims to portions of the airdropped tokens. Each note contains sensitive data that must remain private except for certain public components used for verification and transaction processing. Predetermined sets of notes are bootstrapped (generated) in a non-interative manner, allowing for partial claims of genesis allocations, where eligble claimers can distribute allocations over a span of time rather than immediately, to multiple different accounts as they choose.
 
 ### Q: How are users prevented from claiming more funds then they are allocated?
 
@@ -42,16 +44,14 @@ A predetermined set of notes for users are generated based on initial allocation
 >
 ## Requirements
 
-- **Keys: Self-Custody Key Management Systems**:
-  - a. Reproducible hash-based key derivation: generate & derive a key from use of an eligible key pair with entropy, both in circuit and out of circuit tooling.
-  - b. key rotation/authentication/backup-recovery system
-- **Private Proof Of Ownership: Hkdf + key pairing**
-  - a. constrain a derived key is know from given inputs for proof of ownership
-  - b. constrain a key pair (epk,esk)  are paired by divison with G to be an expected constant in the circuit used as element throughout.
-
-- **Sinsemilla Merkle Trees - hash & commit domains:** ensures inclusion ins specific headstash distribution instance, and in future can implement respendable note-commitments
-- **Nullifier & Note Commitments: Effecient & Private Double Spend Prevention**
-- **On-Chain Smart Contract:** Application layer state machine for spent-nullifiers list, token mint & distribution list
+- **Proof Of Ownership: Hkdf + key pairing:**
+we must constrain a reproducible hash-based key derivation was used to generate & derive keys unique to each notes from entropy & known inputs.
+we must constrain a derived key is know from given inputs for proof of ownership, and also constrain a key pair (epk,esk) are paired together by divison of curves known G to expected constant.
+- **Proof Of Inclusion: Sinsemilla Merkle Trees:**
+we must constrain a note is included in a root path for a specific headstash distribution instance, and in future can implement respendable note-commitments + global nullifier store for multiple headstashes.
+  <!-- - b. key rotation/authentication/backup-recovery system -->
+- **Nullifier & Note Commitments: Private Double Spend Prevention**
+- **On-Chain Verification: Zk-WasmVm:** Application layer state machine for spent-nullifiers list, token mint & distribution list, and verification key storage,access,and use by wasmvm.
 - **Verifiable Service in TEE:** Certainty in transport & offchain runtime
 - **Randomness Generators:** Middleware for generating or acessing randomness oracles during proof generation.
 - **Metamask Snap Support:** Metamask plugin for deterministic proof-input preparation & generation wallet API.
@@ -73,8 +73,8 @@ We have 3 main types of keys involved in this process.
 | # | Key type         | Curve used | Primary crate | Public / Private usage | Typical Rust type (example) | Key‑derivation notes |
 |---|------------------|------------|--------------|------------------------|-----------------------------|----------------------|
 | 1 | **Eligible Key** | `secp256k1`  | `k256` (or `secp256k1`) | Public key is **published** in the allocation; **private key + any signatures / hashes must stay secret** to preserve privacy. | `k256::ecdsa::SigningKey` / `k256::ecdsa::VerifyingKey` | - |
-| 2 | **Recipient Key** | secp256k1 |  `cosmwasm_std` | Public key is **the recp** key the claimed allocation. This is the raw bech32 bytes of an account for the chain we are claiming a headstash on.| May be pre‑generated or created on‑the‑fly; no HKDF involved. | In-circuit we constrain a posiedon hash of a raw canonical bech32 addr represented in 2x16 byte limbs |
-| 3 | **HKDF‑derived Key** |  `pallas` | `pasta-curves` | Keys derived from hashing input values. Used for encrypting data & *"pivoting"* from one cryptographic field to anothe.r |   | Deterministically derived via **posiedon-based** HKDF from circuit‑private inputs (e.g., a seed, a note commitment, a nullifier). The derived scalar is mapped to a pallas point using the crate’s `generator` |
+| 2 | **Recipient Key** | secp256k1 |  `cosmwasm_std` | Public key is **the recp** key the claimed allocation. This is the raw bech32 bytes of an account for the chain we are claiming a headstash on.| May be pre‑generated or created on‑the‑fly; no HKDF involved. | In-circuit we constrain a poseidon hash of a raw canonical bech32 addr represented in 2x16 byte limbs |
+| 3 | **HKDF‑derived Key** |  `pallas` | `pasta-curves` | Keys derived from hashing input values. Used for encrypting data & *"pivoting"* from one cryptographic field to anothe.r |   | Deterministically derived via **poseidon-based** HKDF from circuit‑private inputs (e.g., a seed, a note commitment, a nullifier). The derived scalar is mapped to a pallas point using the crate’s `generator` |
 
 > NOTE: zcash orchard protocol implements key derivation for viewing, authorization, and privacy retention purposes. Our initial scope removed the use of viewing or authorization keys,however upcoming interations will reimplement viewing keys for full disclosure selection to note data.
 
@@ -96,13 +96,6 @@ We have 3 main types of keys involved in this process.
 
 Two core business logic requirement in the headstash circuit are to have a feasable way to verify that the owner of the `epk` is authorizing the spend of a specific note in a headstash instance, and prevent double-spending of headstash allocations. Normal ECDSA verification for field curves are computationally heavy in circuit, & generate extremely large proof sizes not compatible with on-chain gas limits & a nice UX.
 
-When a note is is being spent, the owner generates a nullifier & note commitment, using carefully structured derivation process that results in values that be shared publically and revela no association about the actions the note represents.
-
-Headstashes use a HKDF generated nullifier key `nk` seeded from private input, powering the key separation, verifiablility, & cryptographic binding of the nullifier and note commitment.
-**Users end up proving they know the key pair `esk,epk` by providing the nullifier as a public input into the circuit when generating a proof.**
-
-This lets the circuit use the known curve equation & generator points to constrain that the public and private key are either mathematically paired together or not.
-
 > ### **To prevent double-spending of headstash allocations, a nullifier must be:**
 >
 > - **unique per note**
@@ -110,11 +103,18 @@ This lets the circuit use the known curve equation & generator points to constra
 > - **computable only by the note owner**
 > - **resistant to tampering, especially against attacks where an adversary might attempt to redirect funds during transmission.**
 
+When a note is is being spent, the owner generates a nullifier & note commitment, using carefully structured derivation process that results in two values `nc` & `null` that be shared publically without revealing any association about the sensitive data we are keeping private that note represents and was derived from.
+
+Headstashes use a HKDF generated nullifier key `nk` seeded from private input, powering the key separation, verifiablility, & cryptographic binding of the nullifier and note commitment.
+**Users end up proving they know the key pair `esk,epk` by providing the nullifier as a public input into the circuit when generating a proof.**
+
+This lets the circuit use the known curve equation & generator points to constrain that the public and private key are either mathematically paired together or not.
+
 ### Derivation
 
 > `TLDR:`
 >
-> 1. **select note**: this determines `v`,`nd`,`fdi`,`epk`, `recp`, `rho` (and inherrently `esk` & `psi`)
+> 1. **select note**: this determines `v`,`nd`,`fdi`,`epk||esk`, `recp`, `rho` & `psi`
 > 2. **prepare inputs**: values need some packaging into formats comaptible with our circuit. All clients generating proofs must prepare:
 >     - `v`: fully padded `u64` value
 >     - `fdi`: fully padded `u64` value
@@ -133,8 +133,7 @@ This lets the circuit use the known curve equation & generator points to constra
 
 **Headstashes derive from `esk`,*along with other private inputs a keypair `(nk)` that is on the pallas curve*.**
 
-Specifically, we hash the 3 88-bit limbs of an esk using posiedon,and hash this value `esk_pallas` along with `rho` using a domain-separated posideon hasher, cryptographically bind the nullifier to a specific fund destination. *This defends against a subtle but serious class of attacks man-in-the-middle modifications where an adversary intercepts a transaction and attempts to redirect funds to a different address. Because the nullifier is determined by the exact allocation & destination, any such alteration would result in a different derived `nk`, causing the proof to fail verification.*
- 
+Specifically, we hash the 3 88-bit limbs of an esk using poseidon,and hash this value `esk_pallas` along with `rho` using a domain-separated posideon hasher, cryptographically bind the nullifier to a specific fund destination. *This defends against a subtle but serious class of attacks man-in-the-middle modifications where an adversary intercepts a transaction and attempts to redirect funds to a different address. Because the nullifier is determined by the exact allocation & destination, any such alteration would result in a different derived `nk`, causing the proof to fail verification.*
 
 The following are inputs in the pseduo-random-function (prf) of deriving a nullifier key:
 
@@ -204,26 +203,39 @@ The following are inputs in the pseduo-random-function (prf) of deriving a nulli
 
 For effecieny in-circuit hashing, we are using Posiedon as the hkdf hashing algorithm. Poseidon is a ZK-friendly hash function used for nullifier derivation, note commitments.
 
-<!-- q: when exactly are we using the posiedon function -->
+<!-- q: when exactly are we using the poseidon function -->
 
 | use   |      context                     |                                   |    | ||
 |----------|---------------------------------|--------------------------------------|--------------------------------------|------------|--|
+| `prf_nf` |    ||||
+| `esk_to_base` |    ||||
 | `recp_to_fp` | Convert `RecpAddr` into field element by hashing 2 part pallas represenation  ||||
-| `hdkf_pallas` | Derive `nk` by hashing `esk_pallas` with `rho`  ||||
+| `hdkf_pallas` |   ||||
+<!-- | `prf_pallas_m` |   |||| -->
 
 #### Blake3
 
 For effecieny out of circuit, used as abci-like interface between token-denominations and inputs for `nd` into the circuit. Extremely , and we specifically drop 3 bits from the hash when describing an input, since the hashed values is a public known value we do not worry about the impact of collison resisance that occurs, and just specificy protocols to keep a map dedicated to the original values and their trimmed-hash representations.
 
-q: when exactly are we using the blake3 function
+<!-- q: when exactly are we using the blake3 function -->
+
+| use   |      context                     |                                   |    | ||
+|----------|---------------------------------|--------------------------------------|--------------------------------------|------------|--|
+| `ultra_secure_random` |    ||||
+| `rho_from_secure_random` |    ||||
+| `NoteDenom::hash` |  padded value used in proof generation  ||||
 
 ### Derivation Inputs
 
 | Components   | Meaning                         | Type                                 | Public / Private / Constant / Output | Derivation |Use |
 |----------|---------------------------------|--------------------------------------|--------------------------------------|------------|--|
 | `DST_HEADSTASH`|  genesis tree dst hash  | | **Constant**                         | constant in library  | Genesis Trees |
-| `DST_HKDF`|  nullififer input dst hash   | | **Constant**                         | constant in library  |  hkdf-Keypair |
+| `DST_HKDF`|  nullififer input dst hash   | | **Constant**                         | constant in library  |  `hdkf_pallas` |
 | `SECP256_GENERATOR` |  generator point for secp256k1 curve  | | **Constant** | constant in library  |  hkdf-Keypair |
+| `PrfExpand::ORCHARD_ESK` |  used for deriving a note `rseed` | | **Constant** | constant in library  |  `RandomSeed::esk_inner()` |
+| `PrfExpand::ORCHARD_RCM` | deriving a notes cm trapdoor (used for blinding) | | **Constant** | constant in library  |  `RandomSeed::rcm()` |
+| `LEAF_PERSONALIZATION`|  leaf hasher dst for sinsemilla hashdomain    | | **Constant**  | genesis merkle-tree  | `leaf_hash` |
+| `MERKLE_CRH_PERSONALIZATION`|  hashing leaves   | | **Constant**                         | constant in library  | `MerkleHashOrchard::combine()`\ `HeadstashSuite::merkle_crh()` |
 | `root`   | Genesis Distribution Tree Root  | `u64`                                | **Constant**                          | *sinsemilla::HashDomain*  |
 | `rho`    |                                 |                                      | **Private**                          |  generated by user |
 | `rseed`  |                                 |                                      | **Private**                           |   generated by user ||
@@ -398,27 +410,20 @@ Note Commitments `cm` are also is disclosed publicly during claiming. They are d
 >
 > a: no! thanks to the hardness of hashing functions, its unfeasable to retroactively derive the private inputs given all of the public inputs and the output hash.
 
-## Foreign Field Arithmetic (FFA)
+## Circuit: Chip Specs
+
+Our circuit currently is `K=17`.
+Proof Size: Note expected proof size (~5KB for single proof) in verification section.
+
+### Foreign Field Arithmetic (FFA):  Two-Level Representation
 
   Our circuit operates natively over the **Pallas base field** (`~255 bits`), but for the headstash contracts we need to verify operations on **secp256k1** keys, which use fields of size `~256 bits`. Since secp256k1 field elements **do not fit** natively in the Pallas field, we use **Chinese Remainder Theorem (CRT) representation** with limb decomposition.
-
-### Two-Level Representation
 
 Each secp256k1 field element is represented using a **dual representation**:
 
 #### 1. **Arithmetic Representation (88-bit limbs, each making use of 9x 10-bit decomposition for foreign field arithmetic )**
 
-  For field arithmetic (addition, multiplication, etc.), we decompose 256-bit values into **3 limbs of 88 bits each**:
-
-  ```value = limb[0] + limb[1] *2^88 + limb[2]* 2^176```
-
-  **Why 88 bits?**
-
-- `3 × 88 = 264 bits > 256 bits` (sufficient to represent secp256k1 field elements)
-- 88 bits fits comfortably in Pallas field capacity (254 bits)
-- Allows efficient carry handling during multi-precision arithmetic
-
-  **Arithmetic operations** (add, sub, mul, div) are performed on these 88-bit limbs using standard multi-precision algorithms with carry propagation.
+  For field arithmetic (addition, multiplication, etc.), we decompose 256-bit values into **3 limbs of 88 bits each** `value = limb[0] + limb[1] *2^88 + limb[2]* 2^176`, as 3x88 is sufficient to represent secp256k1 field elements comfortably in Pallas field capacity (254 bits), Allows efficient carry handling during multi-precision arithmetic. **Arithmetic operations** (add, sub, mul, div) are performed on these 88-bit  
 
 #### 2. **Range Check Representation (10-bit chunks)**
 
@@ -506,8 +511,6 @@ let pallas_pk = pallas_sk * G_pallas;
 **2. HKDF Derivation (Native - In-Circuit!)**
 **3. Genesis Distribution Inclusion(Sinsemilla HashDomain)**
 **4. Note Commitment Integrity (Sinsemilla CommitDomain)**
-
-## Circuit: Chip Specs
 
 ### PallasLookupRangeCheck
 
@@ -613,7 +616,22 @@ pub type FqChip<'range, F> = fp::FpChip<'range, F, Secp256k1::Fq>;
 
 ### Sinsemilla Chip
 
+The sinsemilla chip constrains the note-commitment derivation,decomposition,and canonicity. This requires strictly following the specification requiremnts of the sinsemilla hash domain function, resulting in the following bitrange composition of inputs:
+
+| Parameter | Value / Details |
+| ---| --- |
+| **nd**  ||
+| **v**  ||
+| **fdi**  ||
+| **recp**  ||
+| **esk**  | |
+| **rho**  | |
+| **psi**  | |
+| **padding**  ||
+
 ### Merkle Chip
+
+We are constraining that the proover knows the path for a note leaf by having them provide the two leafs next to the specific note leaf they are spending. This can be expanded for a variety of uses cases.
 
 ### NoteCommitChip Chip
 
@@ -627,48 +645,13 @@ Note commit chip constrains the derivation of the `cm` value, via decomposition 
 
 #### Headstash Sinsemilla Running Sum Bitrange
 
-| object  | variables | len |
-|-|-|-|
-|`nd`|`a:0..250`,`b0:250..255`| 255|
-|`v`|`b1:0..55`,`c0:55..64`| 64|
-|`fdi`|`c1:0..51`,`d0:51..64`| 64|
-|`recp`|`d1:0..7`,`ea:7..67,eb:67..127,ec:127..187,ed:187..247, ee:247..255`| 255|
-|`esk`|`ee:0..2`,`f:2..252`, `g0:252..255`| 255|
-|`rho`|`g1:0..57`,`h0:57..117`,`h1:117..177`,`h2:177..237`,`h3:237..247`,`i0:247..255`| 255|
-|`psi`|`i1:0..2`,`i1:2..252`,`i1:252..255`| 255|
-|`padding`|`i4:0..7` | 7 |
-|| **`1403`** |
-
-full docs: [Documentation](./mesh-api)
-
 ## Metamask Snap: Headstash
 
-Metamask snap plugin powering interface for importing/managin circuit proving keys, generating proofs, and for syncing with network for accounts current state across multiple devices
+Metamask snap plugin powering interface for importing/managin circuit proving keys, generating proofs, and for syncing with network for accounts current state across multiple devices. For documentation, [check here.](./metamask-snap.md)
 
-|   |   |   |
-|-|-|-|
-|[Snap-N-Pull](../../zk-crates/snap-n-pull/README) |[Documentation](./metamask-snap) |
+## Headstash Suite: Orchestration Library
 
-actions: `claim-note-nullifier`, `manage-headstash-instance-yaml`, `gen-offline-nullifier`
-
-## WasmBindgen
-
-| actions  | descr | used-by  |
-|-|-|-|
-| web3-connect  |   |   |
-| generating proofs  |   |   |
-| verifying proofs  |   |   |
-| syncing headstash-yamls  |   |   |
-
-## Genesis Bootstrapping
-
-## Randomness Generation
-
-In order to make it impossible to retroatively derive randomness used during the note-commitment generation (which in theory would be possible if an adversary had access to a device, the timestamp of when randomness was generated), we want to enable user-derived input as an additional seed to the PRNG process, such as drawing on the screen or allowing modular inputs
-
-> <center> DEMO: our script used to generate randomness can be invoked via :
->
-> `cargo run --package zk-crates --bin generate_randomness`</center>
+For documentation on our standard suite for interacting and managing headstashes, [check here](./suite.md)
 
 ## Research
 

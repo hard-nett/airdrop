@@ -6,6 +6,7 @@ use pasta_curves::pallas;
 use subtle::{ConstantTimeEq, CtOption};
 
 use crate::{
+    address::RecpAddr,
     constants::{fixed_bases::NOTE_COMMITMENT_PERSONALIZATION, L_ORCHARD_BASE},
     keys::EligibleSk,
     spec::extract_p,
@@ -41,13 +42,14 @@ impl NoteCommitment {
         nd: pallas::Base,
         v: NoteValue,
         fdi: pallas::Base,
-        recp: [u8; 32],
+        recp: RecpAddr,
         esk: EligibleSk,
         rho: pallas::Base,
         psi: pallas::Base,
         rcm: NoteCommitTrapdoor,
     ) -> CtOption<Self> {
         let esk = esk.derive_pallas();
+        let recp = recp.to_pallas();
 
         let domain = sinsemilla::CommitDomain::new(NOTE_COMMITMENT_PERSONALIZATION);
         domain
@@ -56,7 +58,7 @@ impl NoteCommitment {
                     .chain(nd.to_le_bits().iter().by_vals())
                     .chain(v.to_le_bits().iter().by_vals())
                     .chain(fdi.to_le_bits().iter().by_vals())
-                    .chain(BitArray::<_, Lsb0>::new(recp).iter().by_vals())
+                    .chain(recp.to_le_bits().iter().by_vals())
                     .chain(esk.to_le_bits().iter().by_vals())
                     .chain(rho.to_le_bits().iter().by_vals().take(L_ORCHARD_BASE))
                     .chain(psi.to_le_bits().iter().by_vals().take(L_ORCHARD_BASE)),
@@ -91,7 +93,8 @@ impl From<cosmwasm_std::Binary> for ExtractedNoteCommitment {
     fn from(cm: cosmwasm_std::Binary) -> Self {
         ExtractedNoteCommitment::from_bytes(
             cm.as_slice().try_into().expect("Invalid commitment bytes"),
-        ).expect("bad cw -> pallas::Base")
+        )
+        .expect("bad cw -> pallas::Base")
     }
 }
 

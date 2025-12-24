@@ -45,6 +45,7 @@ use crate::{
     tree::{Anchor, MerkleHashOrchard},
     value::{NoteDenom, NoteValue},
 };
+use ff::PrimeField;
 use halo2_gadgets::{
     ecc::{
         chip::{EccChip, EccConfig},
@@ -651,6 +652,7 @@ impl Instance {
             // enable_output,
         }
     }
+
     /// Constructs an [`Instance`] from its constituent parts in bytes.
     pub fn from_bytes(bytes: Vec<u8>) -> Self {
         const THREETWO: usize = 32;
@@ -663,24 +665,18 @@ impl Instance {
         let anchor: &[u8; 32] = &bytes[offset..offset + THREETWO].try_into().expect("anchor");
         offset += THREETWO;
 
-        // Parse nd (32 bytes)
         let nd: &[u8; 32] = &bytes[offset..offset + THREETWO].try_into().expect("nd");
         offset += THREETWO;
 
-        // Parse v (u64, 8 bytes, little-endian)
         let v_bytes = &bytes[offset..offset + EIGHT];
         let v = u64::from_le_bytes(v_bytes.try_into().expect("v"));
         offset += EIGHT;
 
-        // Parse nf (32 bytes)
         let nf: &[u8; 32] = &bytes[offset..offset + THREETWO].try_into().expect("nf");
         offset += THREETWO;
 
-        // Parse recp (32 bytes)
         let recp = &bytes[offset..offset + THREETWO];
         offset += THREETWO;
-
-        // Parse cmx (32 bytes)
         let cmx: &[u8; 32] = &bytes[offset..offset + THREETWO].try_into().expect("cmx");
 
         Instance {
@@ -691,6 +687,20 @@ impl Instance {
             recp: RecpAddr::try_from(recp).expect(""),
             cmx: ExtractedNoteCommitment::from_bytes(cmx).expect(""),
         }
+    }
+
+    /// Constructs an  [Vec<u8>]  from an instance for serialization/deserialization.
+    fn to_bytes(&self) -> Vec<u8> {
+        let mut bytes = Vec::with_capacity(168);
+
+        bytes.extend_from_slice(&self.anchor.to_bytes());
+        bytes.extend_from_slice(&self.nd.as_bytes());
+        bytes.extend_from_slice(&self.v.inner().to_le_bytes());
+        bytes.extend_from_slice(&self.nf.to_bytes());
+        bytes.extend_from_slice(&self.recp.to_bytes());
+        bytes.extend_from_slice(&self.cmx.to_bytes());
+
+        bytes
     }
 
     fn to_halo2_instance(&self) -> [[vesta::Scalar; 9]; 1] {

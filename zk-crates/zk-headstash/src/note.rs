@@ -310,11 +310,10 @@ impl Note {
 
     fn commitment_inner(&self) -> CtOption<NoteCommitment> {
         NoteCommitment::derive(
-            pallas::Base::from_repr(self.nd.as_bytes().try_into().unwrap())
-                .expect("nd noteCommitment Fp"),
+            self.nd.to_pallas(),
             self.v,
-            pallas::Base::from_u128(self.fdi.into()),
-            self.recipient.to_bytes(),
+            self.fdi.into(),
+            self.recipient,
             self.esk,
             self.rho.0,
             self.rseed.psi(&self.rho),

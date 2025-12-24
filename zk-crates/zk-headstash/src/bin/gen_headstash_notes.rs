@@ -1,7 +1,7 @@
 use zk_headstash::deploy::suite::*;
 
 /// ## `create_headstash_notes`
-///  **Sinsemilla HashDomain** generates default note using posiedon hashing algo & Fixed-Denomination Notes
+///  **Sinsemilla HashDomain** generates default note using poseidon hashing algo & Fixed-Denomination Notes
 /// ```
 ///  cargo run -- --bin gen_headstash_notes ./data/genesis_sinsemilla.json 0x0000000000000000000000000000000000000000
 /// ```

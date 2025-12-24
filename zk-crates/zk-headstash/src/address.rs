@@ -1,5 +1,6 @@
 //! address related crate
 use cosmwasm_std::CanonicalAddr;
+use ff::PrimeField;
 use pasta_curves::pallas;
 use subtle::CtOption;
 
@@ -122,8 +123,14 @@ impl RecpAddr {
     pub fn to_pallas(&self) -> pallas::Base {
         crate::spec::recp_to_fp(self)
     }
+
     pub(crate) fn g_d(&self) -> NonIdentityPallasPoint {
         diversify_hash_headstash(&self.0)
+    }
+
+    /// validates whether a byte array is identical to the pallas field representation of the raw recp bytes
+    pub fn validate(&self, pallas: &[u8]) -> bool {
+        self.to_pallas().to_repr() == pallas
     }
 }
 

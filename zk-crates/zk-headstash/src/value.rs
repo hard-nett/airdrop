@@ -93,7 +93,7 @@ pub struct NoteDenom {
 
 /// Return the padded value used in proof generation (blake3 hash with bit-trim)
 impl NoteDenom {
-    /// Return the padded value used in proof generation (posiedon hash with bit-trim for field note denom field inclusion).
+    /// Return the padded value used in proof generation (poseidon hash with bit-trim for field note denom field inclusion).
     /// Clear the top three bits of the first byte to get 253-bit field element (pallas)\
     /// 0x1F = 00011111 in binary (clears top 3 bits)
     pub fn new_for_proof(denom: &str) -> Self {

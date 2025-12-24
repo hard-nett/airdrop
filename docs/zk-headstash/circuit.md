@@ -2,8 +2,12 @@
 
 ## TLDFR
 
-- each action requires us to constrain the "internal action steps" as math (easy cuz all data in computers are just 1 & 0, and if you split them up (and remember the order) very precisely, letting us form numbers in binary representation, ). **headstash has 3 main internal actions, 1.key-pairing,2.note-merkle-tree-inclusion,3.nullifier/note-commitment integrity**
--
+- each action requires us to constrain the "internal action steps" as math (easy cuz all data in computers are just 1 & 0, and if you split them up (and remember the order) very precisely, letting us form numbers in binary representation, ).
+- **headstash has 3 main internal actions:
+
+1. key-pairing
+2. note-merkle-tree-inclusion
+3. nullifier/note-commitment integrity
 
 ## Canonicity Gates
 
@@ -17,28 +21,28 @@ The "10-bit gate canonicity" refers to the custom gates that enforce the correct
 
 The gates achieve this by:
 
-Decomposing a value into smaller, constrained sub-pieces (e.g., b_0, b_1, b_2, b_3 for message piece b).
+Decomposing a value into smaller, constrained sub-pieces (e.g., `b_0, b_1, b_2, b_3` for message piece `b`).
 Constraining the sub-pieces to their correct bit lengths (using lookup tables and boolean checks).
-Reconstructing the original value from the sub-pieces with a constraint like b = b_0 + (2^4) *b_1 + (2^5)* b_2 + (2^6) * b_3.
+Reconstructing the original value from the sub-pieces with a constraint like `b = b_0 + (2^4) *b_1 + (2^5)* b_2 + (2^6) * b_3`.
 Linking across gates to ensure the value in one piece correctly connects to the next piece, forming a continuous bit string.
 
 ### Design
 
+### Instances
+
+Instances are the public values involved in generating and verifying a proof. An example would be a public known root of a merkle tree, or a notes intended recipients for ownership of an nft being transferred.
+
+### Witnesses
+
+Witenesses are the private values involved in the statement we are trying to proove. These are the values that a proof generated along with the required public instances we can proove we know without ever revealing any information about them.
+
 ### Verifying Key
-<!-- q: what is minimum required data needed to verify a proof? -->
-<!-- q: how do we store/retrieve these keys in a cosmwasm contract for use to prooveF -->
 
-Verifying Key (VK)
-
-Size: Typically 10-50 KB (depends on circuit complexity)
-Contents:
-
-Fixed commitments: Commitments to fixed columns in your circuit
-Permutation commitments: For the copy constraint system
-Circuit structure metadata: Number of columns, gates, etc.
-Domain information: FFT domain size
+Verifying keys verifying generated proof bytes with a given set of public instances.
 
 ### Proving Key
+
+Proving keys are the circuits keys used to generate proofs given a set of public witness and private instances.
 
 ### Serializing And Deserializing Keys
 
@@ -67,25 +71,17 @@ Reading requires the vk deserialized params, or manually deserializing each valu
 | ... | 4 bytes | `u32` (little-endian) | Number of selectors | `num_selectors` |
 | ... | `sum((selector.len() + 7) / 8)` | `Vec<Vec<bool>>` | Selectors (packed as bits, 8 bools per byte) | `selectors` |
 
-**Key Points:**
-
-- `from_bytes()` is a convenience wrapper around `read()` that works with byte slices
-- Requires `params` and `ConcreteCircuit` type to reconstruct the domain and constraint system
-- Selectors are bit-packed for efficiency (8 boolean values per byte)
-- The permutation section contains its own count followed by its commitments
-- The total size can be calculated with `bytes_length()` which accounts for all components
-
-### Generating Proof
+## Generating Proof
 
 **What you need to provide:**
 
 1. **Params**: The universal setup parameters
 2. **Proving Key**: Generated earlier
-3. **Circuit instance**: Your actual circuit with witness data filled in
+3. **Circuit Instances**: Your actual circuit with witness data filled in
 4. **Public inputs**: The instance values (public inputs to your circuit)
 5. **RNG**: For generating random challenges
 
-#### **Proof Size**
+### **Proof Size**
 
 - **Typical size**: 1-5 KB for most circuits
 - **Fixed components** (don't scale much with circuit size):
@@ -95,12 +91,3 @@ Reading requires the vk deserialized params, or manually deserializing each valu
   - Evaluations: 32 bytes each (field elements)
 
   ```
-
-Proof Components (approximate):
-├─ Advice commitments: 32 bytes × (number of advice columns) × (number of phases)
-├─ Lookup commitments: 32 bytes × (number of lookup arguments)
-├─ Permutation product commitments: 32 bytes × (number of permutation products)
-├─ Vanishing argument commitment: 32 bytes
-├─ Random commitment: 32 bytes
-├─ Opening evaluations: 32 bytes × (number of opened points)
-└─ Multi-open proof: ~128 bytes
