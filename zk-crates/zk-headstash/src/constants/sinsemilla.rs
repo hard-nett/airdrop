@@ -1,7 +1,7 @@
 //! Sinsemilla generators
 use crate::spec::i2lebsp;
 
-//  #[cfg(feature = "circuit")]
+ #[cfg(feature = "circuit")]
 use {
     super::{OrchardFixedBases, OrchardFixedBasesFull},
     group::ff::PrimeField,
@@ -87,7 +87,7 @@ pub enum OrchardHashDomains {
     MerkleCrh,
 }
 
-//  #[cfg(feature = "circuit")]
+ #[cfg(feature = "circuit")]
 #[allow(non_snake_case)]
 impl HashDomains<pallas::Affine> for OrchardHashDomains {
     fn Q(&self) -> pallas::Affine {
@@ -117,7 +117,7 @@ pub enum OrchardCommitDomains {
     CommitIvk,
 }
 
-//  #[cfg(feature = "circuit")]
+ #[cfg(feature = "circuit")]
 impl CommitDomains<pallas::Affine, OrchardFixedBases, OrchardHashDomains> for OrchardCommitDomains {
     fn r(&self) -> OrchardFixedBasesFull {
         match self {

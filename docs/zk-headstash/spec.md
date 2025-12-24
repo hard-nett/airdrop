@@ -133,45 +133,62 @@ This lets the circuit use the known curve equation & generator points to constra
 
 **Headstashes derive from `esk`,*along with other private inputs a keypair `(nk)` that is on the pallas curve*.**
 
-Specifically, we hash the 3 88-bit limbs of an esk using posiedon,and hash this value `esk_pallas` along with `rho` using a domain-separated posideon hasher, cryptographically bind the nullifier to a specific fund destination, where only the owner has discrection in deciding who can derive the note from it since it depends on their private `note_secret` and the associated key of the `epk`.
+Specifically, we hash the 3 88-bit limbs of an esk using posiedon,and hash this value `esk_pallas` along with `rho` using a domain-separated posideon hasher, cryptographically bind the nullifier to a specific fund destination. *This defends against a subtle but serious class of attacks man-in-the-middle modifications where an adversary intercepts a transaction and attempts to redirect funds to a different address. Because the nullifier is determined by the exact allocation & destination, any such alteration would result in a different derived `nk`, causing the proof to fail verification.*
+ 
 
-*This defends against a subtle but serious class of attacks man-in-the-middle modifications where an adversary intercepts a transaction and attempts to redirect funds to a different address, while reusing the same proof structure. Because the nullifier depends on the exact allocation being spent, any such alteration would result in a different derived `nk`, causing the proof to fail verification.*
+The following are inputs in the pseduo-random-function (prf) of deriving a nullifier key:
 
-#### NoteCommitment Derivation
-<!-- TODO: hash each limb of esk and sum limbs to get esk_pallas -->
 ```math
 \begin{array}{lcl}
-
-\textbf{Private witnesses} &
-\begin{cases}
-\mathsf{esk}\in\mathbb{F}_{\ell}&\text{( Posiedon hash of 3x88bit limb representation of `esk`)}\\[2pt]
-\mathsf{fdi}\in \mathbb{F}_p &\text{fully padded u64 of fixed denomination index }fdi\text{}\\[2pt]
-\mathsf{{\psi }}\in \{0,1\}^{256}&:= \text{PRF}_{\text{PSI}}\!\bigl(\mathsf{rseed},\,\rho\bigr) \in \mathbb{F}_p,\\[4pt]
-\mathsf{rho}\\[6pt]
-\mathsf{rcm} &:= \text{PRF}_{\text{RCM}}\!\bigl(\mathsf{rseed},\,\rho\bigr) \in \mathbb{F}_p,\\[6pt]
-\end{cases}
+\begin{array}{ }
+\textbf{Nullifier Key `nk` Derivation} 
 \end{array}
-```
-
-```math
-\begin{array}{lcl}
 \\[10pt]
-\textbf{Public inputs} &
+\textbf{Private Inputs} &
 \begin{cases}
-\mathsf{recp}\in \mathbb{F}_p      &\text{(recipient adddr)}\\[2pt]
-\mathsf{v}\in \mathbb{F}_p      &\text{(fully padded u64 of value being spent in note)}\\[2pt]
-\mathsf{H(nd)}\in \mathbb{F}_p      &\text{Blake3 hash $nd$, top 3 bits to fit on pallas curve  }\text{}\\[2pt]
+\mathsf{esk}\in \mathbb{F}_p      &\text{Posiedon hash of 3x88bit limb representation of `esk` }\text{}\\[2pt]
+\mathsf{rho}\in \mathbb{F}_p      &\text{note randomness}\\[2pt]
 % \mathsf{recp}^{\ast}\in \mathbb{F}_p      &\text{(Posiedon Hash of recipient of notes token }nd\text{)}\\[2pt]
 \end{cases}
 \end{array}
 ```
 
-#### Nullifier Derivation
+```math
+\begin{array}{lcl}
+\begin{array}{ }
+\textbf{NoteCommitment Derivation} 
+\end{array}
+\\[10pt]
+\textbf{Public (Instances)} &
+\begin{cases}
+\mathsf{nd}\in \mathbb{F}_p      &\text{Blake3 hash $nd$, top 3 bits to fit on pallas curve  }\text{}\\[2pt]
+\mathsf{v}\in \mathbb{F}_p      &\text{(fully padded u64 of value being spent in note)}\\[2pt]
+\mathsf{recp}\in \mathbb{F}_p      &\text{(recipient addr)}\\[2pt]
+\end{cases}
+\end{array}
+```
 
 ```math
 \begin{array}{lcl}
+\textbf{Private (Witnesses)} &
+\begin{cases}
+\mathsf{fdi}\in \mathbb{F}_p &\text{fully padded u64 of fixed denomination index }fdi\text{}\\[2pt]
+\mathsf{esk}\in\mathbb{F}_{\ell}&\text{( Posiedon hash of 3x88bit limb representation of `esk`)}\\[2pt]
+\mathsf{{\psi }}\in \{0,1\}^{256}&:= \text{PRF}_{\text{PSI}}\!\bigl(\mathsf{rseed},\,\rho\bigr) \in \mathbb{F}_p,\\[4pt]
+\mathsf{rho} & \text{note randomness} \\[6pt]
+\mathsf{psi} & \text{private note randomness derived from rho} \\[6pt]
+\mathsf{rcm} & \text{commitment trapdoor used for blinding} \\[6pt]
+\end{cases}
+\end{array}
+```
 
-\textbf{Private witnesses} &
+```math
+\begin{array}{lcl}
+\begin{array}{ }
+\textbf{Nullifier Derivation} 
+\end{array}
+\\[10pt]
+\textbf{Private Inputs} &
 \begin{cases}
 \mathsf{nk}\in\mathbb{F}_{\ell}&\text{( key derived from $ek$ for generating nullifier)}\\[2pt]
 \mathsf{{\psi }}\in \{0,1\}^{256}&:= \text{PRF}_{\text{PSI}}\!\bigl(\mathsf{rseed},\,\rho\bigr) \in \mathbb{F}_p,\\[4pt]
@@ -621,7 +638,6 @@ Note commit chip constrains the derivation of the `cm` value, via decomposition 
 |`psi`|`i1:0..2`,`i1:2..252`,`i1:252..255`| 255|
 |`padding`|`i4:0..7` | 7 |
 || **`1403`** |
-
 
 full docs: [Documentation](./mesh-api)
 

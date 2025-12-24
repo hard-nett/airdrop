@@ -6,7 +6,7 @@ use std::vec::Vec;
 
 use ff::{Field, FromUniformBytes, PrimeField, PrimeFieldBits};
 use group::{Curve, Group, GroupEncoding, WnafBase, WnafScalar};
-// #[cfg(feature = "circuit")]
+#[cfg(feature = "circuit")]
 use halo2_gadgets::{poseidon::primitives as poseidon, sinsemilla::primitives as sinsemilla};
 #[cfg(feature = "std")]
 use memuse::DynamicUsage;

@@ -1,17 +1,17 @@
 //! Orchard fixed bases.
 
-// #[cfg(feature = "circuit")]
+#[cfg(feature = "circuit")]
 use alloc::vec::Vec;
 
 use super::{L_ORCHARD_SCALAR, L_VALUE};
 
-// #[cfg(feature = "circuit")]
+#[cfg(feature = "circuit")]
 use halo2_gadgets::ecc::{
     chip::{BaseFieldElem, FixedPoint, FullScalar, ShortScalar},
     FixedPoints,
 };
 
-// #[cfg(feature = "circuit")]
+#[cfg(feature = "circuit")]
 use pasta_curves::pallas;
 
 pub mod commit_ivk_r;
@@ -114,14 +114,14 @@ pub struct NullifierK;
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub struct ValueCommitV;
 
-// #[cfg(feature = "circuit")]
+#[cfg(feature = "circuit")]
 impl FixedPoints<pallas::Affine> for OrchardFixedBases {
     type FullScalar = OrchardFixedBasesFull;
     type Base = NullifierK;
     type ShortScalar = ValueCommitV;
 }
 
-// #[cfg(feature = "circuit")]
+#[cfg(feature = "circuit")]
 impl FixedPoint<pallas::Affine> for OrchardFixedBasesFull {
     type FixedScalarKind = FullScalar;
 
@@ -153,7 +153,7 @@ impl FixedPoint<pallas::Affine> for OrchardFixedBasesFull {
     }
 }
 
-// #[cfg(feature = "circuit")]
+#[cfg(feature = "circuit")]
 impl FixedPoint<pallas::Affine> for NullifierK {
     type FixedScalarKind = BaseFieldElem;
 
@@ -170,7 +170,7 @@ impl FixedPoint<pallas::Affine> for NullifierK {
     }
 }
 
-// #[cfg(feature = "circuit")]
+#[cfg(feature = "circuit")]
 impl FixedPoint<pallas::Affine> for ValueCommitV {
     type FixedScalarKind = ShortScalar;
 

@@ -242,10 +242,11 @@ impl From<&SpendingKey> for NullifierDerivingKey {
 }
 
 impl NullifierDerivingKey {
+    // pseudo-random function for nullifier
     pub(crate) fn prf_nf(&self, rho: pallas::Base) -> pallas::Base {
         prf_nf(self.0, rho)
     }
-    /// derive from esk & rho
+    /// derive from esk & rho. Decomposes esk into 3x88 bit limbs via [crate::spec::hdkf_pallas]
     pub fn derive_from(esk: EligibleSk, rho: crate::note::Rho) -> Self {
         Self(crate::spec::hdkf_pallas(
             crate::spec::esk_to_base(&esk),
@@ -923,6 +924,13 @@ impl SharedSecret {
 pub struct EligibleSk(secp256k1::SecretKey);
 
 impl EligibleSk {
+    /// Generates a random key that will be eligible for a headstash instance.
+    pub fn random(rng: &mut impl RngCore) -> Self {
+        let mut bytes = [0; 32];
+        rng.fill_bytes(&mut bytes);
+        EligibleSk::from(secp256k1::SecretKey::from_byte_array(bytes).expect("dang"))
+    }
+
     /// derive from an secp256k1 crate value
     pub fn from(sk: secp256k1::SecretKey) -> Self {
         Self(sk)
@@ -933,21 +941,8 @@ impl EligibleSk {
 
         Self(secp256k1::SecretKey::from_byte_array(bytes).expect("dang"))
     }
-    /// Generates a random key that will be eligible for a headstash instance.
-    pub fn random(rng: &mut impl RngCore) -> Self {
-        let mut bytes = [0; 32];
-        rng.fill_bytes(&mut bytes);
-        EligibleSk::from(secp256k1::SecretKey::from_byte_array(bytes).expect("dang"))
-    }
 
-    /// Build an `EligibleSk` from a hex string that represents a 32‑byte SECP‑256k1 secret key.
-    ///
-    /// # Example
-    /// ```rust
-    /// let sk = EligibleSk::from("1a2b3c…"); // 64‑char hex
-    /// ```
-    ///
-    /// The function will `panic!` if the string is not a valid 32‑byte hex value.
+    /// derive from a hex string of raw 32-byte sk.
     pub fn from_hex(hex_str: &str) -> Self {
         Self(
             secp256k1::SecretKey::from_byte_array(

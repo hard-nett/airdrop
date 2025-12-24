@@ -3,9 +3,9 @@ pub mod fixed_bases;
 pub mod sinsemilla;
 pub mod util;
 
-// #[cfg(feature = "circuit")]
+#[cfg(feature = "circuit")]
 pub use self::sinsemilla::{OrchardCommitDomains, OrchardHashDomains};
-// #[cfg(feature = "circuit")]
+#[cfg(feature = "circuit")]
 pub use fixed_bases::{NullifierK, OrchardFixedBases, OrchardFixedBasesFull, ValueCommitV};
 
 /// $\mathsf{MerkleDepth^{Orchard}}$
@@ -30,6 +30,8 @@ pub(crate) const L_VALUE: usize = 64;
 
 /// SWU hash-to-curve personalization for the group hash for key diversification
 pub const KEY_DIVERSIFICATION_PERSONALIZATION: &str = "z.cash:Orchard-gd";
+
+/// personalization for the headstash nullifier key derivation of an esk
 pub const DST_HKDF: [u8; 32] = *b"Hkdf_headstash_710_terp.network\0";
 #[cfg(test)]
 mod tests {

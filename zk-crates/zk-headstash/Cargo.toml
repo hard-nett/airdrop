@@ -5,12 +5,13 @@ edition = "2021"
 
 [features]
 default = ["circuit", "multicore", "std", "interface"]
-interface = ["headstash-randomness"]
-multicore = ["halo2_proofs?/multicore"]
 circuit = ["dep:halo2_gadgets", "dep:halo2_proofs", "std"]
-std = ["core2/std", "group/wnaf-memuse" , "dep:halo2_proofs","reddsa/std"]
+interface = ["headstash-randomness", "std", "dep:rayon", "circuit"]
+multicore = ["halo2_proofs?/multicore"]
+std = ["core2/std", "group/wnaf-memuse" , "reddsa/std"]
 dev-graph = ["halo2_proofs?/dev-graph", "image", "plotters"]
 rpc = []
+test-dependencies = []
 
 [dependencies]
 headstash-randomness  = { workspace = true,  optional = true }
@@ -40,7 +41,7 @@ pasta_curves  = {workspace = true }
 reddsa = { workspace = true, default-features = false }
 rand = {workspace = true }
 rand_core = { workspace = true, default-features = false }
-rayon = {workspace = true }
+rayon = {workspace = true, optional = true }
 secp256k1  = {workspace = true}
 prost = { workspace = true }
 tonic = {workspace = true }
@@ -76,4 +77,23 @@ zcash_note_encryption = { version = "0.4", features = ["pre-zip-212"] }
 incrementalmerkletree = { version = "0.8.1", features = ["test-dependencies"] }
 shardtree = "0.6"
 
- 
+# Binary targets with required features
+[[bin]]
+name = "gen_headstash_keys"
+required-features = ["interface"]
+
+[[bin]]
+name = "create_headstash_proof"
+required-features = ["interface"]
+
+[[bin]]
+name = "gen_headstash_notes"
+required-features = ["interface"]
+
+[[bin]]
+name = "create_test_circuit_data"
+required-features = ["circuit"]
+
+[[bin]]
+name = "gen_randomness"
+required-features = ["interface"]

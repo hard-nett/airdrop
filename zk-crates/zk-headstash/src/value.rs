@@ -45,7 +45,7 @@ use std::string::{String, ToString};
 use bitvec::{array::BitArray, order::Lsb0};
 use ff::{Field, PrimeField};
 use group::{Curve, Group, GroupEncoding};
-//  #[cfg(feature = "circuit")]
+#[cfg(feature = "circuit")]
 use halo2_proofs::plonk::Assigned;
 use pasta_curves::{
     arithmetic::{CurveAffine, CurveExt},
@@ -54,7 +54,6 @@ use pasta_curves::{
 use rand::RngCore;
 use subtle::CtOption;
 
-use crate::address::RecpAddr;
 use crate::{
     constants::fixed_bases::{
         VALUE_COMMITMENT_PERSONALIZATION, VALUE_COMMITMENT_R_BYTES, VALUE_COMMITMENT_V_BYTES,
@@ -207,13 +206,13 @@ impl NoteValue {
     }
 }
 
-//  #[cfg(feature = "circuit")]
+#[cfg(feature = "circuit")]
 impl From<&NoteValue> for Assigned<pallas::Base> {
     fn from(v: &NoteValue) -> Self {
         pallas::Base::from(v.inner()).into()
     }
 }
-//  #[cfg(feature = "circuit")]
+#[cfg(feature = "circuit")]
 impl From<u64> for NoteValue {
     fn from(v: u64) -> Self {
         Self(v)

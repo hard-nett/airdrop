@@ -28,16 +28,18 @@ use alloc::vec::Vec;
 mod action;
 pub mod address;
 pub mod builder;
-// pub mod bundle;
-//  #[cfg(feature = "circuit")]
-pub mod circuit;
 mod constants;
+// pub mod bundle;
+
+#[cfg(feature = "circuit")]
+pub mod circuit;
+#[cfg(feature = "circuit")]
+pub mod example_circuits;
+
 pub mod keys;
 pub mod note;
 // pub mod note_encryption;
 // pub mod pczt;
-pub mod deploy;
-pub mod example_circuits;
 pub mod gen;
 pub mod primitives;
 mod spec;
@@ -47,14 +49,16 @@ pub mod tree;
 pub mod value;
 pub mod zip32;
 
+#[cfg(feature = "interface")]
+pub mod deploy;
+
 pub use action::Action;
 pub use address::Address;
 // pub use bundle::Bundle;
 pub use constants::MERKLE_DEPTH_ORCHARD as NOTE_COMMITMENT_TREE_DEPTH;
 pub use note::Note;
-pub use tree::Anchor;
-
 pub use spec::recp_to_fp;
+pub use tree::Anchor;
 
 /// A proof of the validity of an Orchard [`Bundle`].
 ///
