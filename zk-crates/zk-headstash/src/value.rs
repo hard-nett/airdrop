@@ -130,22 +130,23 @@ impl NoteDenom {
     pub fn to_fp(&self) -> pallas::Base {
         crate::spec::nd_to_fp(self)
     }
-    /// Return the raw bytes (including unused trailing zeros).
-    pub fn to_cosmwasm(&self) -> cosmwasm_std::Binary {
-        cosmwasm_std::Binary::new(self.as_bytes().to_vec())
-    }
+    // /// Return the raw bytes (including unused trailing zeros).
+    // pub fn to_cosmwasm(&self) -> cosmwasm_std::Binary {
+    //     cosmwasm_std::Binary::new(self.as_bytes().to_vec())
+    // }
 }
 
-impl From<cosmwasm_std::Binary> for NoteDenom {
-    fn from(value: cosmwasm_std::Binary) -> Self {
-        NoteDenom {
-            bytes: value
-                .as_slice()
-                .try_into()
-                .expect("Invalid note denom bytes"),
-        }
-    }
-}
+// impl From<cosmwasm_std::Binary> for NoteDenom {
+//     fn from(value: cosmwasm_std::Binary) -> Self {
+//         NoteDenom {
+//             bytes: value
+//                 .as_slice()
+//                 .try_into()
+//                 .expect("Invalid note denom bytes"),
+//         }
+//     }
+// }
+
 impl From<[u8; 32]> for NoteDenom {
     fn from(value: [u8; 32]) -> Self {
         NoteDenom { bytes: value }

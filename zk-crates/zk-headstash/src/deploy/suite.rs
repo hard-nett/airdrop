@@ -26,7 +26,7 @@ use std::{env, eprintln, fs, println};
 
 use anybuf::Anybuf;
 use base64::{engine::general_purpose, Engine as _};
-use cosmwasm_std::CanonicalAddr;
+// use cosmwasm_std::CanonicalAddr;
 use ff::{Field, FromUniformBytes, PrimeField, PrimeFieldBits};
 use hex::decode;
 use pasta_curves::pallas::Base;
@@ -187,9 +187,9 @@ pub trait HeadstashBitwiseInstance {
             .try_into()
             .expect("NoteDenom is always 32 bytes")
     }
-    /// Recipient (recp): poseidon hash of 2x16byte limbs
-    fn derive_recp(&self, addr: CanonicalAddr) -> pallas::Base {
-        spec::recp_to_fp(&RecpAddr::try_from(addr).unwrap())
+    /// Recipient (recp): poseidon hash a 2x16byte limbs of `CanonicalAddr`
+    fn derive_recp(&self, addr: [u8; 32]) -> pallas::Base {
+        spec::recp_to_fp(&RecpAddr::new(addr))
     }
 
     /// extend_with_base_field_bits

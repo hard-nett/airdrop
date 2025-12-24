@@ -303,9 +303,9 @@ A leaf is computed using the sinsemilla hashing function with the following inpu
 
 | Components   | Meaning                         | Type                                 | Public / Private / Constant / Output | Derivation |
 |----------|---------------------------------|--------------------------------------|--------------------------------------|------------|
-| `DST_HKDF`      |    |                                      | **Constant**                         |   |
-| `esk`| Eligible secret key             | `bytes[32]`                          | **Private**                          |  |
-| `fdi`    | Fixed Denomination Index        | `u64`                                | **Private**                          | *fully padded u64* |
+| `DST_HKDF`   |                             |                                      | **Constant**                         |            |
+| `epk`    | Eligible public key             | `bytes[32]`                          | **Public**                          |  *raw 32 bytes* |
+| `fdi`    | Fixed Denomination Index        | `u64`                                | **Public**                          | *fully padded u64* |
 | `v`      | Note Value                      | `NoteValue(u64)`                     | **Public**                           | *fully padded u64* |
 | `nd`     | Note Denomination               | `NoteDenom([u8; <128])`              | **Public**                           | *blake3 Hash + top 3 bits |
 | `psi`    | Note Randomness                 | ` `                                  | **Private**                          ||
@@ -325,56 +325,6 @@ A leaf is computed using the sinsemilla hashing function with the following inpu
 <!-- >q: can we use a point definition for the x & y of the keypair for a single input into the circuit and more clean decomposition? -->
 
 *This is how we enable non-interactive instances of headstash deployments, and can be optimized to bring more composability to these genesis distributions*
-
-#### Circuit Inputs
-
-```math
-\begin{array}{lcl}
-
-\textbf{Private witnesses} &
-\begin{cases}
- \text{no private inputs in sinsemilla hash (non-internative)}
-\end{cases}
-\end{array}
-```
-
-```math
-\begin{array}{lcl}
-\\[10pt]
-\textbf{Public inputs} &
-\begin{cases}
-\mathsf{v}\in \mathbb{F}_p      &\text{(fully padded u64 of value being spent in note)}\\[2pt]
-\mathsf{H(nd\_{raw})}\in \mathbb{F}_p      &\text{(Posiedon Hash of notes token denomination }nd\text{)}\\[2pt]
-\end{cases}
-\end{array}
-```
-
-```math
-\begin{array}{lcl}
-\\[10pt]
-\textbf{Constants} &
-\begin{cases}
-\mathtt{DST}_{\!{Nullifier}}= \texttt{DST\_NULL}&\text{(domain‑separation tag)}\\[2pt]
-\mathtt{DST}_{\!{Hkdf}}= \texttt{DST\_HKDF}&\text{(domain‑separation tag)}\\[2pt]
-\mathtt{DST}_{\!{Sinsemilla}}= \texttt{DST\_SIN}&\text{(domain‑separation tag)}\\[2pt]
-\mathbb{F}_p &\text{base field of the Pallas curve}\\[2pt]
-G_{secp256k1}   = (G_{x},G_{y})                     &\text{(generator point secp256k1)}\\
-\ell = \texttt{CURVE\_ORDER}            &\text{(sub‑group order)}
-\end{cases}
-\end{array}
-```
-
-```math
-\begin{array}{lcl}
-\textbf{Derived} &
-\begin{cases}
- \mathsf{leaves}\;:=\;\\[2pt]
- \mathsf{root}\;:=\; \\[2pt]
-\end{cases}
-\end{array}
-```
-
-___
 
 > <center>  DEMO: our script used to generate this is invokable via the command:
 >

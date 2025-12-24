@@ -4874,7 +4874,6 @@ dependencies = [
  "blake2b_simd",
  "blake3",
  "core2",
- "cosmwasm-std 3.0.3-dev",
  "criterion",
  "ff",
  "fpe",

@@ -1,5 +1,5 @@
 //! address related crate
-use cosmwasm_std::CanonicalAddr;
+// use cosmwasm_std::CanonicalAddr;
 use ff::PrimeField;
 use pasta_curves::pallas;
 use subtle::CtOption;
@@ -115,10 +115,10 @@ impl RecpAddr {
     pub fn to_bytes(&self) -> [u8; 32] {
         self.0
     }
-    /// Returns the [`CanonicalAddr`] for this `RecpAddr`.
-    pub fn to_canonical(&self) -> CanonicalAddr {
-        CanonicalAddr::from(self.0)
-    }
+    // /// Returns the [`CanonicalAddr`] for this `RecpAddr`.
+    // pub fn to_canonical(&self) -> CanonicalAddr {
+    //     CanonicalAddr::from(self.0)
+    // }
     /// Returns the [`pallas::Base`] for this `RecpAddr`.
     pub fn to_pallas(&self) -> pallas::Base {
         crate::spec::recp_to_fp(self)
@@ -134,21 +134,21 @@ impl RecpAddr {
     }
 }
 
-impl From<cosmwasm_std::Binary> for RecpAddr {
-    fn from(value: cosmwasm_std::Binary) -> Self {
-        Self::new(
-            value
-                .as_slice()
-                .try_into()
-                .expect("Invalid nullifier bytes"),
-        )
-    }
-}
-impl From<CanonicalAddr> for RecpAddr {
-    fn from(ca: CanonicalAddr) -> Self {
-        Self(ca.as_slice().try_into().expect("Invalid nullifier bytes"))
-    }
-}
+// impl From<cosmwasm_std::Binary> for RecpAddr {
+//     fn from(value: cosmwasm_std::Binary) -> Self {
+//         Self::new(
+//             value
+//                 .as_slice()
+//                 .try_into()
+//                 .expect("Invalid nullifier bytes"),
+//         )
+//     }
+// }
+// impl From<CanonicalAddr> for RecpAddr {
+//     fn from(ca: CanonicalAddr) -> Self {
+//         Self(ca.as_slice().try_into().expect("Invalid nullifier bytes"))
+//     }
+// }
 
 impl TryFrom<&[u8]> for RecpAddr {
     type Error = std::array::TryFromSliceError;
@@ -167,18 +167,18 @@ mod tests {
     use super::*;
     use crate::spec::recp_to_fp;
 
-    use cosmwasm_std::testing::mock_dependencies;
-    use cosmwasm_std::{Api, CanonicalAddr};
+    // use cosmwasm_std::testing::mock_dependencies;
+    // use cosmwasm_std::{Api, CanonicalAddr};
 
-    #[test]
-    fn test_canon() {
-        let deps = mock_dependencies();
-        let addr = deps.api.addr_make("ayo");
-        let canon: CanonicalAddr = deps.api.addr_canonicalize(&addr.to_string()).unwrap();
-        println!("{:#?}", addr.to_string());
-        println!("{:#?}", canon.len());
-        println!("{:#?}", canon.to_string());
-    }
+    // #[test]
+    // fn test_canon() {
+    //     let deps = mock_dependencies();
+    //     let addr = deps.api.addr_make("ayo");
+    //     let canon: CanonicalAddr = deps.api.addr_canonicalize(&addr.to_string()).unwrap();
+    //     println!("{:#?}", addr.to_string());
+    //     println!("{:#?}", canon.len());
+    //     println!("{:#?}", canon.to_string());
+    // }
 
     // Helper function to create a valid 32-byte array
     fn create_test_bytes() -> [u8; 32] {
@@ -197,33 +197,33 @@ mod tests {
         assert_eq!(recp_addr.to_bytes(), test_bytes);
     }
 
-    #[test]
-    fn test_to_canonical() {
-        let test_bytes = create_test_bytes();
-        let recp_addr = RecpAddr(test_bytes);
+    // #[test]
+    // fn test_to_canonical() {
+    //     let test_bytes = create_test_bytes();
+    //     let recp_addr = RecpAddr(test_bytes);
 
-        let canonical = recp_addr.to_canonical();
-        assert_eq!(canonical.as_slice(), &test_bytes);
-    }
+    //     let canonical = recp_addr.to_canonical();
+    //     assert_eq!(canonical.as_slice(), &test_bytes);
+    // }
 
-    #[test]
-    fn test_try_from_canonical_addr_success() {
-        let test_bytes = create_test_bytes();
-        let canonical = CanonicalAddr::from(test_bytes);
+    // #[test]
+    // fn test_try_from_canonical_addr_success() {
+    //     let test_bytes = create_test_bytes();
+    //     let canonical = CanonicalAddr::from(test_bytes);
 
-        let recp_addr = RecpAddr::try_from(canonical).unwrap();
-        assert_eq!(recp_addr.to_bytes(), test_bytes);
-    }
+    //     let recp_addr = RecpAddr::try_from(canonical).unwrap();
+    //     assert_eq!(recp_addr.to_bytes(), test_bytes);
+    // }
 
-    #[test]
-    fn test_try_from_canonical_addr_wrong_length() {
-        // Create a CanonicalAddr with wrong length (not 32 bytes)
-        let short_bytes = vec![1u8, 2, 3, 4];
-        let canonical = CanonicalAddr::from(short_bytes);
+    // #[test]
+    // fn test_try_from_canonical_addr_wrong_length() {
+    //     // Create a CanonicalAddr with wrong length (not 32 bytes)
+    //     let short_bytes = vec![1u8, 2, 3, 4];
+    //     let canonical = CanonicalAddr::from(short_bytes);
 
-        let result = RecpAddr::try_from(canonical);
-        assert!(result.is_err());
-    }
+    //     let result = RecpAddr::try_from(canonical);
+    //     assert!(result.is_err());
+    // }
 
     #[test]
     fn test_try_from_slice_success() {
@@ -273,17 +273,17 @@ mod tests {
         assert_eq!(recp_addr.to_bytes(), copied.to_bytes());
     }
 
-    #[test]
-    fn test_round_trip_canonical() {
-        let test_bytes = create_test_bytes();
-        let recp_addr = RecpAddr(test_bytes);
+    // #[test]
+    // fn test_round_trip_canonical() {
+    //     let test_bytes = create_test_bytes();
+    //     let recp_addr = RecpAddr(test_bytes);
 
-        // Convert to canonical and back
-        let canonical = recp_addr.to_canonical();
-        let recp_addr_2 = RecpAddr::try_from(canonical).unwrap();
+    //     // Convert to canonical and back
+    //     let canonical = recp_addr.to_canonical();
+    //     let recp_addr_2 = RecpAddr::try_from(canonical).unwrap();
 
-        assert_eq!(recp_addr.to_bytes(), recp_addr_2.to_bytes());
-    }
+    //     assert_eq!(recp_addr.to_bytes(), recp_addr_2.to_bytes());
+    // }
 
     #[test]
     fn test_all_zeros() {
@@ -301,22 +301,22 @@ mod tests {
         assert_eq!(recp_addr.to_bytes(), ones_bytes);
     }
 
-    #[test]
-    fn test_with_mock_cosmwasm_addr() {
-        let deps = mock_dependencies();
-        let addr = deps.api.addr_make("test_address");
-        let canonical = deps.api.addr_canonicalize(&addr.to_string()).unwrap();
+    // #[test]
+    // fn test_with_mock_cosmwasm_addr() {
+    //     let deps = mock_dependencies();
+    //     let addr = deps.api.addr_make("test_address");
+    //     let canonical = deps.api.addr_canonicalize(&addr.to_string()).unwrap();
 
-        // This might fail if the canonical address isn't 32 bytes
-        // depending on the mock implementation
-        if canonical.len() == 32 {
-            let recp_addr = RecpAddr::try_from(canonical.clone()).unwrap();
-            assert_eq!(recp_addr.to_canonical().as_slice(), canonical.as_slice());
-        } else {
-            // Document that mock addresses may not be 32 bytes
-            println!("Mock canonical address length: {}", canonical.len());
-        }
-    }
+    //     // This might fail if the canonical address isn't 32 bytes
+    //     // depending on the mock implementation
+    //     if canonical.len() == 32 {
+    //         let recp_addr = RecpAddr::try_from(canonical.clone()).unwrap();
+    //         assert_eq!(recp_addr.to_canonical().as_slice(), canonical.as_slice());
+    //     } else {
+    //         // Document that mock addresses may not be 32 bytes
+    //         println!("Mock canonical address length: {}", canonical.len());
+    //     }
+    // }
 
     #[test]
     fn test_to_pallas() {

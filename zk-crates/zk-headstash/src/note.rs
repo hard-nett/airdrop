@@ -1,6 +1,6 @@
 //! Data structures used for note construction.
+// use cosmwasm_std::CanonicalAddr;
 use core::fmt;
-use cosmwasm_std::CanonicalAddr;
 use memuse::DynamicUsage;
 
 use ff::PrimeField;
@@ -242,7 +242,7 @@ impl Note {
               NoteDenom::new_for_proof("I hope you got the necessary doguments and fucking permutations to suck on my shaved balls"),
             NoteValue::zero(),
             0,
-            RecpAddr::try_from(CanonicalAddr::from([43; 32])).expect("dang"),
+            RecpAddr::new([43; 32]),
             esk,
             rho.unwrap_or_else(|| Rho::from_nf_old(Nullifier::dummy(rng))),
             rng,

@@ -28,7 +28,6 @@ bitvec = { workspace = true, default-features = false }
 blake2b_simd = { workspace = true, default-features = false }
 blake3  = { workspace = true }
 core2 = { workspace = true, default-features = false, features = ["alloc"] }
-cosmwasm-std = { workspace = true }
 ff  = {workspace = true }
 fpe = { workspace = true, default-features = false, features = ["alloc"] }
 hex = {workspace = true }

@@ -68,9 +68,9 @@ impl Into<Instance> for HeadstashInstances {
                     .expect("Invalid anchor bytes"),
             )
             .expect("bad anchor"),
-            NoteDenom::from(self.nd),
+            NoteDenom::from(self.nd.to_array().expect("nd bytes")),
             NoteValue::from(self.v),
-            RecpAddr::from(self.recp),
+            RecpAddr::try_from(self.recp.as_slice()).expect("recp bytes"),
             Nullifier::from_bytes(
                 self.nf
                     .as_slice()
@@ -78,7 +78,8 @@ impl Into<Instance> for HeadstashInstances {
                     .expect("Invalid nullifier bytes"),
             )
             .expect("darn"),
-            ExtractedNoteCommitment::from(self.cmx),
+            ExtractedNoteCommitment::from_bytes(&self.cmx.to_array().expect("cmx bytes"))
+                .expect("ExtractedNoteCommitment"),
         )
     }
 }

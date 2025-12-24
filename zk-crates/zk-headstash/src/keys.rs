@@ -1067,7 +1067,7 @@ pub mod testing {
 
 #[cfg(test)]
 mod tests {
-    use cosmwasm_std::{testing::mock_dependencies, Api};
+    // use cosmwasm_std::{testing::mock_dependencies, Api};
     use ff::PrimeField;
     use proptest::prelude::*;
 
