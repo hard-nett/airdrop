@@ -2,7 +2,7 @@
 
 A fork of [zcash orchard protocol](https://github.com/zcash/orchard)
 
-A zk-proof circuit dedicated to public allocations, private distributions (headstshes). To learn about the specification, check out the [documentation](./docs/circuit.md)
+A zk-proof circuit dedicated to public allocations, private distributions (headstshes). To learn about the specification, check out the [documentation](../../docs/zk-headstash/spec)
 
 ## WARNING: THIS IS A WORK IN PROGRESS. SUPER EXPERIEMENTAL TYPE BEAT. USE AT YOUR DISCRETION
 
