@@ -832,9 +832,11 @@ mod tests {
         let (_, fvk, esk, spent_note) = Note::dummy(&mut rng, None);
         let (epkx, epky) = esk.epk().xy();
         // 1. Generate secp256k1 key pair (esk, epk)
+        let (epkx, epky) = (
+            Secp256k1Fp::from_bytes(&epkx).expect("valid Fp"),
+            Secp256k1Fp::from_bytes(&epky).expect("valid Fp"),
+        );
         let e_sk_fq = Secp256k1Fq::from_bytes(&esk.secret_bytes()).expect("valid Fq");
-        let epkx = Secp256k1Fp::from_bytes(&epkx).expect("valid Fp");
-        let epky = Secp256k1Fp::from_bytes(&epky).expect("valid Fp");
         let sender_address = spent_note.recipient();
         let nk = *fvk.nk();
         let nf = spent_note.nullifier();

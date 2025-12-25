@@ -1,20 +1,31 @@
 //! Norick: a witnessed string does not contain the work "rick"
-//! The circuit is designed to work without knowing the specific private or public inputs during key generation. 
-//! During key generation, use NoRickCircuit::default() or call without_witnesses() on an instance, which sets priv_input to unknown values. 
+//! The circuit is designed to work without knowing the specific private or public inputs during key generation.
+//! During key generation, use NoRickCircuit::default() or call without_witnesses() on an instance, which sets priv_input to unknown values.
 //! The forbidden string is loaded from the instance column, and since instance values are not needed for key generation (only for proving/verification),
 //!  the circuit configures and synthesizes correctly with unknown instances.For proving, instantiate the circuit with the actual private inputs and provide
-//!  the public inputs (including the forbidden string) to the prover. 
-//! 
+//!  the public inputs (including the forbidden string) to the prover.
+//!
 //! This matches standard Halo2 patterns where the circuit struct holds witness data for proving, but key generation uses placeholders.
-//! 
+//!
 use ff::{Field, PrimeField};
 use halo2_proofs::{
     circuit::{AssignedCell, Chip, Layouter, Region, SimpleFloorPlanner, Value},
-    plonk::{Advice, Circuit, Column, ConstraintSystem, Error, Fixed, Instance, Selector},
+    plonk::{self, Advice, Circuit, Column, ConstraintSystem, Error, Fixed, Instance, Selector},
     poly::Rotation,
+    transcript::{Blake2bRead, Blake2bWrite},
 };
+use pasta_curves::{vesta, Fp};
+use rand::RngCore;
 
-use std::{marker::PhantomData, println, vec::Vec};
+use std::{
+    fs::File,
+    io::{self, BufWriter, Write},
+    marker::PhantomData,
+    path::PathBuf,
+    println,
+    string::String,
+    vec::Vec,
+};
 
 // ANCHOR: instructions
 trait NumericInstructions<F: PrimeField>: Chip<F> {
@@ -271,7 +282,8 @@ impl<F: PrimeField> NumericInstructions<F> for FieldChip<F> {
 /// were `None` we would get an error.
 #[derive(Debug)]
 pub struct NoRickCircuit<F: PrimeField> {
-    priv_input: Vec<Value<F>>, // Fixed length of 20
+    /// Fixed length of 20
+    pub priv_input: Vec<Value<F>>,
 }
 
 impl<F: PrimeField> Default for NoRickCircuit<F> {
@@ -283,7 +295,6 @@ impl<F: PrimeField> Default for NoRickCircuit<F> {
 }
 
 impl<F: PrimeField> Circuit<F> for NoRickCircuit<F> {
-    // Since we are using a single chip for everything, we can just reuse its config.
     type Config = FieldConfig;
     type FloorPlanner = SimpleFloorPlanner;
 
@@ -304,7 +315,6 @@ impl<F: PrimeField> Circuit<F> for NoRickCircuit<F> {
         mut layouter: impl Layouter<F>,
     ) -> Result<(), Error> {
         let chip = FieldChip::<F>::construct(config);
-
         // --------------------------------------------------------------
         // 2️⃣ Powers of 256 (little‑endian) – they are plain F values,
         //    no gates are needed to load them.
@@ -379,13 +389,185 @@ impl<F: PrimeField> Circuit<F> for NoRickCircuit<F> {
     }
 }
 
+/// Public inputs to the Headstash Action circuit.
+#[derive(Clone, Debug)]
+pub struct NoRickInstance {
+    /// word we are proving private value does not contain
+    pub word: String,
+}
+
+impl NoRickInstance {
+    fn to_halo2_instance(&self) -> [[vesta::Scalar; 2]; 1] {
+        let mut instance = [vesta::Scalar::zero(); 2];
+        instance[0] = Fp::one();
+        instance[1] = str_to_field(&self.word);
+        [instance]
+    }
+}
+
+/// The proving key for the Orchard Action circuit.
+#[derive(Debug)]
+pub struct ProvingKey {
+    params: halo2_proofs::poly::commitment::Params<vesta::Affine>,
+    pk: plonk::ProvingKey<vesta::Affine>,
+}
+
+impl ProvingKey {
+    /// Builds existing proving key
+    pub fn new(
+        pk: plonk::ProvingKey<vesta::Affine>,
+        params: halo2_proofs::poly::commitment::Params<vesta::Affine>,
+    ) -> Self {
+        ProvingKey { params, pk }
+    }
+    /// Builds new proving key.
+    pub fn build() -> Self {
+        let params = halo2_proofs::poly::commitment::Params::new(10);
+        let circuit: NoRickCircuit<pasta_curves::Fp> = Default::default();
+
+        let vk = plonk::keygen_vk(&params, &circuit).unwrap();
+        let pk = plonk::keygen_pk(&params, vk, &circuit).unwrap();
+
+        ProvingKey { params, pk }
+    }
+
+    /// Builds pk & vk, writes to file
+    pub fn build_and_write(path: PathBuf) -> io::Result<()> {
+        let mut writer = BufWriter::new(File::create(path)?);
+        let pk = Self::build();
+        pk.params.write(&mut writer)?;
+        pk.pk.get_vk().write(&mut writer)?;
+        writer.flush()
+    }
+
+    /// retrieve a clone of the params
+    pub fn params(&self) -> halo2_proofs::poly::commitment::Params<vesta::Affine> {
+        self.params.clone()
+    }
+}
+
+/// The verifying key for the Orchard Action circuit.
+#[derive(Debug)]
+pub struct VerifyingKey {
+    /// params
+    pub params: halo2_proofs::poly::commitment::Params<vesta::Affine>,
+    /// vk
+    pub vk: plonk::VerifyingKey<vesta::Affine>,
+}
+
+impl VerifyingKey {
+    /// Builds the verifying key.
+    pub fn new(vk: plonk::VerifyingKey<pasta_curves::EqAffine>) -> Self {
+        let params = halo2_proofs::poly::commitment::Params::new(10);
+        VerifyingKey { params, vk }
+    }
+
+    /// Builds the verifying key.
+    pub fn build() -> Self {
+        let params = halo2_proofs::poly::commitment::Params::new(10);
+        let circuit: NoRickCircuit<pasta_curves::Fp> = Default::default();
+        let vk = plonk::keygen_vk(&params, &circuit).unwrap();
+        VerifyingKey { params, vk }
+    }
+}
+
+/// A proof of the validity of an Orchard [`Bundle`].
+///
+/// [`Bundle`]: crate::bundle::Bundle
+#[derive(Clone)]
+pub struct Proof(Vec<u8>);
+
+impl core::fmt::Debug for Proof {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        if f.alternate() {
+            f.debug_tuple("Proof").field(&self.0).finish()
+        } else {
+            // By default, only show the proof length, not its contents.
+            f.debug_tuple("Proof")
+                .field(&format_args!("{} bytes", self.0.len()))
+                .finish()
+        }
+    }
+}
+
+impl Proof {
+    /// Constructs a new Proof value.
+    pub fn new(bytes: Vec<u8>) -> Self {
+        Proof(bytes)
+    }
+
+    /// Creates a proof for the given circuits and instances.
+    pub fn create(
+        pk: &ProvingKey,
+        circuits: &[NoRickCircuit<pasta_curves::Fp>],
+        instances: &[NoRickInstance],
+        mut rng: impl RngCore,
+    ) -> Result<Self, plonk::Error> {
+        let instances: Vec<_> = instances.iter().map(|i| i.to_halo2_instance()).collect();
+        let instances: Vec<Vec<_>> = instances
+            .iter()
+            .map(|i| i.iter().map(|c| &c[..]).collect())
+            .collect();
+        let instances: Vec<_> = instances.iter().map(|i| &i[..]).collect();
+
+        let mut transcript = Blake2bWrite::<_, vesta::Affine, _>::init(vec![]);
+        plonk::create_proof(
+            &pk.params,
+            &pk.pk,
+            circuits,
+            &instances,
+            &mut rng,
+            &mut transcript,
+        )?;
+        Ok(Proof(transcript.finalize()))
+    }
+
+    /// Verifies this proof with the given instances.
+    pub fn verify(
+        &self,
+        vk: &VerifyingKey,
+        instances: &[NoRickInstance],
+    ) -> Result<(), plonk::Error> {
+        let instances: Vec<_> = instances.iter().map(|i| i.to_halo2_instance()).collect();
+        let instances: Vec<Vec<_>> = instances
+            .iter()
+            .map(|i| i.iter().map(|c| &c[..]).collect())
+            .collect();
+        let instances: Vec<_> = instances.iter().map(|i| &i[..]).collect();
+
+        let strategy = plonk::SingleVerifier::new(&vk.params);
+        let mut transcript = Blake2bRead::init(&self.0[..]);
+        plonk::verify_proof(&vk.params, &vk.vk, strategy, &instances, &mut transcript)
+    }
+
+    // /// Adds this proof to the given batch for verification with the given instances.
+    // ///
+    // /// Use this API if you want more control over how proof batches are processed. If you
+    // /// just want to batch-validate Orchard bundles, use [`bundle::BatchValidator`].
+    // ///
+    // /// [`bundle::BatchValidator`]: crate::bundle::BatchValidator
+    // pub fn add_to_batch(&self, batch: &mut BatchVerifier<vesta::Affine>, instances: Vec<Instance>) {
+    //     let instances = instances
+    //         .iter()
+    //         .map(|i| {
+    //             i.to_halo2_instance()
+    //                 .into_iter()
+    //                 .map(|c| c.into_iter().collect())
+    //                 .collect()
+    //         })
+    //         .collect();
+
+    //     batch.add_proof(instances, self.0.clone());
+    // }
+}
+
 /// string to field
 pub fn str_to_field<F: PrimeField>(s: &str) -> F {
     let mut repr = F::default().to_repr();
     let src = s.as_bytes();
     let len = core::cmp::min(src.len(), repr.as_ref().len());
     repr.as_mut()[..len].copy_from_slice(&src[..len]);
-    F::from_repr(repr).expect("something bad happened")
+    F::from_repr(repr).expect("str_to_field")
 }
 
 // ANCHOR: dev-graph

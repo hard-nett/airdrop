@@ -7,20 +7,16 @@ use std::marker::PhantomData;
 use crate::constants::fixed_bases::OrchardFixedBases;
 use crate::constants::sinsemilla::OrchardCommitDomains;
 use crate::constants::OrchardHashDomains;
-use group::Curve;
-use halo2_gadgets::ecc::chip::{EccChip, EccConfig, NonIdentityEccPoint};
+
+use halo2_gadgets::ecc::chip::{EccChip, EccConfig};
 use halo2_gadgets::sinsemilla::chip::{SinsemillaChip, SinsemillaConfig};
-use halo2_gadgets::sinsemilla::{
-    HashDomain, HashDomains, Message, MessagePiece, SinsemillaInstructions,
-};
-use halo2_gadgets::utilities::lookup_range_check::{
-    LookupRangeCheck, LookupRangeCheckConfig, PallasLookupRangeCheck,
-};
+use halo2_gadgets::sinsemilla::{HashDomain, Message, MessagePiece, SinsemillaInstructions};
+use halo2_gadgets::utilities::lookup_range_check::PallasLookupRangeCheck;
 use halo2_gadgets::utilities::{FieldValue, RangeConstrained};
 use halo2_proofs::circuit::Layouter;
-use halo2_proofs::circuit::{AssignedCell, SimpleFloorPlanner, Value};
-use halo2_proofs::plonk::{Circuit, Column, Error, Instance, Selector};
-use pasta_curves::{pallas, EpAffine, Fp};
+use halo2_proofs::circuit::{SimpleFloorPlanner, Value};
+use halo2_proofs::plonk::{Circuit, Column, Instance, Selector};
+use pasta_curves::{pallas, Fp};
 
 type MySinsemillaHashDomainConfig<Lookup> = (
     EccConfig<OrchardFixedBases, Lookup>,

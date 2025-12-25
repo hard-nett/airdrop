@@ -8,25 +8,15 @@ use crate::builder::SpendInfo;
 use crate::circuit::{Circuit, Instance, ProvingKey, VerifyingKey};
 use crate::constants::fixed_bases::FIXED_AMOUNTS;
 use crate::constants::sinsemilla::{LEAF_PERSONALIZATION, MERKLE_CRH_PERSONALIZATION};
+use crate::example_circuits::no_rick::{NoRickCircuit, NoRickInstance};
 use crate::keys::{EligibleSk, FullViewingKey, NullifierDerivingKey, SpendingKey};
 use crate::note::{ExtractedNoteCommitment, Note, RandomSeed, Rho};
 use crate::tree::MerklePath;
-use crate::value::{HeadstashValue, NoteDenom, NoteValue, ValueCommitTrapdoor};
+use crate::value::{HeadstashValue, NoteDenom, NoteValue};
 use crate::{spec, Anchor, Proof};
 use halo2_proofs::plonk;
 
-use std::error::Error;
-use std::fs::File;
-use std::io::{BufWriter, Write};
-use std::path::{Path, PathBuf};
-use std::string::{String, ToString};
-use std::sync::Mutex;
-use std::vec::Vec;
-use std::{env, eprintln, fs, println};
-
-use anybuf::Anybuf;
 use base64::{engine::general_purpose, Engine as _};
-// use cosmwasm_std::CanonicalAddr;
 use ff::{Field, FromUniformBytes, PrimeField, PrimeFieldBits};
 use hex::decode;
 use pasta_curves::pallas::Base;
@@ -35,6 +25,14 @@ use pasta_curves::{vesta, EqAffine};
 use secp256k1::SecretKey;
 use serde_json::{json, Value};
 use sinsemilla::HashDomain;
+use std::error::Error;
+use std::fs::File;
+use std::io::{BufWriter, Write};
+use std::path::{Path, PathBuf};
+use std::string::{String, ToString};
+use std::sync::Mutex;
+use std::vec::Vec;
+use std::{env, eprintln, fs, println};
 
 const KEYS_DIR: &str = "./circuit_keys";
 const PARAMS_FILE: &str = "params.bin";
@@ -116,50 +114,32 @@ impl HeadstashSuite {
 
 /// HeadstashBitwiseInstance
 pub trait HeadstashBitwiseInstance {
-    // /// derive_m
-    // fn derive_m(
-    //     &self,
-    //     esk: &[u8; 32],
-    //     fdi: u64,
-    //     v: u64,
-    //     nd: &str,
-    // ) -> Result<pallas::Base, BoxError> {
-    //     let esk = self.derive_secp256k1_limbs_sum_const_time(&self.derive_esk(*esk));
-    //     let (fdi, v, nd) = (
-    //         Fp::from_u128(u64::from_le_bytes(self.derive_fdi(fdi)) as u128),
-    //         Fp::from_repr(NoteDenom::new_for_proof(nd).as_bytes().try_into().unwrap()).expect("nd"),
-    //         Fp::from_u128(u64::from_le_bytes(self.derive_v(v)) as u128),
-    //     );
-    //     Ok(crate::spec::prf_pallas_m(fdi, esk, v, nd))
-    // }
-
     /// `derive_esk`: derives the 3x88 libs of a raw esk.
     fn derive_esk(&self, sk: [u8; 32]) -> [Fp; 3] {
-        let skfq =
-            halo2_base::halo2_proofs::halo2curves::secq256k1::Fp::from_repr(sk).expect("valid Fq");
+        use crate::spec::decompose_biguint_simple as decompose;
+        let skfq = halo2_base::halo2_proofs::halo2curves::secq256k1::Fp::from_repr(sk).expect("Fq");
         let sk_big = halo2_base::utils::fe_to_biguint(&skfq);
-        crate::spec::decompose_biguint_simple(&sk_big, 3, 88)
-            .try_into()
-            .unwrap()
+        decompose(&sk_big, 3, 88).try_into().unwrap()
     }
 
     /// derive_epk
     fn derive_epk(&self, pk: [u8; 32]) -> [Fp; 3] {
-        let pkfq =
-            halo2_base::halo2_proofs::halo2curves::secq256k1::Fp::from_repr(pk).expect("valid Fq");
+        use crate::spec::decompose_biguint_simple as decompose;
+        let pkfq = halo2_base::halo2_proofs::halo2curves::secq256k1::Fp::from_repr(pk).expect("Fq");
         let sk_big = halo2_base::utils::fe_to_biguint(&pkfq);
-        crate::spec::decompose_biguint_simple(&sk_big, 3, 88)
-            .try_into()
-            .unwrap()
+        decompose(&sk_big, 3, 88).try_into().unwrap()
     }
+
     /// derive_v
     fn derive_v(&self, v: u64) -> [u8; 8] {
         v.to_le_bytes()
     }
+
     /// derive_fdi
     fn derive_fdi(&self, fdi: u64) -> [u8; 8] {
         fdi.to_le_bytes()
     }
+
     /// derive_nk
     fn derive_nk(&self, esk: &[u8; 32], rho: Rho) -> NullifierDerivingKey {
         NullifierDerivingKey::derive_from(
@@ -167,6 +147,7 @@ pub trait HeadstashBitwiseInstance {
             rho,
         )
     }
+
     /// Convert a byte slice into an iterator of little‑endian bits (LSB first per byte).
     fn bytes_to_bits_le(bytes: &[u8]) -> impl Iterator<Item = bool> + '_ {
         bytes
@@ -199,13 +180,7 @@ pub trait HeadstashBitwiseInstance {
         let bit_slice = a.to_le_bits();
         bits.extend(bit_slice.iter().take(250).map(|b| *b));
     }
-    /// repeated_bytes: turns proof keys into anybuf msgs
-    fn repeated_bytes<C: CurveAffine>(&self, items: &[C]) -> Vec<Anybuf> {
-        items
-            .iter()
-            .map(|b| Anybuf::new().append_bytes(1, b.to_bytes()))
-            .collect()
-    }
+
     /// rho_from_secure_random
     fn rho_from_secure_random(&self) -> Rho {
         let mut randomness_64 = [0; 64];
@@ -709,15 +684,74 @@ pub trait HeadstashLaunchpadInstance: HeadstashBitwiseInstance + HeadstashIpfsIn
         Ok(())
     }
 
-    /// `gen_test_circuit_keys`: generate test circuit keys for all example circuits
-    /// This creates proving and verifying keys for demo circuits in the test suite
-    fn gen_test_circuit_keys(&self, path: &Path) -> Result<(), BoxError> {
-        eprintln!("🔑 Generating test circuit keys for example circuits...");
-        fs::create_dir_all(path)?;
-        self.gen_no_rick_circuit_keys(path)?;
-        // self.gen_sinsemilla_hashdomain_circuit_keys(path)?;
-        eprintln!("✅ All test circuit keys generated successfully");
-        Ok(())
+    /// `gen_test_circuit_keys`: generate or load test circuit keys and create multiple proofs for NoRickCircuit
+    /// - `generate_keys`: if true, generates new keys and writes to `path`; if false, loads keys from `key_path`
+    /// - `key_path`: path to load keys from if `generate_keys` is false
+    /// - `proof_specs`: vector of (private_word, forbidden_word) pairs to generate proofs for
+    /// Returns a vector of proofs
+    fn gen_test_circuit_keys(
+        &self,
+        path: &Path,
+        generate_keys: bool,
+        key_path: Option<&Path>,
+        proof_specs: Vec<(String, String)>,
+    ) -> Result<Vec<crate::example_circuits::no_rick::Proof>, BoxError> {
+        use crate::example_circuits::no_rick::{
+            NoRickCircuit, NoRickInstance, Proof as NoRickProof, ProvingKey as NoRickProvingKey,
+        };
+
+        let mut rng = OsRng;
+        let mut proofs = Vec::new();
+
+        let proving_key = if generate_keys {
+            eprintln!("🔑 Generating test circuit keys for example circuits...");
+            fs::create_dir_all(path)?;
+            self.gen_no_rick_circuit_keys(path)?;
+            eprintln!("✅ All test circuit keys generated successfully");
+            NoRickProvingKey::build()
+        } else {
+            if let Some(kp) = key_path {
+                eprintln!("🔑 Loading test circuit keys from {}...", kp.display());
+                // Load params and vk, then regenerate pk
+                let params_path = kp.join("params.bin");
+                let vk_path = kp.join("verifying_key.bin");
+                let params = halo2_proofs::poly::commitment::Params::<vesta::Affine>::read(
+                    &mut std::fs::File::open(params_path)?,
+                )?;
+                let vk = plonk::VerifyingKey::<vesta::Affine>::read::<
+                    File,
+                    NoRickCircuit<pasta_curves::Fp>,
+                >(&mut std::fs::File::open(vk_path)?, &params)?;
+                let circuit: NoRickCircuit<pasta_curves::Fp> = Default::default();
+                let pk = plonk::keygen_pk(&params, vk, &circuit)?;
+                NoRickProvingKey::new(pk, params)
+            } else {
+                return Err("key_path must be provided when generate_keys is false".into());
+            }
+        };
+
+        for (private_word, forbidden_word) in proof_specs {
+            let mut bytes = private_word.as_bytes().to_vec();
+            bytes.resize(20, 0);
+            println!(
+                "resized {} byte string to full 20 via padding",
+                private_word.len()
+            );
+
+            let priv_input: Vec<halo2_proofs::circuit::Value<Fp>> = bytes
+                .iter()
+                .map(|&b| halo2_proofs::circuit::Value::known(Fp::from(b as u64)))
+                .collect();
+            let circuit: NoRickCircuit<pasta_curves::Fp> = NoRickCircuit { priv_input };
+            let instance = NoRickInstance {
+                word: forbidden_word,
+            };
+            let proof: NoRickProof =
+                NoRickProof::create(&proving_key, &[circuit], &[instance], &mut rng)?;
+            proofs.push(proof);
+        }
+
+        Ok(proofs)
     }
 
     /// Generate keys for NoRickCircuit example

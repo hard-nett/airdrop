@@ -4,6 +4,7 @@
 mod tests {
     use super::super::suite::*;
     use std::path::PathBuf;
+    use std::string::ToString;
 
     #[test]
     fn test_gen_no_rick_circuit_keys() -> Result<(), BoxError> {
@@ -69,7 +70,12 @@ mod tests {
         let suite = HeadstashSuite::new();
         let temp_dir = PathBuf::from("./data/test_keys_temp_no_rick");
         // Generate all test circuit keys
-        suite.gen_test_circuit_keys(&temp_dir)?;
+        suite.gen_test_circuit_keys(
+            &temp_dir,
+            true,
+            None,
+            vec![("randy".to_string(), "rick".to_string())],
+        )?;
 
         // Verify directory structure exists
         let test_keys_dir = PathBuf::from("./data/test_keys");

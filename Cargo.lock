@@ -66,12 +66,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "683d7910e743518b0e34f1186f92494becacb047c7b6bf616c96772180fef923"
 
 [[package]]
-name = "anybuf"
-version = "1.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a7658b7ea4a6843aad293ca2d3b0ba4d200b9720b18a5db0cea478dace9a9716"
-
-[[package]]
 name = "anyhow"
 version = "1.0.100"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4052,7 +4046,6 @@ name = "zk-headstash"
 version = "0.0.1"
 dependencies = [
  "aes",
- "anybuf",
  "base64",
  "bitvec",
  "blake2b_simd",
