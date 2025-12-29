@@ -368,6 +368,7 @@ pub fn recp_to_fp(ra: &crate::address::RecpAddr) -> pallas::Base {
 /// Decompose a BigUint into limbs without requiring BigPrimeField trait.
 ///
 /// This is our own implementation to avoid dependency on halo2-base traits.
+///
 pub fn decompose_biguint_simple(
     value: &BigUint,
     num_limbs: usize,
@@ -391,6 +392,7 @@ pub fn decompose_biguint_simple(
 
     limbs
 }
+
 
 /// # hdkf_pallas
 /// Derives nk from the Pallas base field representation for `esk`\
