@@ -25,7 +25,9 @@ cw-headstash = { path = "./cw-headstash" }
 # plume_rustcrypto = {path = "./zk-crates/submodules/zk-nullifier-sig/rust-k256"}
 
 cosmos-sdk-proto = { git = "https://github.com/permissionlessweb/cosmos-rust",features = ["std","cosmwasm","grpc"],default-features = false }
+#halo2_gadgets = { path = "../../../halo2/halo2_gadgets", default-features = false ,features = ["test-dependencies"]  } 
 halo2_gadgets = { git = "https://github.com/permissionlessweb/halo2", branch = "mvp", default-features = false ,features = ["test-dependencies"]  } 
+#halo2_proofs = { path = "../../../halo2/halo2_proofs", default-features = false,features = ["gadget-traces"]  } 
 halo2_proofs = { git = "https://github.com/permissionlessweb/halo2", branch = "mvp", version = "0.3.1" , default-features = false,features = ["gadget-traces"]  } 
 halo2-base = { git = "https://github.com/permissionlessweb/halo2-lib", branch = "mvp", package = "halo2-base"}
 token-bindings = { git = "https://github.com/permissionlessweb/token-bindings", branch = "mvp", library = "bindings" } 

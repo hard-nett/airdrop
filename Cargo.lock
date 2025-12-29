@@ -609,7 +609,7 @@ checksum = "9b0a718b13ffe224e32a8c1f68527354868f47d6cc84afe8c66cb05fbb3ced6e"
 [[package]]
 name = "cosmwasm-core"
 version = "3.0.3-dev"
-source = "git+https://github.com/permissionlessweb/cosmwasm?branch=mvp#80c31d2a5b8bcb85f9fc306666ba3708f0988c9c"
+source = "git+https://github.com/permissionlessweb/cosmwasm?branch=mvp#74114916a0463396cf9aa4361681e0263a7fde99"
 
 [[package]]
 name = "cosmwasm-crypto"
@@ -639,7 +639,7 @@ dependencies = [
 [[package]]
 name = "cosmwasm-crypto"
 version = "3.0.3-dev"
-source = "git+https://github.com/permissionlessweb/cosmwasm?branch=mvp#80c31d2a5b8bcb85f9fc306666ba3708f0988c9c"
+source = "git+https://github.com/permissionlessweb/cosmwasm?branch=mvp#74114916a0463396cf9aa4361681e0263a7fde99"
 dependencies = [
  "ark-bls12-381",
  "ark-ec",
@@ -674,7 +674,7 @@ dependencies = [
 [[package]]
 name = "cosmwasm-derive"
 version = "3.0.3-dev"
-source = "git+https://github.com/permissionlessweb/cosmwasm?branch=mvp#80c31d2a5b8bcb85f9fc306666ba3708f0988c9c"
+source = "git+https://github.com/permissionlessweb/cosmwasm?branch=mvp#74114916a0463396cf9aa4361681e0263a7fde99"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -698,7 +698,7 @@ dependencies = [
 [[package]]
 name = "cosmwasm-schema"
 version = "3.0.3-dev"
-source = "git+https://github.com/permissionlessweb/cosmwasm?branch=mvp#80c31d2a5b8bcb85f9fc306666ba3708f0988c9c"
+source = "git+https://github.com/permissionlessweb/cosmwasm?branch=mvp#74114916a0463396cf9aa4361681e0263a7fde99"
 dependencies = [
  "cosmwasm-schema-derive 3.0.3-dev",
  "cw-schema 3.0.3-dev",
@@ -722,7 +722,7 @@ dependencies = [
 [[package]]
 name = "cosmwasm-schema-derive"
 version = "3.0.3-dev"
-source = "git+https://github.com/permissionlessweb/cosmwasm?branch=mvp#80c31d2a5b8bcb85f9fc306666ba3708f0988c9c"
+source = "git+https://github.com/permissionlessweb/cosmwasm?branch=mvp#74114916a0463396cf9aa4361681e0263a7fde99"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -757,7 +757,7 @@ dependencies = [
 [[package]]
 name = "cosmwasm-std"
 version = "3.0.3-dev"
-source = "git+https://github.com/permissionlessweb/cosmwasm?branch=mvp#80c31d2a5b8bcb85f9fc306666ba3708f0988c9c"
+source = "git+https://github.com/permissionlessweb/cosmwasm?branch=mvp#74114916a0463396cf9aa4361681e0263a7fde99"
 dependencies = [
  "base64",
  "bech32",
@@ -989,7 +989,7 @@ dependencies = [
 [[package]]
 name = "cw-schema"
 version = "3.0.3-dev"
-source = "git+https://github.com/permissionlessweb/cosmwasm?branch=mvp#80c31d2a5b8bcb85f9fc306666ba3708f0988c9c"
+source = "git+https://github.com/permissionlessweb/cosmwasm?branch=mvp#74114916a0463396cf9aa4361681e0263a7fde99"
 dependencies = [
  "cw-schema-derive 3.0.3-dev",
  "indexmap 2.12.1",
@@ -1017,7 +1017,7 @@ dependencies = [
 [[package]]
 name = "cw-schema-derive"
 version = "3.0.3-dev"
-source = "git+https://github.com/permissionlessweb/cosmwasm?branch=mvp#80c31d2a5b8bcb85f9fc306666ba3708f0988c9c"
+source = "git+https://github.com/permissionlessweb/cosmwasm?branch=mvp#74114916a0463396cf9aa4361681e0263a7fde99"
 dependencies = [
  "heck",
  "itertools 0.13.0",
@@ -1297,7 +1297,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -1562,7 +1562,7 @@ dependencies = [
 [[package]]
 name = "halo2_gadgets"
 version = "0.4.0"
-source = "git+https://github.com/permissionlessweb/halo2?branch=mvp#a331093234caf051613c44363a5f69b6ed2b0c1f"
+source = "git+https://github.com/permissionlessweb/halo2?branch=mvp#e9960e139ca07aec8857ee096e3f7a23c625948e"
 dependencies = [
  "arrayvec",
  "bitvec",
@@ -1582,7 +1582,7 @@ dependencies = [
 [[package]]
 name = "halo2_poseidon"
 version = "0.1.0"
-source = "git+https://github.com/permissionlessweb/halo2?branch=mvp#a331093234caf051613c44363a5f69b6ed2b0c1f"
+source = "git+https://github.com/permissionlessweb/halo2?branch=mvp#e9960e139ca07aec8857ee096e3f7a23c625948e"
 dependencies = [
  "bitvec",
  "ff",
@@ -1593,7 +1593,7 @@ dependencies = [
 [[package]]
 name = "halo2_proofs"
 version = "0.3.2"
-source = "git+https://github.com/permissionlessweb/halo2?branch=mvp#a331093234caf051613c44363a5f69b6ed2b0c1f"
+source = "git+https://github.com/permissionlessweb/halo2?branch=mvp#e9960e139ca07aec8857ee096e3f7a23c625948e"
 dependencies = [
  "backtrace",
  "blake2b_simd",
@@ -1869,7 +1869,7 @@ checksum = "3640c1c38b8e4e43584d8df18be5fc6b0aa314ce6ebf51b53313d4306cca8e46"
 dependencies = [
  "hermit-abi",
  "libc",
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -2080,7 +2080,7 @@ version = "0.50.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7957b9740744892f114936ab4a57b3f487491bbeafaf8083688b16841a4240e5"
 dependencies = [
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -2699,7 +2699,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys",
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -3152,7 +3152,7 @@ dependencies = [
  "getrandom 0.3.4",
  "once_cell",
  "rustix",
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -3786,7 +3786,7 @@ version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
