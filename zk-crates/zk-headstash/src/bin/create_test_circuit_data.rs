@@ -11,14 +11,8 @@ use zk_headstash::deploy::suite::*;
 fn main() -> Result<(), BoxError> {
     let suite = HeadstashSuite::new();
     let path = Path::new("./data/test_keys");
-    let proofs = suite.gen_test_circuit_keys(
-        path,
-        true,
-        None,
-        vec![("randy".to_string(), "rick".to_string())],
-    )?;
+    let proofs = suite.gen_test_circuit_keys(path, None, vec![])?; // vec![("randy".to_string(), "rick".to_string())]
     eprintln!("\n🎉 All circuit keys generated successfully!");
-
-    println!("{:#?}", proofs);
+    // println!("{:#?}", proofs);
     Ok(())
 }

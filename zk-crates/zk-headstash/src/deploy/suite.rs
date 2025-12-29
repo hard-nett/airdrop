@@ -14,7 +14,7 @@ use crate::note::{ExtractedNoteCommitment, Note, RandomSeed, Rho};
 use crate::tree::MerklePath;
 use crate::value::{HeadstashValue, NoteDenom, NoteValue};
 use crate::{spec, Anchor, Proof};
-use halo2_proofs::plonk;
+use halo2_proofs::{plonk, COSMWASM_METADATA_LENGTH};
 
 use base64::{engine::general_purpose, Engine as _};
 use ff::{Field, FromUniformBytes, PrimeField, PrimeFieldBits};
@@ -685,14 +685,13 @@ pub trait HeadstashLaunchpadInstance: HeadstashBitwiseInstance + HeadstashIpfsIn
     }
 
     /// `gen_test_circuit_keys`: generate or load test circuit keys and create multiple proofs for NoRickCircuit
-    /// - `generate_keys`: if true, generates new keys and writes to `path`; if false, loads keys from `key_path`
+    /// - `generate_keys`: if true, generates new keys per spec of zk-wasmvm vk serialization, and writes to `path`; if false, loads keys from `key_path`
     /// - `key_path`: path to load keys from if `generate_keys` is false
     /// - `proof_specs`: vector of (private_word, forbidden_word) pairs to generate proofs for
     /// Returns a vector of proofs
     fn gen_test_circuit_keys(
         &self,
         path: &Path,
-        generate_keys: bool,
         key_path: Option<&Path>,
         proof_specs: Vec<(String, String)>,
     ) -> Result<Vec<crate::example_circuits::no_rick::Proof>, BoxError> {
@@ -703,31 +702,32 @@ pub trait HeadstashLaunchpadInstance: HeadstashBitwiseInstance + HeadstashIpfsIn
         let mut rng = OsRng;
         let mut proofs = Vec::new();
 
-        let proving_key = if generate_keys {
+        let pk = if let Some(kp) = key_path {
+            eprintln!("🔑 Loading test circuit keys from {}...", kp.display());
+            // TODO: Load compressed params/vk file
+            // Load params and vk separately
+            let params_path = kp.join("params.bin");
+            let vk_path = kp.join("verifying_key.bin");
+            let params = halo2_proofs::poly::commitment::Params::<vesta::Affine>::read(
+                &mut std::fs::File::open(params_path)?,
+            )?;
+            let vk = plonk::VerifyingKey::<vesta::Affine>::read::<
+                File,
+                NoRickCircuit<pasta_curves::Fp>,
+            >(&mut std::fs::File::open(vk_path)?, &params)?;
+            let circuit: NoRickCircuit<pasta_curves::Fp> = Default::default();
+            let pk = plonk::keygen_pk(&params, vk, &circuit)?;
+            let nrpk = NoRickProvingKey::new(pk, params);
+            println!("NoRickProvingKey: {:#?}", nrpk);
+            nrpk
+        } else {
             eprintln!("🔑 Generating test circuit keys for example circuits...");
             fs::create_dir_all(path)?;
             self.gen_no_rick_circuit_keys(path)?;
             eprintln!("✅ All test circuit keys generated successfully");
-            NoRickProvingKey::build()
-        } else {
-            if let Some(kp) = key_path {
-                eprintln!("🔑 Loading test circuit keys from {}...", kp.display());
-                // Load params and vk, then regenerate pk
-                let params_path = kp.join("params.bin");
-                let vk_path = kp.join("verifying_key.bin");
-                let params = halo2_proofs::poly::commitment::Params::<vesta::Affine>::read(
-                    &mut std::fs::File::open(params_path)?,
-                )?;
-                let vk = plonk::VerifyingKey::<vesta::Affine>::read::<
-                    File,
-                    NoRickCircuit<pasta_curves::Fp>,
-                >(&mut std::fs::File::open(vk_path)?, &params)?;
-                let circuit: NoRickCircuit<pasta_curves::Fp> = Default::default();
-                let pk = plonk::keygen_pk(&params, vk, &circuit)?;
-                NoRickProvingKey::new(pk, params)
-            } else {
-                return Err("key_path must be provided when generate_keys is false".into());
-            }
+            let nrpk = NoRickProvingKey::build();
+            // println!("NoRickProvingKey: {:#?}", nrpk);
+            nrpk
         };
 
         for (private_word, forbidden_word) in proof_specs {
@@ -746,61 +746,127 @@ pub trait HeadstashLaunchpadInstance: HeadstashBitwiseInstance + HeadstashIpfsIn
             let instance = NoRickInstance {
                 word: forbidden_word,
             };
-            let proof: NoRickProof =
-                NoRickProof::create(&proving_key, &[circuit], &[instance], &mut rng)?;
+            let proof: NoRickProof = NoRickProof::create(&pk, &[circuit], &[instance], &mut rng)?;
             proofs.push(proof);
         }
 
         Ok(proofs)
     }
 
-    /// Generate keys for NoRickCircuit example
+    /// Generate keys for NoRickCircuit example.
+    /// Follows specification of zk-wasmvm
     fn gen_no_rick_circuit_keys(&self, base_path: &Path) -> Result<(), BoxError> {
-        const K: u32 = 10;
         use crate::example_circuits::no_rick::NoRickCircuit;
+        use std::io::{self, Seek};
+        const K: u32 = 10;
+        const V: u8 = 0;
+        const I: u8 = 1;
 
         eprintln!("  📝 Generating NoRickCircuit keys...");
-        let params: halo2_proofs::poly::commitment::Params<vesta::Affine> =
-            halo2_proofs::poly::commitment::Params::new(K);
         let circuit: NoRickCircuit<Fp> = Default::default();
-        let vk: plonk::VerifyingKey<vesta::Affine> = plonk::keygen_vk(&params, &circuit)
-            .map_err(|e| format!("Failed to generate VK for NoRickCircuit: {:?}", e))?;
-        let pk = plonk::keygen_pk(&params, vk.clone(), &circuit)
-            .map_err(|e| format!("Failed to generate PK for NoRickCircuit: {:?}", e))?;
+        let p = halo2_proofs::poly::commitment::Params::<vesta::Affine>::new(K);
+        let vk = plonk::keygen_vk(&p, &circuit).map_err(|e| format!("VK: {:?}", e))?;
+        let pk = plonk::keygen_pk(&p, vk.clone(), &circuit).map_err(|e| format!("PK: {:?}", e))?;
 
-        let circuit_dir = base_path.join("no_rick");
-        fs::create_dir_all(&circuit_dir)?;
+        let cd = base_path.join("no_rick");
+        fs::create_dir_all(&cd)?;
+        let pp = cd.join("params.bin");
+        let vp = cd.join("verifying_key.bin");
+        let cp = cd.join("vk_combined.bin");
 
-        // Write params (separate, for reference)
-        let params_path = circuit_dir.join("params.bin");
-        let mut params_file = BufWriter::new(File::create(&params_path)?);
-        params.write(&mut params_file)?;
-        params_file.flush()?;
-        eprintln!("    ✓ Params written to {}", params_path.display());
+        // params w/ V and I as the first two bytes
+        let mut pf = BufWriter::new(File::create(&pp)?);
+        p.write(&mut pf)?;
+        pf.flush()?;
+        eprintln!("✓ Params written to {}", pp.display());
 
-        // Write verifying key (separate, for reference)
-        let vk_path = circuit_dir.join("verifying_key.bin");
-        let mut vk_file = BufWriter::new(File::create(&vk_path)?);
-        vk.write(&mut vk_file)?;
-        vk_file.flush()?;
-        eprintln!("    ✓ Verifying key written to {}", vk_path.display());
+        // verifying key
+        let mut vf = BufWriter::new(File::create(&vp)?);
+        vk.write(&mut vf)?;
+        vf.flush()?;
+        eprintln!("✓ Verifying key written to {}", vp.display());
 
-        let combined_path = circuit_dir.join("vk_combined.bin");
-        let mut combined_file = BufWriter::new(File::create(&combined_path)?);
-        params.write(&mut combined_file)?; // Params first
-        vk.write(&mut combined_file)?; // VK second
-        combined_file.flush()?;
+        // After writing vk to vp
+        let vk_data = fs::read(&vp)?;
+        eprintln!("✓ Standalone VK size: {} bytes", vk_data.len());
+        eprintln!("  First byte (should be 0x01): 0x{:02x}", vk_data[0]);
         eprintln!(
-            "    ✅ COMBINED VK (for upload) written to {}",
-            combined_path.display()
+            "First 20 bytes: {:02x?}",
+            &vk_data[0..20.min(vk_data.len())]
         );
 
-        // Write proving key (for proving, not upload)
-        let pk_path = circuit_dir.join("proving_key.bin");
-        let mut pk_file = BufWriter::new(File::create(&pk_path)?);
-        pk.get_vk().write(&mut pk_file)?;
-        pk_file.flush()?;
-        eprintln!("    ✓ Proving key written to {}", pk_path.display());
+        // vk-params||vk
+        let mut combined_file = BufWriter::new(File::create(&cp)?);
+
+        // Track position before writing params
+        let mut temp = Vec::new();
+        p.write(&mut temp)?;
+        let params_len = temp.len() as u32;
+        eprintln!("norick: ✓ Params size: {} bytes", params_len);
+        combined_file.write_all(&temp)?;
+
+        // Track position before writing vk
+        let mut temp = Vec::new();
+        vk.write(&mut temp)?;
+        let vk_len = temp.len() as u32;
+        eprintln!("norick: ✓ Verifying key size: {} bytes", vk_len);
+        combined_file.write_all(&temp)?;
+        // WRITE METADATA FOOTER
+        let metadata_start = combined_file.seek(io::SeekFrom::Current(0))?;
+
+        combined_file.write_all(&[V])?;
+        combined_file.write_all(&[I])?;
+        combined_file.write_all(&params_len.to_le_bytes())?;
+        combined_file.write_all(&vk_len.to_le_bytes())?;
+
+        let metadata_end = combined_file.seek(io::SeekFrom::Current(0))?;
+        let actual_metadata_len = (metadata_end - metadata_start) as usize;
+
+        assert_eq!(
+            actual_metadata_len, COSMWASM_METADATA_LENGTH,
+            "norick: Metadata size mismatch: wrote {} bytes, expected {}",
+            actual_metadata_len, COSMWASM_METADATA_LENGTH
+        );
+        eprintln!(
+            "norick: Metadata footer written: {} bytes",
+            actual_metadata_len
+        );
+        eprintln!("norick: V: {}, I: {}", V, I);
+        eprintln!("  params_len: {}, vk_len: {}", params_len, vk_len);
+
+        combined_file.flush()?;
+        eprintln!(
+            "✅ Total combined file written: {} bytes",
+            combined_file.seek(io::SeekFrom::End(0))?
+        );
+
+        // Debug: read back what we just wrote
+        let written_data = fs::read(&cp)?;
+        eprintln!(
+            "norick: Combined file total size: {} bytes",
+            written_data.len()
+        );
+        eprintln!(
+            "norick: Params section (first 20 bytes): {:02x?}",
+            &written_data[0..20]
+        );
+        eprintln!(
+            "norick:VK section (bytes {}-{}): {:02x?}",
+            65604,
+            (65604 + 20).min(written_data.len()),
+            &written_data[65604..(65604 + 20).min(written_data.len())]
+        );
+        eprintln!(
+            "norick:Footer (last 10 bytes): {:02x?}",
+            &written_data[written_data.len() - 10..]
+        );
+
+        // proving key
+        let pkp = cd.join("proving_key.bin");
+        let mut pkf = BufWriter::new(File::create(&pkp)?);
+        pk.get_vk().write(&mut pkf)?;
+        pkf.flush()?;
+        eprintln!("norick: Proving key written to {}", pkp.display());
 
         Ok(())
     }

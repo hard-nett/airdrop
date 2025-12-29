@@ -1,7 +1,7 @@
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::SystemTime;
 
 use rand::rngs::OsRng;
-use rand::{RngCore, SeedableRng};
+use rand::RngCore;
 // use winit::event_loop::{ControlFlow, EventLoop};
 // use rand_chacha::ChaCha20Rng;
 
@@ -9,14 +9,14 @@ use rand::{RngCore, SeedableRng};
 
 pub fn ultra_secure_random() -> [u8; 32] {
     let mut hasher = blake3::Hasher::new();
-    let mut os_rng = OsRng;
+    // let mut os_rng = OsRng;
     // let mut chacha = ChaCha20Rng::fr();
 
     // Mix multiple entropy sources
     hasher.update(&get_os_random()); // OS entropy
     hasher.update(&get_rdrand()); // CPU hardware RNG
     hasher.update(&get_timing_jitter()); // Timing variations
-    // hasher.update(&get_user_input()); // Mouse/keyboard timing
+                                         // hasher.update(&get_user_input()); // Mouse/keyboard timing
 
     // bls381 ring via chacha
 

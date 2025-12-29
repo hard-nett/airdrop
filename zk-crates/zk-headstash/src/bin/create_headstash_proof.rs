@@ -1,11 +1,5 @@
-// use commonware_runtime::tokio::Runner;
-// use commonware_runtime::Runner as _;
-use zk_headstash::address::RecpAddr;
-use zk_headstash::deploy::suite::*;
-use zk_headstash::keys::EligibleSk;
-use zk_headstash::tree::{MerkleHashOrchard, MerklePath};
-use zk_headstash::value::{HeadstashValue, NoteDenom};
-use zk_headstash::Anchor;
+use zk_headstash::circuit::Circuit;
+
 /// # create headstash circuit proof from a note.
 /// - generates default Headstash [VerifyingKey] and [ProvingKey]
 /// ```
@@ -13,6 +7,7 @@ use zk_headstash::Anchor;
 /// ```
 /// See <https://docs.rs/commonware_runtime> for traits/details.
 fn main() -> Result<(), Box<dyn std::error::Error>> {
+    Circuit::default();
     // Runner::default()
     //     .start(|_| async move {
     //         let a = Anchor::empty_tree();

@@ -14,10 +14,11 @@ use halo2_proofs::{
     poly::Rotation,
     transcript::{Blake2bRead, Blake2bWrite},
 };
-use pasta_curves::{vesta, Fp};
+use pasta_curves::{pallas, vesta, Fp};
 use rand::RngCore;
 
 use std::{
+    eprintln,
     fs::File,
     io::{self, BufWriter, Write},
     marker::PhantomData,
@@ -303,10 +304,22 @@ impl<F: PrimeField> Circuit<F> for NoRickCircuit<F> {
     }
 
     fn configure(meta: &mut ConstraintSystem<F>) -> Self::Config {
+        eprintln!("📋 NoRickCircuit::configure called - THIS SHOULD ALWAYS RUN");
         let advice = [meta.advice_column(), meta.advice_column()];
+        eprintln!("  ✓ Created 2 advice columns");
         let instance = meta.instance_column();
+        eprintln!("  ✓ Created instance column");
         let constant = meta.fixed_column();
-        FieldChip::configure(meta, advice, instance, constant)
+        eprintln!("  ✓ Created fixed column");
+        eprintln!("  Before FieldChip::configure: columns exist");
+        let config = FieldChip::configure(meta, advice, instance, constant);
+        eprintln!("  ✓ FieldChip::configure returned");
+        eprintln!(
+            "  After FieldChip::configure: num_advice={}, num_fixed={:#?} ",
+            config.advice.len(),
+            meta,
+        );
+        config
     }
 
     fn synthesize(
@@ -596,8 +609,7 @@ fn test_rick_circuit() {
         .map(|&b| Value::known(Fp::from(b as u64)))
         .collect();
 
-    let mut circuit = NoRickCircuit { priv_input };
-
+    let mut circuit: NoRickCircuit<pallas::Base> = NoRickCircuit { priv_input };
     // === THE CONSTRAINT===:
     // set to 1 as we inverse constraint (if result == 0 , we know that the private input has "rick in it")
     let public_input = vec![Fp::one(), str_to_field("rick")];

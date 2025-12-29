@@ -72,7 +72,6 @@ mod tests {
         // Generate all test circuit keys
         suite.gen_test_circuit_keys(
             &temp_dir,
-            true,
             None,
             vec![("randy".to_string(), "rick".to_string())],
         )?;
