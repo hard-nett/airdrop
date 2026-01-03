@@ -44,7 +44,10 @@ prost = { workspace = true }
 tonic = {workspace = true }
 tonic-prost = {workspace = true }
 group = {workspace = true}
-
+cosmwasm-vm-derive = {workspace = true}
+cosmwasm-vm = {workspace = true}
+zk-cosmwasm = {workspace = true}
+cosmwasm-std = {workspace = true}
 sinsemilla = {workspace = true }
 # image  = {workspace = true, optional = true }
 serde = { workspace = true, features = ["derive"] } 
@@ -64,33 +67,12 @@ tracing = { workspace = true, default-features = false }
 # plotters = { workspace = true, optional = true }
 # Boilerplate
 getset = {workspace = true }
- 
-[dev-dependencies]
+
+ [dev-dependencies]
 # criterion = "0.4" # 0.5 depends on clap 4 which has MSRV 1.70
-halo2_gadgets = { workspace = true,  version = "0.3.1", features = ["test-dependencies"] }
+halo2_gadgets = { workspace = true, features = ["test-dependencies"] }
 hex = "0.4"
 proptest = ">=1.0.0, <1.7.0"
 zcash_note_encryption = { version = "0.4", features = ["pre-zip-212"] }
 incrementalmerkletree = { version = "0.8.1", features = ["test-dependencies"] }
 shardtree = "0.6"
-
-# Binary targets with required features
-[[bin]]
-name = "gen_headstash_keys"
-required-features = ["interface"]
-
-[[bin]]
-name = "create_headstash_proof"
-required-features = ["interface"]
-
-[[bin]]
-name = "gen_headstash_notes"
-required-features = ["interface"]
-
-[[bin]]
-name = "create_test_circuit_data"
-required-features = ["circuit"]
-
-[[bin]]
-name = "gen_randomness"
-required-features = ["interface"]

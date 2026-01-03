@@ -188,20 +188,17 @@ impl NoteValue {
     pub(crate) fn one() -> Self {
         NoteValue(1)
     }
-
     /// Returns the raw underlying value.
     pub fn inner(&self) -> u64 {
         self.0
     }
-
-    pub(crate) fn from_bytes(bytes: [u8; 8]) -> Self {
+    /// derives from u64 little eidian bytes.
+    pub fn from_bytes(bytes: [u8; 8]) -> Self {
         NoteValue(u64::from_le_bytes(bytes))
     }
-
     pub(crate) fn to_bytes(self) -> [u8; 8] {
         self.0.to_le_bytes()
     }
-
     pub(crate) fn to_le_bits(self) -> BitArray<[u8; 8], Lsb0> {
         BitArray::<_, Lsb0>::new(self.0.to_le_bytes())
     }

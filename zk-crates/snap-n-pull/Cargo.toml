@@ -22,6 +22,7 @@ crate-type = ["cdylib", "rlib"]
 # Dependencies (marked as optional so they are only pulled with their feature)
 [dependencies]
 zk-headstash = { path = "../zk-headstash", features = ["rpc"] }
+zk-cosmwasm = { workspace = true }
 cosmos-sdk-proto  = { workspace = true }
 group  = { workspace = true }
 

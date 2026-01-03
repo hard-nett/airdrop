@@ -1,5 +1,6 @@
 use std::path::Path;
-use zk_headstash::deploy::suite::*;
+
+use zk_test_press::HeadstashSuite;
 
 /// # logic to create & verify circuit and proofs for testing in zk-wasmvm integrations.
 /// - generates default testing circuits [VerifyingKey] and [ProvingKey]

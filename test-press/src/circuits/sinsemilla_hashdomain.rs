@@ -4,9 +4,7 @@
 
 use std::marker::PhantomData;
 
-use crate::constants::fixed_bases::OrchardFixedBases;
-use crate::constants::sinsemilla::OrchardCommitDomains;
-use crate::constants::OrchardHashDomains;
+use zk_headstash::{OrchardCommitDomains, OrchardFixedBases, OrchardHashDomains};
 
 use halo2_gadgets::ecc::chip::{EccChip, EccConfig};
 use halo2_gadgets::sinsemilla::chip::{SinsemillaChip, SinsemillaConfig};

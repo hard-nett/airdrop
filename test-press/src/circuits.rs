@@ -10,9 +10,8 @@ mod tests {
     fn test_gen_no_rick_circuit_keys() -> Result<(), BoxError> {
         let suite = HeadstashSuite::new();
         let temp_dir = PathBuf::from("./data/test_keys_temp_no_rick");
-
         // Generate keys
-        suite.gen_no_rick_circuit_keys(&temp_dir)?;
+        suite.gen_test_circuit_keys(&temp_dir, None, vec![])?;
 
         // Verify files exist
         let circuit_dir = temp_dir.join("no_rick");

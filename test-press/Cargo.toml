@@ -1,0 +1,68 @@
+[package]
+name = "zk-test-press"
+version = { workspace = true }
+edition = { workspace = true }
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[features]
+default = ["std"]
+library = []
+std = []
+multicore = [ ]
+
+[dependencies]
+ark-bls12-381 = "0.5.0"
+zk-headstash  = { workspace = true }
+zk-cosmwasm  = { workspace = true }
+btsg-account  = { workspace = true }
+ff   = { workspace = true }
+rand = {workspace = true }
+token-bindings  = { workspace = true }
+btsg-auth  = { workspace = true }
+cosmwasm-schema  = { workspace = true }
+cosmwasm-std  = { workspace = true }
+cw-storage-plus  = { workspace = true }
+halo2_proofs  = { workspace = true }
+halo2-base  = { workspace = true }
+headstash-randomness  = { workspace = true }
+secp256k1  = { workspace = true }
+rayon = {workspace = true, optional = true }
+hex  = { workspace = true }
+serde  = { workspace = true }
+base64  = { workspace = true }
+serde_json  = { workspace = true }
+sinsemilla  = { workspace = true }
+sha2  = { workspace = true }
+rand_core = "0.6"
+ark-ff = "0.5.0"
+ark-ec = "0.5.0"
+ark-serialize = "0.5.0"
+blake3 = "1.8.2"
+pasta_curves = "=0.5.1"
+
+[dev-dependencies]
+
+
+
+# Binary targets with required features
+[[bin]]
+name = "gen_headstash_keys"
+required-features = ["interface"]
+
+[[bin]]
+name = "create_headstash_proof"
+required-features = ["interface"]
+
+[[bin]]
+name = "gen_headstash_notes"
+required-features = ["interface"]
+
+[[bin]]
+name = "create_test_circuit_data"
+required-features = ["circuit"]
+
+[[bin]]
+name = "gen_randomness"
+required-features = ["interface"]

@@ -253,11 +253,44 @@ For effecieny out of circuit, used as abci-like interface between token-denomina
 
 ## Sinsemilla Merkle Trees: Inclusion Constraints
 
-Sinsemilla is a ZK-friendly hash function designed specifically for Pallas/Vesta curves. We use it for both genesis distribution tree (HashDomain) and note commitment tree (CommitDomain).
+Sinsemilla is a ZK-friendly hash function designed specifically for Pallas/Vesta curves. We use it for both genesis distribution tree (`HashDomain`) and note commitment tree (`CommitDomain`). `HashDomain` does not use a private value in the hashing function,unlike the `CommitDomain`, which involves a trap-door value in the hashing operation.
 
-### 1. Genesis Distribution Tree: `HashDomain`
+### 1. Genesis Sinsemilla Tree: `HashDomain`
 
-**This is the static, starting state of the headstash before any claims happen.** Its purpose is to allow a user to prove a specific address `epk` is how we mesh key ownership constraints with airdrop instance eligibility, without revealing which specific address or note being claimed exactly is. Each leaf is a commitment to the `HashDomain`,that is public & binding an eligible recipients balance for a single token balance, so we can derive the expected hash result in circuit.
+**This is the starting configuration of a headstash that is created offchain.** Its purpose is to create the inital set of notes for a headstash instance,and will allow a user to prove a specific address `epk` have both key ownership constraints & headstash eligibility, without revealing which specific address or note being claimed exactly is.
+
+Each leaf is a commitment to the `HashDomain`,that is public & binding (not blinding) an eligible recipients balance for a single token balance, so we can derive the expected hash result in circuit.
+
+
+### Genesis Sinsemilla Tree: Leaf Input Preparation
+
+A leaf is computed using the sinsemilla hashing function with the following input specification. Notice that we must perform some preparation before input into the hashing sequence expected, so that we can have optimized proofs:
+
+<center>
+
+| Components   | Meaning                         | Type                                 | Public / Private / Constant / Output | Derivation |
+|----------|---------------------------------|--------------------------------------|--------------------------------------|------------|
+| `DST_HKDF`   |                             |                                      | **Constant** |            |
+| `epk`    | Eligible public key             | `bytes[32]`                          | **Public** |  *sum of 3x88 pallas field element representation* |
+| `fdi`    | Fixed Denomination Index        | `u64`                                | **Public** | *fully padded u64* |
+| `v`      | Note Value                      | `NoteValue(u64)`                     | **Public** | *fully padded u64* |
+| `nd`     | Note Denomination               | `NoteDenom([u8])`                    | **Public** | *blake3 Hash + top 3 bits |
+
+</center>
+
+> - **Denomination hashing** – Since the length of a denomination is unknown, we hash `nd` with **blake3** to obtain a 32‑byte digest. *Sinsemilla* expects a
+> 253‑bit domain, so we simply clear the top three bits of the digest. The denomination is public, so smart contracts can map `nd` → `blake3(nd) &
+> 0x1FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF` in O(1) time.
+>
+> - **Padding for `v` and `fdi`** – Both values are `u64` (max 160 bits when concatenated). For table look‑ups we left‑pad each to the byte length required by the hashDomain of Sinsemilla (e.g., 32 bytes). This ensures the inputs line up with the fixed‑size field elements used inside the circuit.
+>
+> - **`epk` handling for Sinsemilla compatibility** – `epk` is a 32‑byte public‑key representation. The value is interpreted as a set of foriegn field element limbs; since we are focused on secp256k1 curve, we can expect the sum of 3 limbs of 88 bits to always fit within the pallas curve, to then allow reduction for each  88bit string for linear operations within the curve structure.
+> - **The Full key is required in‑circuit:** Even though `epk` is private for the prover, the circuit must receive the entire key as we need to enforce the relationship of the
+> `hkd_sk` being derived from a `esk` thyat is paired with an `epk`. This guarantees that the HKDF‑derived key used in the protocol is indeed tied to
+> the secret key `esk`.
+<!-- >q: can we use a point definition for the x & y of the keypair for a single input into the circuit and more clean decomposition? -->
+
+> *This is how we enable non-interactive instances of headstash deployments, and can be optimized to bring more composability to these genesis distributions.*
 
 ```math
 \begin{array}{lcl}
@@ -296,35 +329,6 @@ Sinsemilla is a ZK-friendly hash function designed specifically for Pallas/Vesta
 
 </center>
 
-### Tree Genesis: Leaf Input Preparation
-
-A leaf is computed using the sinsemilla hashing function with the following input specification. Notice that we must perform some preparation before input into the hashing sequence expected, so that we can have optimized proofs:
-
-<center>
-
-| Components   | Meaning                         | Type                                 | Public / Private / Constant / Output | Derivation |
-|----------|---------------------------------|--------------------------------------|--------------------------------------|------------|
-| `DST_HKDF`   |                             |                                      | **Constant** |            |
-| `epk`    | Eligible public key             | `bytes[32]`                          | **Public** |  *sum of 3x88 pallas field element representation* |
-| `fdi`    | Fixed Denomination Index        | `u64`                                | **Public** | *fully padded u64* |
-| `v`      | Note Value                      | `NoteValue(u64)`                     | **Public** | *fully padded u64* |
-| `nd`     | Note Denomination               | `NoteDenom([u8])`                    | **Public** | *blake3 Hash + top 3 bits |
-
-</center>
-
-> - **Denomination hashing** – Since the length of a denomination is unknown, we hash `nd` with **blake3** to obtain a 32‑byte digest. *Sinsemilla* expects a
-> 253‑bit domain, so we simply clear the top three bits of the digest. The denomination is public, so smart contracts can map `nd` → `blake3(nd) &
-> 0x1FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF` in O(1) time.
->
-> - **Padding for `v` and `fdi`** – Both values are `u64` (max 160 bits when concatenated). For table look‑ups we left‑pad each to the byte length required by the hashDomain of Sinsemilla (e.g., 32 bytes). This ensures the inputs line up with the fixed‑size field elements used inside the circuit.
->
-> - **`epk` handling for Sinsemilla compatibility** – `epk` is a 32‑byte public‑key representation. The value is interpreted as a set of foriegn field element limbs; since we are focused on secp256k1 curve, we can expect the sum of 3 limbs of 88 bits to always fit within the pallas curve, to then allow reduction for each  88bit string for linear operations within the curve structure.
-> - **The Full key is required in‑circuit:** Even though `epk` is private for the prover, the circuit must receive the entire key as we need to enforce the relationship of the
-> `hkd_sk` being derived from a `esk` thyat is paired with an `epk`. This guarantees that the HKDF‑derived key used in the protocol is indeed tied to
-> the secret key `esk`.
-<!-- >q: can we use a point definition for the x & y of the keypair for a single input into the circuit and more clean decomposition? -->
-
-> *This is how we enable non-interactive instances of headstash deployments, and can be optimized to bring more composability to these genesis distributions.*
 
 ### Account Headstash Instance Yaml
 
@@ -577,10 +581,7 @@ The sinsemilla chip constrains the note-commitment derivation,decomposition,and 
 
 ### Merkle Chip
 
-We are constraining that a prover knows the path for a note leaf by having them provide the two sibling leafs to the specific note leaf they are spending. The circuit will reconsturct the notes being spent leaf and confirm the leaf is within the specific headstash instance. 
-
-
-
+We are constraining that a prover knows the path for a note leaf by having them provide the two sibling leafs to the specific note leaf they are spending. The circuit will reconsturct the notes being spent leaf and confirm the leaf is within the specific headstash instance.
 
 ### NoteCommitChip Chip
 
