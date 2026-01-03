@@ -43,7 +43,6 @@ pub enum QueryMsg {
 #[derive(Error, Debug)]
 pub enum Never {}
 
-
 #[cw_serde]
 pub enum SudoMsg {}
 
@@ -62,8 +61,6 @@ pub fn instantiate(
     _info: MessageInfo,
     msg: InstantiateMsg,
 ) -> Result<Response, ContractError> {
-    set_contract_version(deps.storage, CONTRACT_NAME, CONTRACT_VERSION)?;
-
     CONFIG.save(deps.storage, &Config { words: msg.words })?;
 
     Ok(Response::new().add_attribute("method", "instantiate"))
@@ -80,7 +77,7 @@ pub fn execute(
     match msg {
         ExecuteMsg::Proove { word_id, proof } => {
             let instance = c.words[word_id].as_bytes();
-            deps.api.halo2_proof_instance_verify(&proof, instance)?;
+            deps.api.halo2_proof_instance_verify(0, &proof, instance)?;
         }
     }
 

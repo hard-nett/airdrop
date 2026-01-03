@@ -8,24 +8,18 @@ use crate::{
     tokenfactory::TokenStrategy,
     wavs::{WavsOperatorSet, WavsProofOfOwnership},
 };
-use ark_bls12_381::G1Affine;
+
 use ark_ff::Zero;
-use cosmwasm_schema::{cw_serde, serde, QueryResponses};
+use cosmwasm_schema::{QueryResponses, cw_serde, serde};
 use cosmwasm_std::{
-    from_json, to_json_binary, AnyMsg, BankMsg, Binary, Coin, CosmosMsg, Deps, DepsMut, Env,
-    MessageInfo, Order, Response, StdError, StdResult, Storage, BLS12_381_G1_GENERATOR as G1,
-    BLS12_381_G2_GENERATOR as G2,
+    AnyMsg, BLS12_381_G1_GENERATOR as G1, BLS12_381_G2_GENERATOR as G2, BankMsg, Binary, Coin,
+    CosmosMsg, Deps, DepsMut, Env, MessageInfo, Order, Response, StdError, StdResult, Storage,
+    from_json, to_json_binary,
 };
 use cw_storage_plus::{Bound, Bounder, Item, KeyDeserialize, Map};
-use halo2_proofs::{
-    plonk::{self, ProvingKey, VerifyingKey as Halo2Vk},
-    poly::commitment::Params,
-};
 pub use msg::*;
 
-
 use serde::{Deserialize, Serialize};
-use std::sync::LazyLock;
 use token_bindings::TokenFactoryMsg;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -91,6 +85,7 @@ pub fn instantiate(
             gr: msg.genesis_root.clone(),
             ts: vec![ts],
             w,
+            cid: todo!(),
         },
     )?;
 
@@ -280,7 +275,7 @@ mod instantiate_tests {
     use super::*;
     use ark_ff::UniformRand;
     use cosmwasm_std::testing::{message_info, mock_dependencies, mock_env};
-    use cosmwasm_std::{coins, Addr, Api, HashFunction, Uint128};
+    use cosmwasm_std::{Addr, Api, HashFunction, Uint128, coins};
     use rand_core::OsRng;
     use token_bindings::{DenomUnit, Metadata};
 
@@ -568,9 +563,10 @@ mod instantiate_tests {
 
         let err = instantiate(deps.as_mut(), env, info, msg).unwrap_err();
 
-        assert!(err
-            .to_string()
-            .contains("invalid amount of operators defined"));
+        assert!(
+            err.to_string()
+                .contains("invalid amount of operators defined")
+        );
     }
 
     #[test]

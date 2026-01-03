@@ -22,6 +22,9 @@ gen_my_notes:
     cd zk-crates && cargo run --bin gen_headstash_notes -- ./data/genesis_sinsemilla.json 0x0000000000000000000000000000000000000000
 build-geth:
     cd scripts/geth && docker buildx build --platform linux/amd64 -t discoverdefiteam/geth-rpc:0.0.1 --load .
+
+build-test-data:
+    cd zk-crates/zk-wasmvm-test && just optimize && cd ../../test-press && cargo run --bin create_test_circuit_data
 # publish:
 #     #!/usr/bin/env bash
 #     crates=(

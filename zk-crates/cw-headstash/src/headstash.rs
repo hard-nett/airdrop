@@ -16,6 +16,8 @@ use zk_headstash::{Anchor, Proof};
 
 #[cosmwasm_schema::cw_serde]
 pub struct HeadstashCfg {
+    // cid: circuit-id of stored circuit in vm
+    pub cid: u32,
     // gr: genesis tree root
     pub gr: Binary,
     // ts: token strategies
@@ -133,6 +135,7 @@ pub fn process_headstash(
 
         // verify headstash proof
         deps.api.halo2_proof_instance_verify(
+            cfg.cid,
             &claim.p.to_vec(),
             &<HeadstashInstances as Into<Instance>>::into(claim.i.clone()).to_bytes(),
         )?;
