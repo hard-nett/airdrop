@@ -708,7 +708,7 @@ pub trait HeadstashLaunchpadInstance: HeadstashBitwiseInstance + HeadstashIpfsIn
         path: &Path,
         key_path: Option<&Path>,
         proof_specs: Vec<(String, String)>,
-    ) -> Result<Vec<NoRickProof>, BoxError> {
+    ) -> Result<Vec<zk_cosmwasm::example_circuits::NoRickProof>, BoxError> {
         use zk_cosmwasm::example_circuits::{
             NoRickCircuit, NoRickInstance, NoRickProof, NoRickProvingKey,
         };
@@ -737,7 +737,7 @@ pub trait HeadstashLaunchpadInstance: HeadstashBitwiseInstance + HeadstashIpfsIn
         } else {
             eprintln!("🔑 Generating test circuit keys for example circuits...");
             fs::create_dir_all(path)?;
-            self.gen_test_circuit_keys(path, None, vec![])?;
+            self.gen_no_rick_circuit_keys(path)?;
             eprintln!("✅ All test circuit keys generated successfully");
             let nrpk = NoRickProvingKey::build();
             // println!("NoRickProvingKey: {:#?}", nrpk);
@@ -765,6 +765,137 @@ pub trait HeadstashLaunchpadInstance: HeadstashBitwiseInstance + HeadstashIpfsIn
         }
 
         Ok(proofs)
+    }
+
+    /// Generate keys for NoRickCircuit example.
+    /// Follows specification of zk-wasmvm
+    fn gen_no_rick_circuit_keys(&self, base_path: &Path) -> Result<(), BoxError> {
+        use std::io::{self, Seek};
+        use zk_cosmwasm::example_circuits::NoRickCircuit;
+        const K: u32 = 10;
+        const V: u8 = 0;
+        const I: u8 = 1;
+
+        eprintln!("  📝 Generating NoRickCircuit keys...");
+        let circuit: NoRickCircuit<Fp> = Default::default();
+        let p = halo2_proofs::poly::commitment::Params::<vesta::Affine>::new(K);
+        let vk = plonk::keygen_vk(&p, &circuit).map_err(|e| format!("VK: {:?}", e))?;
+        let pk = plonk::keygen_pk(&p, vk.clone(), &circuit).map_err(|e| format!("PK: {:?}", e))?;
+
+        let cd = base_path.join("no_rick");
+        fs::create_dir_all(&cd)?;
+        let pp = cd.join("params.bin");
+        let vp = cd.join("verifying_key.bin");
+        let cp = cd.join("vk_combined.bin");
+
+        // params w/ V and I as the first two bytes
+        let mut pf = BufWriter::new(File::create(&pp)?);
+        p.write(&mut pf)?;
+        pf.flush()?;
+        eprintln!("✓ Params written to {}", pp.display());
+
+        // verifying key
+        let mut vf = BufWriter::new(File::create(&vp)?);
+        vk.write(&mut vf)?;
+        vf.flush()?;
+        eprintln!("✓ Verifying key written to {}", vp.display());
+
+        // After writing vk to vp
+        let vk_data = fs::read(&vp)?;
+        eprintln!("✓ Standalone VK size: {} bytes", vk_data.len());
+        eprintln!("  First byte (should be 0x01): 0x{:02x}", vk_data[0]);
+        eprintln!(
+            "First 20 bytes: {:02x?}",
+            &vk_data[0..20.min(vk_data.len())]
+        );
+
+        // vk-params||vk
+        let mut combined_file = BufWriter::new(File::create(&cp)?);
+
+        // Track position before writing params
+        let mut temp = Vec::new();
+        p.write(&mut temp)?;
+        let params_len = temp.len() as u32;
+        eprintln!("norick: ✓ Params size: {} bytes", params_len);
+        combined_file.write_all(&temp)?;
+
+        // Track position before writing vk
+        let mut temp = Vec::new();
+        vk.write(&mut temp)?;
+        let vk_len = temp.len() as u32;
+        eprintln!("norick: ✓ Verifying key size: {} bytes", vk_len);
+        combined_file.write_all(&temp)?;
+
+        // WRITE EXTENDED 32-BYTE METADATA FOOTER using CircuitFooter
+        use zk_cosmwasm::cosmwasm_circuit::{CircuitFooter, CircuitType};
+        let footer = CircuitFooter::new(
+            CircuitType::Plonkish,
+            I, // instance_count: 1
+            2, // num_fixed_columns (NoRickCircuit: 1 constant + 1 selector)
+            2, // num_advice_columns (NoRickCircuit: 2 advice columns)
+            1, // num_instance_columns
+            3, // degree (typical for plonk gates)
+            params_len,
+            vk_len,
+            1, // num_selectors (NoRickCircuit: 1 selector for multiply gate)
+            0, // crc32 (not computed for now)
+        );
+
+        let metadata_start = combined_file.seek(io::SeekFrom::Current(0))?;
+        combined_file.write_all(&footer.to_bytes())?;
+        let metadata_end = combined_file.seek(io::SeekFrom::Current(0))?;
+        let actual_metadata_len = (metadata_end - metadata_start) as usize;
+
+        assert_eq!(
+            actual_metadata_len, 32,
+            "norick: Metadata size mismatch: wrote {} bytes, expected 32",
+            actual_metadata_len
+        );
+        eprintln!(
+            "norick: CircuitFooter written: {} bytes (extended format)",
+            actual_metadata_len
+        );
+        eprintln!(
+            "norick: instance_count={}, fixed_cols={}, advice_cols={}, instance_cols={}, degree={}",
+            I, 1, 2, 1, 3
+        );
+        eprintln!("  params_len: {}, vk_len: {}", params_len, vk_len);
+
+        combined_file.flush()?;
+        eprintln!(
+            "✅ Total combined file written: {} bytes",
+            combined_file.seek(io::SeekFrom::End(0))?
+        );
+
+        // Debug: read back what we just wrote
+        let written_data = fs::read(&cp)?;
+        eprintln!(
+            "norick: Combined file total size: {} bytes",
+            written_data.len()
+        );
+        eprintln!(
+            "norick: Params section (first 20 bytes): {:02x?}",
+            &written_data[0..20]
+        );
+        eprintln!(
+            "norick:VK section (bytes {}-{}): {:02x?}",
+            65604,
+            (65604 + 20).min(written_data.len()),
+            &written_data[65604..(65604 + 20).min(written_data.len())]
+        );
+        eprintln!(
+            "norick:Footer (last 10 bytes): {:02x?}",
+            &written_data[written_data.len() - 10..]
+        );
+
+        // proving key
+        let pkp = cd.join("proving_key.bin");
+        let mut pkf = BufWriter::new(File::create(&pkp)?);
+        pk.get_vk().write(&mut pkf)?;
+        pkf.flush()?;
+        eprintln!("norick: Proving key written to {}", pkp.display());
+
+        Ok(())
     }
 
     // /// Generate keys for MySinsemillaHashDomainCircuit example
