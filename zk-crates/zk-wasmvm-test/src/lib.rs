@@ -1,12 +1,10 @@
 use cosmwasm_schema::{QueryResponses, cw_serde};
-use cosmwasm_std::Checksum;
-use cosmwasm_std::StdError;
-use cosmwasm_std::VerificationError;
 #[cfg(not(feature = "library"))]
 use cosmwasm_std::entry_point;
-use cosmwasm_std::{Binary, Deps, DepsMut, Env, MessageInfo, Response, StdResult, to_json_binary};
-use cw_storage_plus::Item;
-use cw2::set_contract_version;
+use cosmwasm_std::{
+    Binary, Checksum, Deps, DepsMut, Env, MessageInfo, Response, StdError, StdResult,
+    VerificationError,
+};
 use thiserror::Error;
 
 #[cw_serde]
@@ -15,8 +13,8 @@ pub struct Config {
     pub words: Vec<String>,
 }
 
-pub const CONFIG: Item<Config> = Item::new("config");
-pub const MOCK_DATA: Item<Vec<u8>> = Item::new("mock_data");
+// pub const CONFIG: Item<Config> = Item::new("config");
+// pub const MOCK_DATA: Item<Vec<u8>> = Item::new("mock_data");
 
 const CONTRACT_NAME: &str = "crates.io:cw-cadence";
 const CONTRACT_VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -28,7 +26,7 @@ pub struct InstantiateMsg {
 
 #[cw_serde]
 pub enum ExecuteMsg {
-    Proove { word_id: usize, proof: Vec<u8> },
+    Proove { forbidden: String, proof: Vec<u8> },
 }
 
 #[cw_serde]
@@ -36,8 +34,6 @@ pub enum ExecuteMsg {
 pub enum QueryMsg {
     #[returns(Checksum)]
     VkChecksum {},
-    #[returns(Vec<String>)]
-    WordList {},
 }
 
 #[derive(Error, Debug)]
@@ -61,7 +57,7 @@ pub fn instantiate(
     _info: MessageInfo,
     msg: InstantiateMsg,
 ) -> Result<Response, ContractError> {
-    CONFIG.save(deps.storage, &Config { words: msg.words })?;
+    // CONFIG.save(deps.storage, &Config { words: msg.words })?;
 
     Ok(Response::new().add_attribute("method", "instantiate"))
 }
@@ -73,10 +69,9 @@ pub fn execute(
     _info: MessageInfo,
     msg: ExecuteMsg,
 ) -> Result<Response, ContractError> {
-    let c = CONFIG.load(deps.storage)?;
     match msg {
-        ExecuteMsg::Proove { word_id, proof } => {
-            let instance = c.words[word_id].as_bytes();
+        ExecuteMsg::Proove { forbidden, proof } => {
+            let instance = forbidden.as_bytes();
             deps.api.halo2_proof_instance_verify(0, &proof, instance)?;
         }
     }
@@ -88,7 +83,6 @@ pub fn execute(
 pub fn query(deps: Deps, _env: Env, msg: QueryMsg) -> StdResult<Binary> {
     match msg {
         QueryMsg::VkChecksum {} => unimplemented!(),
-        QueryMsg::WordList {} => to_json_binary(&CONFIG.load(deps.storage)?.words),
     }
 }
 
