@@ -16,8 +16,8 @@ use group::ff::PrimeField;
 // use pczt::roles::combiner::Combiner;
 // use pczt::roles::prover::Prover;
 
-use rand::rngs::OsRng;
 use rand::RngCore;
+use rand::rngs::OsRng;
 use serde::Deserialize;
 // use pczt::roles::updater::Updater;
 // use pczt::Pczt;
@@ -27,20 +27,19 @@ use serde::Serialize;
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
+use zk_cosmwasm::TestPressSuite;
 use zk_headstash::address::RecpAddr;
 use zk_headstash::circuit::Instance;
-use zk_headstash::deploy::suite::HeadstashLaunchpadInstance;
-use zk_headstash::deploy::HeadstashSuite;
 use zk_headstash::keys::FullViewingKey;
 use zk_headstash::keys::SpendingKey;
 use zk_headstash::keys::{EligiblePk, EligibleSk, NullifierDerivingKey};
 use zk_headstash::note::{Note, RandomSeed};
 use zk_headstash::note::{NoteCommitment, Nullifier, Rho};
 
+use zk_headstash::Anchor;
 use zk_headstash::tree::MerkleHashOrchard;
 use zk_headstash::tree::MerklePath;
 use zk_headstash::value::HeadstashValue;
-use zk_headstash::Anchor;
 
 use crate::client::HeadstashClient;
 
@@ -191,7 +190,7 @@ impl HeadstashWallet {
         md: &HeadstashMetadata,
     ) -> Result<ProofData, Error> {
         Ok(ProofData {
-            proof: HeadstashSuite::new()
+            proof: TestPressSuite::new()
                 .create_headstash_proof(
                     Anchor::from_bytes(md.mr.as_slice().try_into().expect("darg")).expect("bvad"),
                     MerklePath::from_parts(

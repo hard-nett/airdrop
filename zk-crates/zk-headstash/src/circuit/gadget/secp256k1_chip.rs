@@ -580,11 +580,8 @@ impl<Fp: BigPrimeField> FpChip<Fp> {
         }
 
         // Compute native representation
-        let native_value = value.map(|v| {
-            let v_big = fe_to_biguint_for_field(&v);
-            let v_native_big = &v_big % &self.native_modulus;
-            biguint_to_fe_simple(&v_native_big)
-        });
+        let native_value = value
+            .map(|v| biguint_to_fe_simple(&(&fe_to_biguint_for_field(&v) % &self.native_modulus)));
 
         let native_cell = region.assign_advice(
             || "witness native",
@@ -746,12 +743,12 @@ impl<Fp: BigPrimeField> FpChip<Fp> {
 
                 // Assign result limbs
                 let mut c_limbs = Vec::with_capacity(self.num_limbs);
-                for (i, limb_val) in c_limbs_vals.iter().enumerate() {
+                for (i, lv) in c_limbs_vals.iter().enumerate() {
                     let cell = region.assign_advice(
                         || format!("c[{}]", i),
                         self.config.advices[2],
                         i,
-                        || *limb_val,
+                        || *lv,
                     )?;
                     c_limbs.push(cell);
                 }
@@ -1353,19 +1350,17 @@ impl Secp256k1Chip {
         self.fp
             .range_check_limbs(layouter.namespace(|| "range check pk.y"), &pk_y_assigned)?;
 
-        // TODO: Implement actual scalar multiplication check: pk = sk * G
-        // This requires:
-        // 1. Load generator point G (as CRT coordinates)
         // Load generator G
-        let g_x = self.fp.load_private(
-            layouter.namespace(|| "load G x"),
-            Value::known(Secp256k1Fp::from_raw_bytes_unchecked(&GENERATOR_X)),
-        )?;
-        let g_y = self.fp.load_private(
-            layouter.namespace(|| "load G y"),
-            Value::known(Secp256k1Fp::from_raw_bytes_unchecked(&GENERATOR_Y)),
-        )?;
-        let g = (g_x, g_y);
+        let g = (
+            self.fp.load_private(
+                layouter.namespace(|| "load G x"),
+                Value::known(Secp256k1Fp::from_raw_bytes_unchecked(&GENERATOR_X)),
+            )?,
+            self.fp.load_private(
+                layouter.namespace(|| "load G y"),
+                Value::known(Secp256k1Fp::from_raw_bytes_unchecked(&GENERATOR_Y)),
+            )?,
+        );
 
         // Compute sk * G using Montgomery ladder
         let computed_pk = self.scalar_mul_montgomery(
@@ -1442,7 +1437,7 @@ impl Secp256k1Chip {
 
     /// Convert a secp256k1 Fq element (CRT representation) to native Pallas::Base.
     ///
-    /// This is used for HKDF derivation: we need to convert the secp256k1
+    /// This is used for HKDF derivation: we convert the secp256k1
     /// secret key to a native field element to use as input to Poseidon hash.
     ///
     /// **NOTE**: This extracts the native field representation from the CRT integer,

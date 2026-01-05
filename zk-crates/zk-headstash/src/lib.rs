@@ -33,8 +33,6 @@ mod constants;
 
 #[cfg(feature = "circuit")]
 pub mod circuit;
-#[cfg(feature = "circuit")]
-pub mod example_circuits;
 
 pub mod keys;
 pub mod note;
@@ -49,15 +47,16 @@ pub mod tree;
 pub mod value;
 pub mod zip32;
 
-#[cfg(feature = "interface")]
-pub mod deploy;
-
 pub use action::Action;
 pub use address::Address;
 // pub use bundle::Bundle;
-pub use constants::MERKLE_DEPTH_ORCHARD as NOTE_COMMITMENT_TREE_DEPTH;
+pub use constants::{
+    fixed_bases::{OrchardFixedBases, FIXED_AMOUNTS},
+    sinsemilla::{OrchardCommitDomains, LEAF_PERSONALIZATION, MERKLE_CRH_PERSONALIZATION},
+    OrchardHashDomains, MERKLE_DEPTH_ORCHARD as NOTE_COMMITMENT_TREE_DEPTH,
+};
 pub use note::Note;
-pub use spec::recp_to_fp;
+pub use spec::{decompose_biguint_simple, recp_to_fp};
 pub use tree::Anchor;
 
 /// A proof of the validity of an Orchard [`Bundle`].

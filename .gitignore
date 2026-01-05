@@ -9,4 +9,5 @@ headstash/scripts-data/*.csv
 headstash/scripts-data/*.json
 
 target
+vendor
 zk-crates/submodules/*

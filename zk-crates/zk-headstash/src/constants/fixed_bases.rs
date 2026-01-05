@@ -21,8 +21,6 @@ pub mod spend_auth_g;
 pub mod value_commit_r;
 pub mod value_commit_v;
 
-
-
 /// FIXED_AMOUNTS
 pub const FIXED_AMOUNTS: [u64; 10] = [
     1_000_000_000,
@@ -71,11 +69,14 @@ pub const NUM_WINDOWS_SHORT: usize =
     (L_VALUE + FIXED_BASE_WINDOW_SIZE - 1) / FIXED_BASE_WINDOW_SIZE;
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
-// A sum type for both full-width and short bases. This enables us to use the
-// shared functionality of full-width and short fixed-base scalar multiplication.
+/// A sum type for both full-width and short bases. This enables us to use the
+/// shared functionality of full-width and short fixed-base scalar multiplication.
 pub enum OrchardFixedBases {
+    /// Full
     Full(OrchardFixedBasesFull),
+    /// NullifierK
     NullifierK,
+    /// ValueCommitV
     ValueCommitV,
 }
 

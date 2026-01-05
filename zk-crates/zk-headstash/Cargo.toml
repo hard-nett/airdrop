@@ -1,97 +1,71 @@
 [package]
 name = "zk-headstash"
-version = {workspace = true}
+version = { workspace = true }
 edition = "2021"
 
 [features]
 default = ["circuit", "multicore", "std", "interface"]
 circuit = ["dep:halo2_gadgets", "dep:halo2_proofs", "std"]
-interface = ["headstash-randomness", "std", "dep:rayon", "circuit"]
+interface = ["std", "circuit"]
 multicore = ["halo2_proofs?/multicore"]
-std = ["core2/std", "group/wnaf-memuse" , "reddsa/std"]
+std = ["core2/std", "group/wnaf-memuse", "reddsa/std"]
 # dev-graph = ["halo2_proofs?/dev-graph", "image", "plotters"]
 rpc = []
 test-dependencies = []
 
 [dependencies]
-headstash-randomness  = { workspace = true,  optional = true }
-halo2_gadgets  = { workspace = true, optional = true }
-halo2_proofs  = { workspace = true , optional = true}
-halo2-base  = { workspace = true }
-anybuf  = { workspace = true }
-
-# plume_rustcrypto  = { workspace = true }
-
 aes = "0.8"
-base64  = { workspace = true }
+
 bitvec = { workspace = true, default-features = false }
 blake2b_simd = { workspace = true, default-features = false }
 blake3  = { workspace = true }
 core2 = { workspace = true, default-features = false, features = ["alloc"] }
-ff  = {workspace = true }
+cosmwasm-std = { workspace = true }
+ff  = { workspace = true }
 fpe = { workspace = true, default-features = false, features = ["alloc"] }
-hex = {workspace = true }
-lazy_static  = {workspace = true }
-memuse = { workspace = true, default-features = false }
-num-bigint  = {workspace = true }
-num-traits = {workspace = true }
-pasta_curves  = {workspace = true }
-reddsa = { workspace = true, default-features = false }
-rand = {workspace = true }
-rand_core = { workspace = true, default-features = false }
-rayon = {workspace = true, optional = true }
-secp256k1  = {workspace = true}
-prost = { workspace = true }
-tonic = {workspace = true }
-tonic-prost = {workspace = true }
-group = {workspace = true}
-
-sinsemilla = {workspace = true }
-# image  = {workspace = true, optional = true }
-serde = { workspace = true, features = ["derive"] } 
-serde_json  = {workspace = true }
-subtle = { workspace = true, default-features = false }
-zip32 = { workspace = true, default-features = false }
-proptest = { workspace = true, optional = true }
-nonempty = { workspace = true, default-features = false }
-zcash_note_encryption = "0.4"
-incrementalmerkletree = "0.8.1"
-zcash_spec = {workspace = true }
-visibility = {workspace = true }
-
-# Logging
-tracing = { workspace = true, default-features = false }
-# Developer tooling dependencies
 # plotters = { workspace = true, optional = true }
-# Boilerplate
-getset = {workspace = true }
- 
+getset = { workspace = true }
+group = { workspace = true }
+halo2-base  = { workspace = true }
+halo2_gadgets  = { workspace = true, optional = true }
+halo2_proofs  = { workspace = true, optional = true }
+#headstash-randomness  = { workspace = true, optional = true }
+hex = { workspace = true }
+incrementalmerkletree = "0.8.1"
+lazy_static  = { workspace = true }
+memuse = { workspace = true, default-features = false }
+nonempty = { workspace = true, default-features = false }
+num-bigint  = { workspace = true }
+num-traits = { workspace = true }
+pasta_curves  = { workspace = true }
+proptest = { workspace = true, optional = true }
+prost = { workspace = true }
+rand = { workspace = true }
+#rayon = { workspace = true, optional = true }
+reddsa = { workspace = true, default-features = false }
+secp256k1  = { workspace = true }
+serde = { workspace = true, features = ["derive"] } 
+sinsemilla = { workspace = true }
+subtle = { workspace = true, default-features = false }
+tonic = { workspace = true }
+tonic-prost = { workspace = true }
+tracing = { workspace = true, default-features = false }
+visibility = { workspace = true }
+zcash_note_encryption = "0.4"
+zcash_spec = { workspace = true }
+zip32 = { workspace = true, default-features = false }
+zk-cosmwasm = { workspace = true }
+# rand_core = { workspace = true, default-features = false }
+# image  = {workspace = true, optional = true }
+# serde_json  = { workspace = true }
+# cosmwasm-vm-derive = {workspace = true}
+# cosmwasm-vm = {workspace = true}
+#base64  = { workspace = true }
 [dev-dependencies]
 # criterion = "0.4" # 0.5 depends on clap 4 which has MSRV 1.70
-halo2_gadgets = { workspace = true,  version = "0.3.1", features = ["test-dependencies"] }
+halo2_gadgets = { workspace = true, features = ["test-dependencies"] }
 hex = "0.4"
-proptest = ">=1.0.0, <1.7.0"
-zcash_note_encryption = { version = "0.4", features = ["pre-zip-212"] }
 incrementalmerkletree = { version = "0.8.1", features = ["test-dependencies"] }
+proptest = ">=1.0.0, <1.7.0"
 shardtree = "0.6"
-
-# Binary targets with required features
-[[bin]]
-name = "gen_headstash_keys"
-required-features = ["interface"]
-
-[[bin]]
-name = "create_headstash_proof"
-required-features = ["interface"]
-
-[[bin]]
-name = "gen_headstash_notes"
-required-features = ["interface"]
-
-[[bin]]
-name = "create_test_circuit_data"
-required-features = ["circuit"]
-
-[[bin]]
-name = "gen_randomness"
-required-features = ["interface"]
+zcash_note_encryption = { version = "0.4", features = ["pre-zip-212"] }

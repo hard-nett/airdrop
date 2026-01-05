@@ -222,11 +222,11 @@ fn test_secp256k1_key_pairing_invalid() {
 
     // Secret key 1
     let sk_bytes = [0x42; 32];
-    let sk_secp = SecretKey::from_slice(&sk_bytes).expect("valid secret key");
+    let sk_secp = SecretKey::from_byte_array(sk_bytes).unwrap();
 
     // Public key from DIFFERENT secret key
     let wrong_sk_bytes = [0x43; 32];
-    let wrong_sk_secp = SecretKey::from_slice(&wrong_sk_bytes).expect("valid secret key");
+    let wrong_sk_secp = SecretKey::from_byte_array(wrong_sk_bytes).unwrap();
     let wrong_pk_secp = PublicKey::from_secret_key(&secp, &wrong_sk_secp);
 
     // Extract public key bytes (from wrong secret key)
@@ -336,6 +336,115 @@ fn test_foreign_field_limb_decomposition() {
 // ============================================================================
 // Test: Secp256k1 SK to Pallas Base Conversion via CRT
 // ============================================================================
+#[test]
+fn test_secp256k1_pk_to_pallas_crt_conversion() {
+    use halo2_base::utils::fe_to_biguint;
+    use num_bigint::BigUint;
+    use secp256k1::{PublicKey, Secp256k1, SecretKey};
+
+    println!("\n=== Secp256k1 PK → Pallas CRT Conversion ===\n");
+
+    // 1. Generate a secp256k1 key pair
+    let secp = Secp256k1::new();
+    let sk_bytes = [
+        0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f,
+        0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18, 0x19, 0x1a, 0x1b, 0x1c, 0x1d, 0x1e,
+        0x1f, 0x20,
+    ];
+    let sk = SecretKey::from_slice(&sk_bytes).expect("valid secret key");
+    let pk = PublicKey::from_secret_key(&secp, &sk);
+
+    // Extract x and y coordinates
+    let pk_bytes = pk.serialize_uncompressed();
+    let pk_x_bytes: [u8; 32] = pk_bytes[1..33].try_into().unwrap();
+    let pk_y_bytes: [u8; 32] = pk_bytes[33..65].try_into().unwrap();
+
+    println!("1. Original secp256k1 public key:");
+    println!("   pk_x_bytes: {}", hex::encode(pk_x_bytes));
+    println!("   pk_y_bytes: {}", hex::encode(pk_y_bytes));
+
+    // 2. Convert to secp256k1::Fp field elements
+    let pk_x_fp = Secp256k1Fp::from_repr(pk_x_bytes).expect("valid Fp");
+    let pk_y_fp = Secp256k1Fp::from_repr(pk_y_bytes).expect("valid Fp");
+    let pk_x_big = fe_to_biguint(&pk_x_fp);
+    let pk_y_big = fe_to_biguint(&pk_y_fp);
+
+    println!("\n2. As secp256k1::Fp BigUint:");
+    println!("   pk_x: {} bits", pk_x_big.bits());
+    println!("   pk_y: {} bits", pk_y_big.bits());
+
+    // 3. Decompose x and y into 3x88-bit limbs (CRT representation)
+    let x_limbs = crate::spec::decompose_biguint_simple(&pk_x_big, 3, 88);
+    let y_limbs = crate::spec::decompose_biguint_simple(&pk_y_big, 3, 88);
+
+    println!("\n3. CRT decomposition (3x88-bit limbs):");
+    for (coord, limbs) in [("x", &x_limbs), ("y", &y_limbs)] {
+        println!("   {} limbs:", coord);
+        for (i, limb) in limbs.iter().enumerate() {
+            let limb_big = crate::spec::fe_to_biguint_simple(limb);
+            println!("     Limb[{}]: {} bits = {}", i, limb_big.bits(), limb_big);
+
+            // Verify limb fits in 88 bits
+            let max_88_bit = BigUint::from(1u64) << 88;
+            assert!(
+                limb_big < max_88_bit,
+                "Limb {} for {} exceeds 88 bits",
+                i,
+                coord
+            );
+        }
+    }
+
+    // 4. Reconstruct x and y in pallas::Base field
+    let base_88 = crate::spec::biguint_to_fe_simple(&(BigUint::from(1u64) << 88));
+    let base_176 = crate::spec::biguint_to_fe_simple(&(BigUint::from(1u64) << 176));
+
+    let pk_x_pallas_reconstructed = x_limbs[0] + x_limbs[1] * base_88 + x_limbs[2] * base_176;
+    let pk_y_pallas_reconstructed = y_limbs[0] + y_limbs[1] * base_88 + y_limbs[2] * base_176;
+
+    println!("\n4. Reconstructed as pallas::Base:");
+    println!("   pk_x_pallas = limb_x[0] + limb_x[1]*2^88 + limb_x[2]*2^176");
+    println!("   pk_y_pallas = limb_y[0] + limb_y[1]*2^88 + limb_y[2]*2^176");
+
+    // 5. Compute direct interpretation as BigUint from bytes, reduced mod pallas modulus
+    let pallas_modulus = crate::spec::fe_to_biguint_simple(&(-pallas::Base::ONE)) + 1u64;
+    let pk_x_direct_big = BigUint::from_bytes_be(&pk_x_bytes) % &pallas_modulus;
+    let pk_y_direct_big = BigUint::from_bytes_be(&pk_y_bytes) % &pallas_modulus;
+
+    println!("\n5. Direct byte interpretation reduced mod pallas modulus:");
+    println!("   (secp256k1 bytes interpreted as BigUint, then % pallas_modulus)");
+
+    // 6. Compare CRT reconstructed (already in pallas field) with direct reduced BigUint
+    let x_reconstructed_big = crate::spec::fe_to_biguint_simple(&pk_x_pallas_reconstructed);
+    let y_reconstructed_big = crate::spec::fe_to_biguint_simple(&pk_y_pallas_reconstructed);
+
+    println!("\n6. Comparison:");
+    println!("   X - CRT reconstructed: {}", x_reconstructed_big);
+    println!("   X - Direct reduced:     {}", pk_x_direct_big);
+    println!("   Y - CRT reconstructed: {}", y_reconstructed_big);
+    println!("   Y - Direct reduced:     {}", pk_y_direct_big);
+
+    let x_matches = x_reconstructed_big == pk_x_direct_big;
+    let y_matches = y_reconstructed_big == pk_y_direct_big;
+    println!("   X methods match: {}", x_matches);
+    println!("   Y methods match: {}", y_matches);
+
+    assert_eq!(
+        x_reconstructed_big, pk_x_direct_big,
+        "CRT reconstruction should match direct interpretation for X"
+    );
+    assert_eq!(
+        y_reconstructed_big, pk_y_direct_big,
+        "CRT reconstruction should match direct interpretation for Y"
+    );
+
+    println!("\n7. These pallas::Base values represent epk in the circuit:");
+    println!(
+        "   epk: (CrtInteger<pallas::Base>, CrtInteger<pallas::Base>) = ((x_limbs), (y_limbs))"
+    );
+
+    println!("\n=== PK CRT Conversion Verified ✓ ===\n");
+}
 
 #[test]
 fn test_secp256k1_sk_to_pallas_base_conversion() {

@@ -3,7 +3,7 @@
 use ff::Field;
 use pasta_curves::pallas;
 
-use super::{commit_ivk::CommitIvkChip, note_commit::NoteCommitChip};
+use super::{commit_ivk::CommitIvkChip, note_commit::NoteCommitChip, LeafHashChip};
 use crate::constants::{
     NullifierK, OrchardCommitDomains, OrchardFixedBases, OrchardFixedBasesFull, OrchardHashDomains,
     ValueCommitV,
@@ -37,6 +37,10 @@ impl super::Config {
 
     pub(super) fn commit_ivk_chip(&self) -> CommitIvkChip {
         CommitIvkChip::construct(self.commit_ivk_config.clone())
+    }
+
+    pub(super) fn leaf_hash_chip(&self) -> LeafHashChip {
+        LeafHashChip::construct(self.leaf_hash_config.clone())
     }
 
     pub(super) fn ecc_chip(&self) -> EccChip<OrchardFixedBases> {

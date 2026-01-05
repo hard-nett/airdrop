@@ -25,6 +25,7 @@ pub const C: usize = 253;
 /// $\ell^\mathsf{Orchard}_\mathsf{Merkle}$
 pub(crate) const L_ORCHARD_MERKLE: usize = 255;
 
+/// LEAF_PERSONALIZATION of genesis sinsemilla hashdomain merkle tree .
 pub const LEAF_PERSONALIZATION: &str = "t.network:Headstash-Sinsemilla-leaf";
 
 /// SWU hash-to-curve personalization for the Merkle CRH generator
@@ -80,11 +81,16 @@ pub(crate) fn i2lebsp_k(int: usize) -> [bool; K] {
     i2lebsp(int as u64)
 }
 
+/// OrchardHashDomains
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum OrchardHashDomains {
+    /// NoteCommit
     NoteCommit,
+    /// CommitIvk
     CommitIvk,
+    /// MerkleCrh
     MerkleCrh,
+    /// Leaf
     Leaf,
 }
 
@@ -117,9 +123,12 @@ impl HashDomains<pallas::Affine> for OrchardHashDomains {
     }
 }
 
+/// OrchardCommitDomains
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum OrchardCommitDomains {
+    /// NoteCommit
     NoteCommit,
+    /// CommitIvk
     CommitIvk,
 }
 

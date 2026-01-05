@@ -20,6 +20,7 @@ use halo2_proofs::{
 
 use pasta_curves::{pallas, vesta};
 use rand::RngCore;
+use zk_cosmwasm::CosmwasmCircuit;
 
 use self::{
     commit_ivk::{CommitIvkChip, CommitIvkConfig},
@@ -32,7 +33,10 @@ use self::{
 use crate::{
     address::RecpAddr,
     builder::SpendInfo,
-    circuit::gadget::secp256k1_chip::{Secp256k1Chip, Secp256k1Config, Secp256k1Fp, Secp256k1Fq},
+    circuit::{
+        gadget::secp256k1_chip::{Secp256k1Chip, Secp256k1Config, Secp256k1Fp, Secp256k1Fq},
+        headstash_merkle_tree::{LeafHashChip, LeafHashConfig},
+    },
     constants::{
         OrchardCommitDomains, OrchardFixedBases, OrchardHashDomains, MERKLE_DEPTH_ORCHARD,
     },
@@ -104,6 +108,7 @@ pub struct Config {
     sinsemilla_config_2:
         SinsemillaConfig<OrchardHashDomains, OrchardCommitDomains, OrchardFixedBases>,
     commit_ivk_config: CommitIvkConfig,
+    leaf_hash_config: LeafHashConfig,
     old_note_commit_config: NoteCommitConfig,
     new_note_commit_config: NoteCommitConfig,
 }
@@ -131,6 +136,12 @@ pub struct Circuit {
     // pub(crate) rcv: Value<ValueCommitTrapdoor>,
 }
 
+impl From<Circuit> for CosmwasmCircuit<Circuit> {
+    fn from(c: Circuit) -> Self {
+        CosmwasmCircuit::new(c)
+    }
+}
+
 impl Circuit {
     /// This constructor is public to enable creation of custom builders.
     /// If you are not creating a custom builder, use [`Builder`] to compose
@@ -156,8 +167,8 @@ impl Circuit {
         (Rho::from_nf_old(spend.note.nullifier()) == output_note.rho())
             .then(|| Self::from_action_context_unchecked(spend, output_note))
     }
-
-    pub(crate) fn from_action_context_unchecked(
+    /// This from_action_context_unchecked is from action without validation.
+    pub fn from_action_context_unchecked(
         spend: SpendInfo,
         output_note: Note,
         // alpha: pallas::Scalar,
@@ -370,6 +381,10 @@ impl plonk::Circuit<pallas::Base> for Circuit {
         let commit_ivk_config = CommitIvkChip::configure(meta, advices);
 
         // Configuration to handle decomposition and canonicity checking
+        // for leaf hash.
+        let leaf_hash_config = LeafHashChip::configure(meta, advices);
+
+        // Configuration to handle decomposition and canonicity checking
         // for NoteCommit_old.
         let old_note_commit_config =
             NoteCommitChip::configure(meta, advices, sinsemilla_config_1.clone());
@@ -392,6 +407,7 @@ impl plonk::Circuit<pallas::Base> for Circuit {
             sinsemilla_config_1,
             sinsemilla_config_2,
             commit_ivk_config,
+            leaf_hash_config,
             old_note_commit_config,
             new_note_commit_config,
         }
@@ -478,21 +494,24 @@ impl plonk::Circuit<pallas::Base> for Circuit {
             (nd, v, fdi, recp, psi_old, rho_old, cm_old, nk)
         };
 
-        // hashdomain Merkle path validity check
-        // Compute epk_sum
+        // Genesis Sinsemilla Merkle tree: Inclusion proof for participant eligibility
+        // This tree proves that the participant (identified by epk, fdi, v, nd) is
+        // included in the genesis distribution with their allocated balance.
 
-        // derive current note leaf
-        let (leaf, rs) = gadget::derive_leaf(
-            layouter.namespace(|| "derive leaf"),
+        // Derive the leaf hash from participant inputs
+        let leaf_hash_chip = config.leaf_hash_chip();
+        let genesis_leaf = gadget::derive_leaf(
+            layouter.namespace(|| "derive genesis leaf"),
             &config.sinsemilla_chip_1(),
             &ecc_chip,
+            &leaf_hash_chip,
             epk_crt,
             fdi.clone(),
             v.clone(),
             nd.clone(),
         )?;
 
-        // constrain path to headstash genesis root
+        // Verify inclusion in genesis merkle tree via merkle path
         let genesis_root = {
             let path = self
                 .path
@@ -503,26 +522,15 @@ impl plonk::Circuit<pallas::Base> for Circuit {
                 self.pos,
                 path,
             );
-            // merkle_inputs.calculate_root(layouter.namespace(|| "Genesis merkle path"), leaf.x())?
+            // Calculate root using the genesis leaf and merkle path
+            merkle_inputs.calculate_root(
+                layouter.namespace(|| "Genesis merkle path verification"),
+                genesis_leaf.extract_p().inner().clone(),
+            )?
         };
 
-        // commitdomain Merkle path validity check. This is a headstash genesis sinsemilla hashdomain merkle tree.
-        let root = {
-            let path = self
-                .path
-                .map(|typed_path| typed_path.map(|node| node.inner()));
-            let merkle_inputs = MerklePath::construct(
-                [config.merkle_chip_1(), config.merkle_chip_2()],
-                OrchardHashDomains::MerkleCrh,
-                self.pos,
-                path,
-            );
-            let leaf = cm_old.extract_p().inner().clone();
-            merkle_inputs.calculate_root(layouter.namespace(|| "Merkle path"), leaf)?
-        };
-
-        // constrain hashCommit root to public input
-        layouter.constrain_instance(root.cell(), config.primary, ANCHOR)?;
+        // Constrain the calculated genesis root to the public input anchor
+        layouter.constrain_instance(genesis_root.cell(), config.primary, ANCHOR)?;
 
         // Nullifier integrity (https://p.z.cash/ZKS:action-nullifier-integrity).
         let nf_old = {
@@ -720,11 +728,11 @@ impl Instance {
     }
 
     /// Constructs an  [Vec<u8>]  from an instance for serialization/deserialization.
-    fn to_bytes(&self) -> Vec<u8> {
+    pub fn to_bytes(&self) -> Vec<u8> {
         let mut bytes = Vec::with_capacity(168);
 
         bytes.extend_from_slice(&self.anchor.to_bytes());
-        bytes.extend_from_slice(&self.nd.as_bytes());
+        bytes.extend_from_slice(&self.nd.to_pallas().to_repr());
         bytes.extend_from_slice(&self.v.inner().to_le_bytes());
         bytes.extend_from_slice(&self.nf.to_bytes());
         bytes.extend_from_slice(&self.recp.to_bytes());
@@ -732,8 +740,8 @@ impl Instance {
 
         bytes
     }
-
-    fn to_halo2_instance(&self) -> [[vesta::Scalar; 9]; 1] {
+    /// Constructs the `[[vesta::Scalar; 9]; 1]` array representation from an instance for serialization/deserialization.
+    pub fn to_halo2_instance(&self) -> [[vesta::Scalar; 9]; 1] {
         let mut instance = [vesta::Scalar::zero(); 9];
 
         instance[ANCHOR] = self.anchor.inner();
@@ -832,9 +840,11 @@ mod tests {
         let (_, fvk, esk, spent_note) = Note::dummy(&mut rng, None);
         let (epkx, epky) = esk.epk().xy();
         // 1. Generate secp256k1 key pair (esk, epk)
+        let (epkx, epky) = (
+            Secp256k1Fp::from_bytes(&epkx).expect("valid Fp"),
+            Secp256k1Fp::from_bytes(&epky).expect("valid Fp"),
+        );
         let e_sk_fq = Secp256k1Fq::from_bytes(&esk.secret_bytes()).expect("valid Fq");
-        let epkx = Secp256k1Fp::from_bytes(&epkx).expect("valid Fp");
-        let epky = Secp256k1Fp::from_bytes(&epky).expect("valid Fp");
         let sender_address = spent_note.recipient();
         let nk = *fvk.nk();
         let nf = spent_note.nullifier();
@@ -1022,7 +1032,7 @@ mod tests {
             let create_proof = || -> std::io::Result<()> {
                 let mut rng = OsRng;
 
-                let (circuit, instance) = generate_circuit_instance(OsRng);
+                let (circuit, instance) = generate_circuit_instance(rng);
                 let instances = &[instance.clone()];
 
                 let pk = ProvingKey::build();
@@ -1043,6 +1053,75 @@ mod tests {
         assert_eq!(proof.0.len(), 4992);
 
         assert!(proof.verify(&vk, &[instance]).is_ok());
+    }
+
+    #[test]
+    fn test_genesis_merkle_inclusion() {
+        /// Integration test for genesis merkle tree inclusion proof
+        /// Verifies that a participant can prove their inclusion in the genesis distribution
+        let mut rng = OsRng;
+
+        let (circuits, instances): (Vec<_>, Vec<_>) = iter::once(())
+            .map(|()| generate_circuit_instance(&mut rng))
+            .unzip();
+
+        for (circuit, instance) in circuits.iter().zip(instances.iter()) {
+            // Test MockProver passes with correct instance
+            let result = MockProver::run(
+                K,
+                circuit,
+                instance
+                    .to_halo2_instance()
+                    .iter()
+                    .map(|p| p.to_vec())
+                    .collect(),
+            );
+
+            assert!(
+                result.is_ok(),
+                "Genesis merkle inclusion proof should create valid MockProver"
+            );
+            assert_eq!(
+                result.unwrap().verify(),
+                Ok(()),
+                "Genesis merkle inclusion proof should verify correctly"
+            );
+        }
+    }
+
+    #[test]
+    fn test_genesis_merkle_path_with_various_positions() {
+        /// Test genesis merkle path verification with different leaf positions
+        /// This validates that the merkle path proof works correctly at any tree position
+        let mut rng = OsRng;
+
+        // Test multiple instances with potentially different merkle paths
+        for test_num in 0..3 {
+            std::println!("Testing genesis merkle path with instance {}", test_num);
+            let (circuit, instance) = generate_circuit_instance(&mut rng);
+
+            let result = MockProver::run(
+                K,
+                &circuit,
+                instance
+                    .to_halo2_instance()
+                    .iter()
+                    .map(|p| p.to_vec())
+                    .collect(),
+            );
+
+            assert!(
+                result.is_ok(),
+                "MockProver creation failed for test {}",
+                test_num
+            );
+            assert_eq!(
+                result.unwrap().verify(),
+                Ok(()),
+                "Genesis merkle path verification failed for test {}",
+                test_num
+            );
+        }
     }
 
     #[cfg(feature = "dev-graph")]

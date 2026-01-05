@@ -17,7 +17,7 @@ btsg-account  = { workspace = true }
 token-bindings  = { workspace = true }
 btsg-auth  = { workspace = true }
 cosmwasm-schema  = { workspace = true }
-cosmwasm-std  = { workspace = true }
+cosmwasm-std  = { workspace = true, features = ["cosmwasm_2_0"] }
 cw-storage-plus  = { workspace = true }
 halo2_proofs  = { workspace = true }
 hex  = { workspace = true }

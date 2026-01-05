@@ -16,6 +16,8 @@ use zk_headstash::{Anchor, Proof};
 
 #[cosmwasm_schema::cw_serde]
 pub struct HeadstashCfg {
+    // cid: circuit-id of stored circuit in vm
+    pub cid: u64,
     // gr: genesis tree root
     pub gr: Binary,
     // ts: token strategies
@@ -132,7 +134,11 @@ pub fn process_headstash(
         }
 
         // verify headstash proof
-        // Proof::new(claim.p.to_vec()).verify(&VK, &[claim.i.clone().into()])?;
+        deps.api.halo2_proof_instance_verify(
+            cfg.cid.into(),
+            &claim.p.to_vec(),
+            &<HeadstashInstances as Into<Instance>>::into(claim.i.clone()).to_bytes(),
+        )?;
 
         // verify recp integrity
         claim.verify_recp_posiedon_hash()?;
@@ -189,7 +195,6 @@ pub fn process_headstash(
             }
         }
     }
-    // }
 
     Ok(res.add_attribute("action", "process_headstash"))
 }
