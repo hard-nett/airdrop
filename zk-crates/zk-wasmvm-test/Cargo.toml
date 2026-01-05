@@ -24,8 +24,14 @@ overflow-checks = true
 library = []
 
 [dependencies]
-cosmwasm-std   = { workspace = true  }
-cosmwasm-schema  = { workspace = true  }
+cosmwasm-std = { git = "https://github.com/permissionlessweb/cosmwasm", branch = "mvp", features = ["cosmwasm_1_4","cosmwasm_3_0", "stargate"] }
+cosmwasm-schema = { git = "https://github.com/permissionlessweb/cosmwasm", branch = "mvp", library = "cosmwasm-schema" }
 thiserror = { version = "2.0.16" }
+pasta_curves = "0.5"
+ff = "0.13"
+
+# for local development
+#cosmwasm-std = { path = "../../../../../zk-cosmwasm/mvp/packages/std" }
+#cosmwasm-schema = { path = "../../../../../zk-cosmwasm/mvp/packages/schema" }
 
 [dev-dependencies]

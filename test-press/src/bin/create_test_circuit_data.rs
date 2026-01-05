@@ -11,9 +11,14 @@ use zk_test_press::suite::{BoxError, HeadstashLaunchpadInstance};
 /// ```q
 // Generate test circuit keys for all example circuits
 fn main() -> Result<(), BoxError> {
-    let suite = HeadstashSuite::new();
     let path = Path::new("./data/test_keys");
-    let proofs = HeadstashLaunchpadInstance::gen_test_circuit_keys(&suite, path, None, vec![])?; // vec![("randy".to_string(), "rick".to_string())]
+
+    let proofs = zk_cosmwasm::TestPressLaunchpadInstance::gen_test_circuit_keys(
+        &zk_cosmwasm::suite::TestPressSuite::new(),
+        path,
+        None,
+        vec![],
+    )?; // vec![("randy".to_string(), "rick".to_string())];
     eprintln!("\n🎉 All circuit keys generated successfully!");
     // println!("{:#?}", proofs);
     Ok(())
