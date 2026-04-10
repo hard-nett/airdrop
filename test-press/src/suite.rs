@@ -1,6 +1,6 @@
 //! main suite for headstash
 use alloc::boxed::Box;
-use cosmwasm_std::to_json_binary;
+use ict_rs::chain::terp::ZkSuiteError;
 use rand_core::OsRng;
 
 #[cfg(feature = "multicore")]
@@ -22,11 +22,11 @@ use zk_headstash::{
 
 // use crate::{Anchor, Proof, spec};
 use base64::{Engine as _, engine::general_purpose};
-use sinsemilla::HashDomain;
 use ff::{Field, FromUniformBytes, PrimeField, PrimeFieldBits};
 use hex::decode;
 use pasta_curves::pallas::Base;
 use pasta_curves::{Fp, arithmetic::CurveAffine, group::Curve, pallas};
+use sinsemilla::HashDomain;
 use std::error::Error;
 
 use std::path::{Path, PathBuf};
@@ -52,83 +52,139 @@ pub fn get_cli_args() -> Result<(String, String), Box<dyn std::error::Error>> {
     Ok((args[1].clone(), args[2].clone()))
 }
 
-/// TerpHeadstashConfig
-#[derive(Debug)]
-pub struct TerpHeadstashConfig {
-    // smart contract params
-    // file location params
-    // storage params
-    // deployment params
-    // node params
+
+
+// ── TestPressSuite ────────────────────────────────────────────────────────────
+
+/// Composed suite of **all** test-press circuit suites.
+///
+/// Retains every method from the headstash helpers (via the same trait blanket
+/// impls) and adds one `TerpVmSuite`-compatible field per test circuit.
+///
+/// # Feature gating
+/// The circuit-suite fields (`no_rick`, …) are only present when the
+/// `interface` feature is enabled (pulls in ict-rs).  The struct is still
+/// usable without that feature — it is then just a zero-sized wrapper that
+/// provides all the `HeadstashBitwiseInstance` / tree / IPFS / launchpad
+/// helpers.
+///
+/// # Layout (keys dir)
+/// ```text
+/// <keys_base>/
+///   no_rick/
+///     params.bin
+///     proving_key.bin
+///     verifying_key.bin
+/// ```
+pub struct TestPressSuite {
+    /// No-Rick circuit: key management, prove, verify, on-chain deploy.
+    #[cfg(feature = "interface")]
+    pub no_rick: crate::suites::no_rick::NoRickSuite,
+    /// Headstash Orchard circuit: production spend-proof circuit.
+    #[cfg(feature = "interface")]
+    pub headstash_circuit: crate::suites::headstash::HeadstashSuite,
+    // sinsemilla merkle tree
+    // zk-hashmerchant (proove know mirrored tree root path )
+    // plonky3
+    // groth16
+    // cario
+    // zk-tls
 }
 
-/// HeadstashSuite
-#[derive(Debug, Default)]
-pub struct HeadstashSuite {}
-impl HeadstashBitwiseInstance for HeadstashSuite {}
-impl HeadstashLaunchpadInstance for HeadstashSuite {}
-impl HeadstashSinsemillaTree for HeadstashSuite {}
-impl HeadstashIpfsInstance for HeadstashSuite {}
-impl HeadstashSuite {
-    /// create new headsatsh suite
+/// TerpHeadstashConfig
+#[derive(Debug)]
+pub struct TerpHeadstashConfig {}
+
+// All stateless circuit-utility traits are delegated with default impls.
+impl HeadstashBitwiseInstance for TestPressSuite {}
+impl HeadstashSinsemillaTree for TestPressSuite {}
+impl HeadstashIpfsInstance for TestPressSuite {}
+impl HeadstashLaunchpadInstance for TestPressSuite {}
+
+impl TestPressSuite {
+    /// Create with a default keys directory (`./circuit_keys`).
     pub fn new() -> Self {
-        Self {}
+        Self {
+            #[cfg(feature = "interface")]
+            no_rick: crate::suites::no_rick::NoRickSuite::new(
+                std::path::PathBuf::from(KEYS_DIR).join("no_rick"),
+            ),
+            #[cfg(feature = "interface")]
+            headstash_circuit: crate::suites::headstash::HeadstashSuite::with_keys_dir(
+                std::path::PathBuf::from(KEYS_DIR).join("headstash"),
+            ),
+        }
+    }
+
+    /// Create with an explicit base directory for all circuit key files.
+    pub fn with_keys_dir<P: Into<std::path::PathBuf>>(base: P) -> Self {
+        let base = base.into();
+        Self {
+            #[cfg(feature = "interface")]
+            no_rick: crate::suites::no_rick::NoRickSuite::new(base.join("no_rick")),
+            #[cfg(feature = "interface")]
+            headstash_circuit: crate::suites::headstash::HeadstashSuite::with_keys_dir(
+                base.join("headstash"),
+            ),
+        }
     }
 }
 
-/// # Trait: `HeadstashInstance`
-///
-/// implement expected functions for client side interactions headstashes.
-// pub trait HeadstashInstance {
-//     type HsErr;
+#[cfg(feature = "interface")]
+impl TestPressSuite {
+    /// Generate or load No-Rick circuit keys, then create proofs for each
+    /// `(private_word, forbidden_word)` pair.
+    pub fn gen_test_circuit_keys(
+        &self,
+        path: &std::path::Path,
+        key_path: Option<&std::path::Path>,
+        proof_specs: Vec<(&str, &str)>,
+    ) -> Result<Vec<crate::circuits::no_rick::Proof>, BoxError> {
+        use crate::suites::no_rick::{NoRickInputs, NoRickSuite};
+        use ict_rs::chain::terp::TerpVmSuite as _;
 
-//     /// TODO: wire into network client for headstash market contract state queries
-//     fn find_new_headstashes() -> Result<(), Self::HsErr> {
-//         todo!()
-//     }
+        let suite = NoRickSuite::new(key_path.unwrap_or(path));
+        if key_path.is_none() {
+            suite.build_and_save_keys(10)?;
+        }
 
-//     /// TODO: query ipfs file to retrieve headstash config
-//     fn list_headstash_info() -> Result<(), Self::HsErr> {
-//         todo!()
-//     }
-
-//     /// TODO: read folder and display sum of notes and number of fdi counts
-//     fn list_unspent_notes() -> Vec<Note> {
-//         todo!()
-//     }
-
-//     /// TODO: read folder and display notes spent
-//     fn list_spent_notes() -> Vec<Note> {
-//         todo!()
-//     }
-
-//     /// TODO: select unspent notes used to claim and move note file over into spent,
-//     /// specify method of preparing and harvesting (creating proof) for a given note (either wasm-bindgen invocation,locally via cargo script, or external method invoked with a bash script)
-//     fn prepare_and_harvest_note() -> Result<(), Self::HsErr> {
-//         todo!()
-//     }
-
-//     fn headstash_action() -> Result<(), Self::HsErr> {
-//         todo!()
-//     }
-// }
+        proof_specs
+            .into_iter()
+            .map(|(private_word, forbidden_word)| {
+                suite
+                    .prove(&NoRickInputs::new(private_word, forbidden_word))
+                    .map_err(|e| Box::new(e) as BoxError)
+            })
+            .collect()
+    }
+}
 
 /// HeadstashBitwiseInstance
 pub trait HeadstashBitwiseInstance {
-    /// `derive_esk`: derives the 3x88 libs of a raw esk.
-    fn derive_esk(&self, sk: [u8; 32]) -> [Fp; 3] {
-        use zk_headstash::decompose_biguint_simple as decompose;
+    /// Derives the native pallas representation of a secp256k1 secret key.
+    /// Returns `esk mod pallas_p`, matching the in-circuit `.native` value.
+    fn derive_esk_native(&self, sk: [u8; 32]) -> Fp {
+        use zk_headstash::biguint_to_fe_simple;
         let skfq = halo2_base::halo2_proofs::halo2curves::secq256k1::Fp::from_repr(sk).expect("Fq");
         let sk_big = halo2_base::utils::fe_to_biguint(&skfq);
-        decompose(&sk_big, 3, 88).try_into().unwrap()
+        biguint_to_fe_simple(&sk_big)
     }
 
-    /// derive_epk
-    fn derive_epk(&self, pk: [u8; 32]) -> [Fp; 3] {
-        use zk_headstash::decompose_biguint_simple as decompose;
-        let pkfq = halo2_base::halo2_proofs::halo2curves::secq256k1::Fp::from_repr(pk).expect("Fq");
-        let sk_big = halo2_base::utils::fe_to_biguint(&pkfq);
-        decompose(&sk_big, 3, 88).try_into().unwrap()
+    /// Derives the native pallas representations of the secp256k1 public key
+    /// from a secret key. Computes `epk = esk * G` on secp256k1, then reduces
+    /// both coordinates mod pallas_p to match the in-circuit `.native` values.
+    fn derive_epk_natives(&self, sk: [u8; 32]) -> (Fp, Fp) {
+        use zk_headstash::to_native_out_of_circuit;
+        use halo2_base::halo2_proofs::halo2curves::secp256k1::Fp as Secp256k1Fp;
+        let secret_key = secp256k1::SecretKey::from_byte_array(sk).expect("valid secret key");
+        let esk = EligibleSk::from(secret_key);
+        let (epk_x_bytes, epk_y_bytes) = esk.epk().xy();
+        let epk_x = Secp256k1Fp::from_bytes(&epk_x_bytes.into()).expect("valid Fp");
+        let epk_y = Secp256k1Fp::from_bytes(&epk_y_bytes.into()).expect("valid Fp");
+        (
+            to_native_out_of_circuit(&epk_x),
+            to_native_out_of_circuit(&epk_y),
+        )
     }
 
     /// derive_v
@@ -149,22 +205,16 @@ pub trait HeadstashBitwiseInstance {
         )
     }
 
-    /// Convert a byte slice into an iterator of little‑endian bits (LSB first per byte).
+    /// Convert a byte slice into an iterator of little-endian bits (LSB first per byte).
     fn bytes_to_bits_le(bytes: &[u8]) -> impl Iterator<Item = bool> + '_ {
         bytes
             .iter()
             .flat_map(|b| (0..8).map(move |i| (b >> i) & 1 == 1))
     }
 
-    /// Returns the sum of the 3 88-bit pallas curve point representation of a secp256k1 value
-    fn derive_secp256k1_limbs_sum_const_time(&self, bytes: &[Fp; 3]) -> Fp {
-        let limb3 = &bytes[0];
-        let limb2 = &bytes[1];
-        let limb1 = &bytes[2];
-        limb1.add(&limb2.add(&limb3))
-    }
 
-    /// Note‑Denom (nd): blake3 hash of the token, 1 bit cleared.
+
+    /// Note-Denom (nd): blake3 hash of the token, 1 bit cleared.
     fn derive_nd(&self, raw_nd: &str) -> [u8; 32] {
         NoteDenom::new_for_proof(raw_nd)
             .as_bytes()
@@ -216,10 +266,10 @@ pub trait HeadstashSinsemillaTree: HeadstashBitwiseInstance {
             &self.get_input_path()?,
             serde_json::to_string_pretty(&input)?,
         )?;
-        eprintln!("✅ Input with leaves written to {}", self.get_input_path()?);
+        eprintln!("Input with leaves written to {}", self.get_input_path()?);
         let merkle_path = path.join("merkle_output.json");
         fs::write(&merkle_path, serde_json::to_string_pretty(&output)?)?;
-        eprintln!("✅ Merkle output written to {}", merkle_path.display());
+        eprintln!("Merkle output written to {}", merkle_path.display());
         Ok(())
     }
 
@@ -256,11 +306,8 @@ pub trait HeadstashSinsemillaTree: HeadstashBitwiseInstance {
                     .and_then(|s| s.parse::<u64>().ok())
                     .unwrap();
 
-                // ---- parallel leaf generation ---------------------------------
-                // Parallel leaf generation (now also gives us an index)
                 let (lidxh, raw_leaves) =
                     self.derive_leaf(addr.as_str(), &token["name"].to_string(), v)?;
-                // ---- attach leaves back to the JSON object (single‑thread) ----
                 {
                     token
                         .as_object_mut()
@@ -269,7 +316,6 @@ pub trait HeadstashSinsemillaTree: HeadstashBitwiseInstance {
                         .or_insert_with(|| json!([]));
                 }
 
-                // Push each leaf together with its index:
                 for (fixed_amount, idx, leaf_hex) in lidxh {
                     token
                         .get_mut("leaves")
@@ -279,7 +325,6 @@ pub trait HeadstashSinsemillaTree: HeadstashBitwiseInstance {
                         .push(json!({ "amnt":fixed_amount,"index": idx, "leaf": leaf_hex }));
                 }
 
-                // ---- push raw leaves into the global vector -------------------
                 leaves.extend(raw_leaves);
             }
         }
@@ -297,7 +342,6 @@ pub trait HeadstashSinsemillaTree: HeadstashBitwiseInstance {
             .map(|leaf| format!("0x{}", hex::encode(leaf.to_repr())))
             .collect();
 
-        // Output Merkle result
         let merkle_output = json!({
             "root": root_hex,
             "leaves": leaves_hex,
@@ -319,7 +363,6 @@ pub trait HeadstashSinsemillaTree: HeadstashBitwiseInstance {
     where
         Self: Sync,
     {
-        // ---------- build work list ------------------------------------------------
         let mut work_items: Vec<u64> = Vec::new();
         let mut remainder = v;
         for &fixed_amount in FIXED_AMOUNTS.iter() {
@@ -328,13 +371,11 @@ pub trait HeadstashSinsemillaTree: HeadstashBitwiseInstance {
                 remainder %= fixed_amount;
                 continue;
             }
-            // push *count* copies of the denomination value
             work_items.extend(std::iter::repeat(fixed_amount).take(count as usize));
             remainder %= fixed_amount;
         }
         debug_assert_eq!(remainder, 0, "remainder not zero after denomination split");
 
-        // ---------- parallel leaf generation ---------------------------------------
         let leaf_hexes = Mutex::new(Vec::<(u64, usize, String)>::new());
         let raw_leaves = Mutex::new(Vec::<Fp>::new());
 
@@ -347,18 +388,14 @@ pub trait HeadstashSinsemillaTree: HeadstashBitwiseInstance {
                 .unwrap(),
         };
 
-        // `enumerate` gives us the leaf‑index (0‑based) for this address/token
         #[cfg(feature = "multicore")]
         work_items.par_iter().enumerate().try_for_each(
             |(idx, &fixed_amount)| -> Result<(), BoxError> {
-                let leaf = self.leaf_hash(
-                    &self
-                        .derive_secp256k1_limbs_sum_const_time(&self.derive_esk(*addr_bytes))
-                        .to_repr(),
-                    &self.derive_nd(token_name),
-                    &self.derive_v(fixed_amount),
-                    &self.derive_fdi(idx as u64),
-                )?;
+                let (epk_x, epk_y) = self.derive_epk_natives(*addr_bytes);
+                let nd_fp = Fp::from_repr(self.derive_nd(token_name)).unwrap();
+                let v_fp = Fp::from(fixed_amount);
+                let fdi_fp = Fp::from(idx as u64);
+                let leaf = self.leaf_hash(epk_x, epk_y, nd_fp, v_fp, fdi_fp)?;
                 let leaf_hex = format!("0x{}", hex::encode(leaf.to_repr()));
                 leaf_hexes
                     .lock()
@@ -406,43 +443,49 @@ pub trait HeadstashSinsemillaTree: HeadstashBitwiseInstance {
     /// Calculate MerkleCRH: H(layer || left || right)
     fn merkle_crh(layer: u32, left: pallas::Base, right: pallas::Base) -> pallas::Base {
         let domain = HashDomain::new(MERKLE_CRH_PERSONALIZATION);
-        // bit string: 10 + 250 + 250 = 510 bits
         let mut message = Vec::with_capacity(510);
 
         for i in 0..10 {
             message.push((layer >> i) & 1 == 1);
         }
 
-        <HeadstashSuite as HeadstashBitwiseInstance>::extend_with_base_field_bits(
+        <TestPressSuite as HeadstashBitwiseInstance>::extend_with_base_field_bits(
             &mut message,
             left,
         );
-        <HeadstashSuite as HeadstashBitwiseInstance>::extend_with_base_field_bits(
+        <TestPressSuite as HeadstashBitwiseInstance>::extend_with_base_field_bits(
             &mut message,
             right,
         );
 
-        // Hash and return x-coordinate
         let point = domain.hash_to_point(message.into_iter()).unwrap();
         point.to_affine().coordinates().unwrap().x().clone()
     }
 
-    /// Compute the leaf hash
+    /// Compute the leaf hash matching in-circuit `derive_leaf`.
+    ///
+    /// 640-bit Sinsemilla message layout:
+    ///   epk_x[0..255) || epk_y[0..1) || nd[0..255) || v[0..64) || fdi[0..64) || 0_pad
     fn leaf_hash(
         &self,
-        epk: &[u8],
-        nd: &[u8],
-        v: &[u8],
-        fdi: &[u8],
+        epk_x: Fp,
+        epk_y: Fp,
+        nd: Fp,
+        v: Fp,
+        fdi: Fp,
     ) -> Result<pallas::Base, BoxError> {
-        let mut message_bytes = Vec::new();
-        message_bytes.extend_from_slice(epk);
-        message_bytes.extend_from_slice(nd);
-        message_bytes.extend_from_slice(v);
-        message_bytes.extend_from_slice(fdi);
+        use ff::PrimeFieldBits;
+        let mut bits: Vec<bool> = Vec::with_capacity(640);
+        bits.extend(epk_x.to_le_bits().iter().by_vals().take(255));
+        bits.extend(epk_y.to_le_bits().iter().by_vals().take(1));
+        bits.extend(nd.to_le_bits().iter().by_vals().take(255));
+        bits.extend(v.to_le_bits().iter().by_vals().take(64));
+        bits.extend(fdi.to_le_bits().iter().by_vals().take(64));
+        bits.push(false); // 1-bit padding to reach 640
+        assert_eq!(bits.len(), 640);
         Ok(HashDomain::new(LEAF_PERSONALIZATION)
-            .hash_to_point(HeadstashSuite::bytes_to_bits_le(&message_bytes).into_iter())
-            .expect("dang")
+            .hash_to_point(bits.into_iter())
+            .expect("leaf hash should succeed")
             .to_affine()
             .coordinates()
             .unwrap()
@@ -460,14 +503,13 @@ pub trait HeadstashSinsemillaTree: HeadstashBitwiseInstance {
             if let Some(holdings) = map.get(&addr_target) {
                 if let Value::Array(holding_array) = holdings {
                     for holding in holding_array.iter() {
-                        // token identifier: raw value ("uterp", "ibc/...", "tokenfactory/...")
                         let token_name = holding["name"].as_str().unwrap().to_string();
                         let _total_amount = holding["amount"].as_str().unwrap();
 
                         let leaves = match holding.get("leaves") {
                             Some(Value::Array(arr)) => arr,
                             _ => {
-                                eprintln!("⚠️  No \"leaves\" array for token {}", token_name);
+                                eprintln!("No \"leaves\" array for token {}", token_name);
                                 std::process::exit(1);
                             }
                         };
@@ -475,15 +517,13 @@ pub trait HeadstashSinsemillaTree: HeadstashBitwiseInstance {
                         let mut generated_notes = Vec::new();
 
                         for leaf in leaves.iter() {
-                            // concrete amount for this note
                             let amnt = leaf["amnt"].as_u64().unwrap_or_else(|| {
-                                eprintln!("⚠️  Missing \"amnt\" in leaf for token {}", token_name);
+                                eprintln!("Missing \"amnt\" in leaf for token {}", token_name);
                                 std::process::exit(1);
                             });
 
-                            // the fdi value (the leaf itself)
                             let fdi = leaf["index"].as_u64().unwrap_or_else(|| {
-                                eprintln!("⚠️  Missing \"index\" in leaf for token {}", token_name);
+                                eprintln!("Missing \"index\" in leaf for token {}", token_name);
                                 std::process::exit(1);
                             });
                             generated_notes.push(json!({
@@ -493,9 +533,6 @@ pub trait HeadstashSinsemillaTree: HeadstashBitwiseInstance {
                             }));
                         }
 
-                        // ------------------------------------------------------------------
-                        // 3️⃣  Insert the array of notes for this token into the final map
-                        // ------------------------------------------------------------------
                         address_notes.insert(token_name, Value::Array(generated_notes));
                     }
                 } else {
@@ -514,7 +551,6 @@ pub trait HeadstashSinsemillaTree: HeadstashBitwiseInstance {
             std::process::exit(1);
         }
 
-        // Create output file: ./data/<address>_notes.json
         let output_dir = Path::new("./data/notes");
         fs::create_dir_all(output_dir)?;
         let safe_addr: String = addr_target
@@ -525,14 +561,13 @@ pub trait HeadstashSinsemillaTree: HeadstashBitwiseInstance {
 
         fs::write(&output_path, serde_json::to_string_pretty(&address_notes)?)?;
 
-        eprintln!("✅ Default Genesis Notes generated for {}", addr_target);
-        eprintln!("📁 Written to: {}", output_path.display());
+        eprintln!("Default Genesis Notes generated for {}", addr_target);
+        eprintln!("Written to: {}", output_path.display());
 
         Ok(())
     }
 
     /// TODO: create default notes of a specific public key allocation for a given headstash instance.
-    /// retrieves the entire tree from the headstash-API client, and then generate our notes 100% client side
     fn gen_headstash_my_notes(&self, input: PathBuf, output: PathBuf) -> Result<(), BoxError> {
         todo!()
     }
@@ -552,7 +587,6 @@ pub trait HeadstashSinsemillaTree: HeadstashBitwiseInstance {
             let amount_match = note.get("amount").and_then(|v| v.as_str()) == Some(amount);
 
             if denom_match && amount_match {
-                // fdi is a number (u32); pull it out
                 let fdi = note
                     .get("fdi")
                     .and_then(|v| v.as_u64())
@@ -583,19 +617,9 @@ pub trait HeadstashSinsemillaTree: HeadstashBitwiseInstance {
 }
 
 /// All actions any user would take for creating a new headstash 100% client side using this launchpad framework.
-///  Requires struct implementing trait to also implement `HeadstashBitwiseInstance` default members.
-/// TODO: feature flag parallelization in tree generation
-/// TODO: add default documentation to each member
 pub trait HeadstashIpfsInstance: HeadstashBitwiseInstance {
     /// `upload_circuit_keys`: upload keys to ipfs for public distribution
     fn upload_circuit_keys(&self) -> Result<(), BoxError> {
-        // check for existing ipfs connection
-        // options:
-        // -  use node local ipfs gateway
-        // -  use remote ipfs gateway
-        // -  deploy new one if needed
-        // load key files from default folder
-        // upload and handle response gracefully
         Ok(())
     }
     /// `upload_headstash_params`: upload headstash params to ipfs for public distribution
@@ -610,8 +634,7 @@ pub trait HeadstashIpfsInstance: HeadstashBitwiseInstance {
 
 /// launchpad
 pub trait HeadstashLaunchpadInstance: HeadstashBitwiseInstance + HeadstashIpfsInstance {
-    /// ## [create_headstash_proof]
-    /// > #### Default method for creating a proof. Requires both the *public (instance)* & *private (witnesses)* values.
+    /// Default method for creating a proof.
     async fn create_headstash_proof(
         &self,
         a: Anchor,
@@ -626,8 +649,12 @@ pub trait HeadstashLaunchpadInstance: HeadstashBitwiseInstance + HeadstashIpfsIn
         let rseed = RandomSeed::from_bytes(r, &rho).expect("random seed");
 
         let pk = self.req_headstash_pk().await?;
-        let spk = SpendingKey::from_bytes(r).expect("spk");
-        let fvk = FullViewingKey::from(&spk);
+        let spk = SpendingKey::from_bytes(r);
+        let fvk = if bool::from(spk.is_some()) {
+            FullViewingKey::from(&spk.unwrap())
+        } else {
+            return Err("SpendingKey derivation failed".into());
+        };
 
         let n = Note::from_parts(hv, recp, esk, rho, rseed).expect("note derivation");
         let nf = n.nullifier();
@@ -635,7 +662,6 @@ pub trait HeadstashLaunchpadInstance: HeadstashBitwiseInstance + HeadstashIpfsIn
 
         let c = SpendInfo::new(fvk, n, mp).expect("headstash claim");
 
-        // generate proof, unchecked as we rho is not deterministically derived
         let instances =
             zk_headstash::circuit::Instance::from_parts(a, hv.denom(), hv.amount(), recp, nf, cmx);
         let circuit = Circuit::from_action_context_unchecked(c, n);
@@ -648,197 +674,15 @@ pub trait HeadstashLaunchpadInstance: HeadstashBitwiseInstance + HeadstashIpfsIn
     }
     /// create_new_headstash
     fn create_new_headstash(&self) -> Result<(), BoxError> {
-        // generate template headstash yaml
         self.gen_new_headstash_params();
-        // prompt to determine communities to include in headstash airdrop
-        // deploy/retrieve holder distributions via full ephemeral full nodes api queries
         self.gen_community_snapshots();
-        // prompt calculations on percentile distribution and suggested ranges for normalization of airdrop allocation between communities
         self.gen_calculate_distribution();
-        // generate headstash circuit
-        // self.gen_headstash_circuit()?;
-        // upload circuit keys to ipfs
         self.upload_circuit_keys()?;
-        // upload headstash yaml to ipfs
         self.upload_headstash_yaml()?;
-        // call headstash launchpad
-        // deploy new headstash aggregator
         unimplemented!()
     }
 
-    /// `gen_headstgen_community_snapshotsash_keys`: retrive snapshot and pubkeys of list of community holders.
-    fn gen_new_headstash_params(&self) {
-        // load config file or create new one
-        // a. determine what circuit keys used
-        //  - default headstash, custom one we upload
-        // b. smart contract params
-        // c. deployment params
-        // d. node params
-    }
-
-    /// `gen_headstgen_community_snapshotsash_keys`: retrive snapshot and pubkeys of list of community holders.
-    fn gen_community_snapshots(&self) {
-        // load config file
-        // connect to eth node
-        // retrieve latest holder distribution and pubkeys for each community
-        // write csv into each community folder
-    }
-    /// `gen_calculate_distribution`:  .
+    fn gen_new_headstash_params(&self) {}
+    fn gen_community_snapshots(&self) {}
     fn gen_calculate_distribution(&self) {}
-
-    // /// `gen_headstash_circuit`: generate circuit [ProvingKey] & [VerifyingKey] with hex-encode, write to ./data/keys/.
-    // fn gen_headstash_circuit(&self) -> Result<(), BoxError> {
-    //     fs::create_dir_all("./data/keys")?;
-    //     let pk_path = Path::new("./data/keys").join(PK_FILE);
-    //     ProvingKey::build_and_write(pk_path)?;
-    //     Ok(())
-    // }
-}
-
-// TODO:
-// - notecommitment derivation accuracy
-// - nullifier derivation accuracy
-// - document DST & hashing algo constant in spec
-
-// TEST:
-// nullifier should not be impacted by randomness inputs
-// nullifier should change with different esk/epk
-//
-
-#[cfg(test)]
-mod test {
-    use super::*;
-    use std::boxed::Box;
-    use std::collections::HashMap;
-
-    #[test]
-    pub fn test_note_accuracy() -> Result<(), Box<dyn std::error::Error>> {
-        // Load original allocations
-        let input_data: Value =
-            serde_json::from_str(&fs::read_to_string("./data/genesis_sinsemilla.json")?)?;
-
-        // Load generated notes for the zero address
-        let notes_path = "./data/notes/0x0000000000000000000000000000000000000000.json";
-        let calculated_notes: Value = serde_json::from_str(&fs::read_to_string(notes_path)?)?;
-
-        // Extract original holdings
-        let mut original_balances: HashMap<String, u64> = HashMap::new();
-
-        if let Value::Object(map) = &input_data {
-            if let Some(holdings) = map.get("0x0000000000000000000000000000000000000000") {
-                if let Value::Array(holding_array) = holdings {
-                    for holding in holding_array {
-                        if let Some(name) = holding["name"].as_str() {
-                            let amount_str = holding["amount"].as_str().unwrap_or("0");
-                            let amount: u64 = amount_str.parse().unwrap_or(0);
-                            *original_balances.entry(name.to_string()).or_insert(0) += amount;
-                        }
-                    }
-                }
-            }
-        }
-
-        // Extract and sum note values from generated notes
-        let mut notes_sum: HashMap<String, u64> = HashMap::new();
-
-        if let Value::Object(note_map) = &calculated_notes {
-            for (token_name, notes) in note_map {
-                if let Value::Array(note_array) = notes {
-                    for note in note_array {
-                        if let Some(v_str) = note["v"].as_str() {
-                            let v: u64 = v_str.parse().unwrap_or(0);
-                            *notes_sum.entry(token_name.clone()).or_insert(0) += v;
-                        }
-                    }
-                }
-            }
-        }
-
-        // Compare: original vs summed note values
-        for (token, original_amount) in &original_balances {
-            let note_total = notes_sum.get(token).copied().unwrap_or(0);
-            assert_eq!(
-                original_amount, &note_total,
-                "Token {}: allocation ({}) does not match total notes ({})",
-                token, original_amount, note_total
-            );
-        }
-
-        // Also check for extra tokens in notes not in original
-        for (token, _) in &notes_sum {
-            assert!(
-                original_balances.contains_key(token),
-                "Token {} appears in notes but not in original allocation",
-                token
-            );
-        }
-
-        Ok(())
-    }
-
-    fn load_data() -> Result<Value, BoxError> {
-        let file = fs::File::open("./data/genesis_sinsemilla.json")?;
-        let reader = std::io::BufReader::new(file);
-        Ok(serde_json::from_reader(reader)?)
-    }
-
-    // Ensures input data is in compatible format
-    #[test]
-    pub fn test_input_data_accuracy() -> Result<(), BoxError> {
-        let data = load_data()?;
-        if !data.is_object() {
-            panic!("Expected JSON object (map) at root");
-        }
-
-        for (addr, tokens) in data.as_object().unwrap().iter() {
-            assert!(tokens.is_array(), "Value for {} must be an array", addr);
-            for token in tokens.as_array().unwrap() {
-                let obj = token.as_object().unwrap();
-                assert!(obj.contains_key("amount"), "missing required key 'amount'");
-                assert!(obj.contains_key("token"), " missing required key 'token'");
-                assert!(obj["amount"].is_string(), "'amount' must be a string");
-                assert!(obj["token"].is_string(), "'token' must be a string");
-            }
-        }
-
-        Ok(())
-    }
-
-    // #[test]
-    // pub fn test_leaves_accuracy() -> Result<(), BoxError> {
-    //     let data = load_data()?;
-    //     // Expect top-level object: { "addr": [ { token, amount, leaf }, ... ] }
-    //     let balances = data.as_object().ok_or("JSON must be an object")?;
-    //     for (address, allocs) in balances {
-    //         let alloc_array = allocs.as_array().unwrap();
-
-    //         for token_obj in alloc_array {
-    //             let token_name = token_obj["token"].as_str().unwrap_or_default();
-    //             let amount = token_obj["amount"].as_str().unwrap_or_default();
-    //             let expected_leaf_hex = token_obj["leaf"].as_str().unwrap_or_default();
-
-    //             // Remove 0x prefix if present
-    //             let expected_bytes = if expected_leaf_hex.starts_with("0x") {
-    //                 hex::decode(&expected_leaf_hex[2..])?
-    //             } else {
-    //                 hex::decode(expected_leaf_hex)?
-    //             };
-
-    //             // Re-compute expected scalar from address + token + amount
-    //             let computed_leaf = leaf_hash(address, token_name, amount,)?;
-    //             let computed_bytes = computed_leaf.to_repr();
-
-    //             // Compare raw field element bytes
-    //             assert_eq!(
-    //                 computed_bytes.as_ref(),
-    //                 expected_bytes.as_slice(),
-    //                 "Leaf mismatch for address={}, token={}",
-    //                 address,
-    //                 token_name
-    //             );
-    //         }
-    //     }
-
-    //     Ok(())
-    // }
 }

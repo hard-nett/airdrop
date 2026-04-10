@@ -9,7 +9,10 @@ fn main() -> anyhow::Result<()> {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     println!("root: {}", root.display());
 
-    let target_dir = root.join("../").join("zk-crates/zk-headstash/src").join("gen");
+    let target_dir = root
+        .join("../")
+        .join("zk-crates/zk-headstash/src")
+        .join("gen");
 
     println!("target_dir: {}", target_dir.display());
 

@@ -1,7 +1,7 @@
 use std::path::Path;
 
-use zk_test_press::HeadstashSuite;
 use zk_test_press::suite::{BoxError, HeadstashLaunchpadInstance};
+use zk_test_press::{HeadstashSuite, TestPressSuite};
 
 /// # logic to create & verify circuit and proofs for testing in zk-wasmvm integrations.
 /// - generates default testing circuits [VerifyingKey] and [ProvingKey]
@@ -13,12 +13,7 @@ use zk_test_press::suite::{BoxError, HeadstashLaunchpadInstance};
 fn main() -> Result<(), BoxError> {
     let path = Path::new("./data/test_keys");
 
-    let proofs = zk_cosmwasm::TestPressLaunchpadInstance::gen_test_circuit_keys(
-        &zk_cosmwasm::suite::TestPressSuite::new(),
-        path,
-        None,
-        vec![],
-    )?; // vec![("randy".to_string(), "rick".to_string())];
+    let proofs = TestPressSuite::gen_test_circuit_keys(&TestPressSuite::new(), path, None, vec![])?; // vec![("randy".to_string(), "rick".to_string())];
     eprintln!("\n🎉 All circuit keys generated successfully!");
     // println!("{:#?}", proofs);
     Ok(())

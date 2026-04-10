@@ -1,4 +1,8 @@
-use zk_headstash::deploy::suite::*;
+use zk_headstash::{
+    suite::*,
+    suite::{HeadstashSuite, suite::HeadstashSinsemillaTree},
+};
+use zk_test_press::suite::BoxError;
 
 /// ## `create_headstash_notes`
 ///  **Sinsemilla HashDomain** generates default note using poseidon hashing algo & Fixed-Denomination Notes

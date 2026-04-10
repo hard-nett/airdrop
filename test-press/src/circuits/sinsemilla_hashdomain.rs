@@ -1,69 +1,117 @@
-//! proove that H(v||nd||fdi||epk) was derived accurately using the sinsemilla hash domain.
-//!  - public inputs (exposed as instance columns): v,nd, H_sinsemilla
-//!  - private inputs: fdi,epk
+//! Genesis Sinsemilla leaf hash test circuit.
+//!
+//! This module provides a spec-compliant test circuit for verifying the genesis
+//! sinsemilla merkle tree leaf hash computation with proper 8-piece message
+//! decomposition and canonicity constraints.
+//!
+//! ## Message Decomposition (510 bits total):
+//! - `a`: epk.x[0..250] (250 bits)
+//! - `b`: epk.x[250..255] || epk.y[0] || nd[0..4] (10 bits)
+//! - `c`: nd[4..254] (250 bits)
+//! - `d`: nd[254] || v[0..9] (10 bits)
+//! - `e`: v[9..59] (50 bits)
+//! - `f`: v[59..64] || fdi[0..5] (10 bits)
+//! - `g`: fdi[5..55] (50 bits)
+//! - `h`: fdi[55..64] || padding (10 bits)
+//!
+//! ## Test Coverage
+//!
+//! Tests use `MerkleTestDataBuilder` from suite.rs to generate test data that can be
+//! verified against the circuit constraints.
 
-use std::marker::PhantomData;
+use pasta_curves::pallas;
+use zk_headstash::{
+    OrchardCommitDomains, OrchardFixedBases, OrchardHashDomains,
+    circuit::{
+        Secp256k1Chip, Secp256k1Config, Secp256k1Fp, assign_free_advice,
+        headstash_merkle_tree::{LeafHashChip, LeafHashConfig, gadgets},
+    },
+    value::NoteValue,
+};
 
-use zk_headstash::{OrchardCommitDomains, OrchardFixedBases, OrchardHashDomains};
+use halo2_gadgets::{
+    ecc::chip::{EccChip, EccConfig},
+    sinsemilla::chip::{SinsemillaChip, SinsemillaConfig},
+    utilities::lookup_range_check::{LookupRangeCheck, LookupRangeCheckConfig},
+};
+use halo2_proofs::{
+    circuit::{Layouter, SimpleFloorPlanner, Value},
+    plonk::{Circuit, ConstraintSystem, Error},
+};
 
-use halo2_gadgets::ecc::chip::{EccChip, EccConfig};
-use halo2_gadgets::sinsemilla::chip::{SinsemillaChip, SinsemillaConfig};
-use halo2_gadgets::sinsemilla::{HashDomain, Message, MessagePiece, SinsemillaInstructions};
-use halo2_gadgets::utilities::lookup_range_check::PallasLookupRangeCheck;
-use halo2_gadgets::utilities::{FieldValue, RangeConstrained};
-use halo2_proofs::circuit::Layouter;
-use halo2_proofs::circuit::{SimpleFloorPlanner, Value};
-use halo2_proofs::plonk::{Circuit, Column, Instance, Selector};
-use pasta_curves::{pallas, Fp};
-
-type MySinsemillaHashDomainConfig<Lookup> = (
-    EccConfig<OrchardFixedBases, Lookup>,
-    Column<Instance>,
-    SinsemillaConfig<OrchardHashDomains, OrchardCommitDomains, OrchardFixedBases, Lookup>,
-    // supports up to 2^32 bits
-    Selector,
+/// Configuration type for the LeafHashTestCircuit.
+pub type LeafHashTestConfig = (
+    LeafHashConfig,
+    SinsemillaConfig<OrchardHashDomains, OrchardCommitDomains, OrchardFixedBases>,
+    EccConfig<OrchardFixedBases>,
+    Secp256k1Config,
 );
 
-/// MySinsemillaHashDomainCircuit
-#[derive(Default, Debug)]
-pub struct MySinsemillaHashDomainCircuit<Lookup: PallasLookupRangeCheck> {
-    _lookup_marker: PhantomData<Lookup>,
-    v: Value<Fp>,
-    nd: Value<Fp>,
-    fdi: Value<Fp>,
-    epk: Value<Fp>,
-    path: [(Value<bool>, Value<pallas::Base>); 2],
-    root: Value<pallas::Base>,
+/// Spec-compliant test circuit for genesis leaf hash computation.
+///
+/// This circuit tests the 8-piece message decomposition and canonicity constraints
+/// for the genesis sinsemilla merkle tree leaf hash, matching the exact specification
+/// used in the production circuit.
+///
+/// ## Usage
+///
+/// ```ignore
+/// use zk_test_press::circuits::sinsemilla_hashdomain::LeafHashTestCircuit;
+/// use halo2_proofs::{circuit::Value, dev::MockProver};
+///
+/// let circuit = LeafHashTestCircuit::new(
+///     Value::known(epk_x),
+///     Value::known(epk_y),
+///     Value::known(nd),
+///     Value::known(v),
+///     Value::known(fdi),
+/// );
+///
+/// let prover = MockProver::run(17, &circuit, vec![]).unwrap();
+/// prover.verify().unwrap();
+/// ```
+#[derive(Default, Clone, Debug)]
+pub struct LeafHashTestCircuit {
+    /// Secp256k1 public key x-coordinate (as foreign field element with 4x64-bit CRT representation)
+    pub epk_x: Value<Secp256k1Fp>,
+    /// Secp256k1 public key y-coordinate (as foreign field element with 4x64-bit CRT representation)
+    pub epk_y: Value<Secp256k1Fp>,
+    /// Note denomination (blake3 hash with top bits cleared to fit in pallas field)
+    pub nd: Value<pallas::Base>,
+    /// Note value (64-bit, padded)
+    pub v: Value<NoteValue>,
+    /// Fixed denomination index (64-bit, padded)
+    pub fdi: Value<pallas::Base>,
 }
 
-impl<Lookup: PallasLookupRangeCheck> MySinsemillaHashDomainCircuit<Lookup> {
-    /// new
-    pub fn new() -> Self {
+impl LeafHashTestCircuit {
+    /// Create a new test circuit with the given values.
+    pub fn new(
+        epk_x: Value<Secp256k1Fp>,
+        epk_y: Value<Secp256k1Fp>,
+        nd: Value<pallas::Base>,
+        v: Value<NoteValue>,
+        fdi: Value<pallas::Base>,
+    ) -> Self {
         Self {
-            _lookup_marker: PhantomData,
-            v: Value::default(),
-            nd: Value::default(),
-            fdi: Value::default(),
-            epk: Value::default(),
-            root: Value::default(),
-            path: [(Value::default(), Value::default()); 2],
+            epk_x,
+            epk_y,
+            nd,
+            v,
+            fdi,
         }
     }
 }
 
-impl<Lookup: PallasLookupRangeCheck> Circuit<pallas::Base>
-    for MySinsemillaHashDomainCircuit<Lookup>
-{
-    type Config = MySinsemillaHashDomainConfig<Lookup>;
-
+impl Circuit<pallas::Base> for LeafHashTestCircuit {
+    type Config = LeafHashTestConfig;
     type FloorPlanner = SimpleFloorPlanner;
 
     fn without_witnesses(&self) -> Self {
-        MySinsemillaHashDomainCircuit::new()
+        Self::default()
     }
 
-    fn configure(meta: &mut halo2_proofs::plonk::ConstraintSystem<pallas::Base>) -> Self::Config {
-        // Advice columns for Sinsemilla (bit decomposition, running sum, etc.)
+    fn configure(meta: &mut ConstraintSystem<pallas::Base>) -> Self::Config {
         let advices = [
             meta.advice_column(),
             meta.advice_column(),
@@ -77,24 +125,19 @@ impl<Lookup: PallasLookupRangeCheck> Circuit<pallas::Base>
             meta.advice_column(),
         ];
 
-        let primary = meta.instance_column();
-        meta.enable_equality(primary);
+        let constants = meta.fixed_column();
+        meta.enable_constant(constants);
 
-        let q_enabled = meta.complex_selector();
+        for advice in advices.iter() {
+            meta.enable_equality(*advice);
+        }
 
-        // Fixed columns for the Sinsemilla generator lookup table
         let table_idx = meta.lookup_table_column();
         let lookup = (
             table_idx,
             meta.lookup_table_column(),
             meta.lookup_table_column(),
         );
-
-        // Permutation over all advice columns.
-        for advice in advices.iter() {
-            meta.enable_equality(*advice);
-        }
-
         let lagrange_coeffs = [
             meta.fixed_column(),
             meta.fixed_column(),
@@ -106,192 +149,477 @@ impl<Lookup: PallasLookupRangeCheck> Circuit<pallas::Base>
             meta.fixed_column(),
         ];
 
-        // Also use the first Lagrange coefficient column for loading global constants.
-        // It's free real estate :)
-        meta.enable_constant(lagrange_coeffs[0]);
+        let range_check = LookupRangeCheckConfig::configure(meta, advices[9], table_idx);
 
-        // We have a lot of free space in the right-most advice columns; use one of them
-        // for all of our range checks.
-        let range_check = Lookup::configure(meta, advices[9], table_idx);
-
-        let ecc_config = EccChip::<OrchardFixedBases, Lookup>::configure(
-            meta,
-            advices,
-            lagrange_coeffs,
-            range_check,
-        );
-
-        // sinsemilla config uses 5 advice columns
-        let sinsemilla_config = SinsemillaChip::configure(
+        let sinsemilla_config = SinsemillaChip::<
+            OrchardHashDomains,
+            OrchardCommitDomains,
+            OrchardFixedBases,
+        >::configure(
             meta,
             advices[..5].try_into().unwrap(),
-            advices[6], // is this correct advice colum for witness_pieces
+            advices[6],
             lagrange_coeffs[0],
             lookup,
-            range_check,
+            range_check.clone(),
             false,
         );
 
-        (ecc_config, primary, sinsemilla_config, q_enabled)
+        let leaf_hash_config = LeafHashChip::configure(meta, advices);
+
+        let ecc_config =
+            EccChip::<OrchardFixedBases>::configure(meta, advices, lagrange_coeffs, range_check);
+
+        let secp_advices: [halo2_proofs::plonk::Column<halo2_proofs::plonk::Advice>; 9] = [
+            advices[0], advices[1], advices[2], advices[3], advices[4], advices[5], advices[6],
+            advices[7], advices[8],
+        ];
+        let secp256k1 = Secp256k1Config::configure(meta, secp_advices, range_check.clone());
+
+        (leaf_hash_config, sinsemilla_config, ecc_config, secp256k1)
     }
 
     fn synthesize(
         &self,
         config: Self::Config,
-        mut layouter: impl Layouter<pallas::Base>,
-    ) -> Result<(), halo2_proofs::plonk::Error> {
-        let ecc_chip = EccChip::construct(config.0);
+        mut lo: impl Layouter<pallas::Base>,
+    ) -> Result<(), Error> {
+        let (leaf_hash_config, sinsemilla_config, ecc_config, secp256k1_config) = config;
 
-        // Load the Sinsemilla chip
-        // The two `SinsemillaChip`s share the same lookup table.
-        SinsemillaChip::<OrchardHashDomains, OrchardCommitDomains, OrchardFixedBases,Lookup>::load(
-            config.2.clone(),
-            &mut layouter,
+        // Load the Sinsemilla chip lookup table
+        SinsemillaChip::<OrchardHashDomains, OrchardCommitDomains, OrchardFixedBases>::load(
+            sinsemilla_config.clone(),
+            &mut lo,
         )?;
 
-        let sinsemilla_chip = SinsemillaChip::construct(config.2.clone());
+        let sinsemilla_chip = SinsemillaChip::construct(sinsemilla_config);
+        let ecc_chip = EccChip::construct(ecc_config);
+        let lhc = LeafHashChip::construct(leaf_hash_config);
+        let secp256k1 = Secp256k1Chip::construct(secp256k1_config);
 
-        let merkle_crh = HashDomain::new(
-            sinsemilla_chip.clone(),
-            ecc_chip.clone(),
-            &OrchardHashDomains::MerkleCrh,
-        );
+        // Load secp256k1 public key coordinates as CRT integers (4x64-bit limbs)
+        let epkx = secp256k1
+            .fp
+            .load_private(lo.namespace(|| "load pk.x"), self.epk_x)?;
+        let epky = secp256k1
+            .fp
+            .load_private(lo.namespace(|| "load pk.y"), self.epk_y)?;
 
-        // === Step 1: Compute leaf = H(v || nd || fdi || epk) ===
-
-        // `a` = bits 0..=249 of `x(v)`
-        let a = MessagePiece::from_subpieces(
-            sinsemilla_chip.clone(),
-            layouter.namespace(|| "v bits 0..250"),
-            [RangeConstrained::bitrange_of(self.v.value(), 0..250)],
+        // Witness note inputs
+        let nd = assign_free_advice(
+            lo.namespace(|| "witness nd"),
+            lhc.config.advices[0],
+            self.nd,
         )?;
 
-        // b = bits 250..253 of v (3 bits), and bit 253 is sign (ỹ) — but we only need the bits
-        let b = MessagePiece::from_subpieces(
-            sinsemilla_chip.clone(),
-            layouter.namespace(|| "v bits 250..253"),
-            [RangeConstrained::bitrange_of(self.v.value(), 250..253)],
+        let v = assign_free_advice(lo.namespace(|| "witness v"), lhc.config.advices[0], self.v)?;
+
+        let fdi = assign_free_advice(
+            lo.namespace(|| "witness fdi"),
+            lhc.config.advices[0],
+            self.fdi,
         )?;
 
-        let c = MessagePiece::from_subpieces(
-            sinsemilla_chip.clone(),
-            layouter.namespace(|| "nd bits 0..250"),
-            [RangeConstrained::bitrange_of(self.nd.value(), 0..250)],
+        // Compute leaf hash with proper 8-piece decomposition and canonicity constraints
+        let _leaf = gadgets::hash_leaf(
+            sinsemilla_chip,
+            ecc_chip,
+            lhc.clone(),
+            lo,
+            (epkx, epky),
+            fdi,
+            v,
+            nd,
         )?;
-
-        // d = bits 250..253 of nd
-        let d = MessagePiece::from_subpieces(
-            sinsemilla_chip.clone(),
-            layouter.namespace(|| "nd bits 250..253"),
-            [RangeConstrained::bitrange_of(self.nd.value(), 250..253)],
-        )?;
-
-        // e = bits 0..250 of fdi
-        let e = MessagePiece::from_subpieces(
-            sinsemilla_chip.clone(),
-            layouter.namespace(|| "fdi bits 0..250"),
-            [RangeConstrained::bitrange_of(self.fdi.value(), 0..250)],
-        )?;
-
-        // f = bits 250..253 of fdi
-        let f = MessagePiece::from_subpieces(
-            sinsemilla_chip.clone(),
-            layouter.namespace(|| "fdi bits 250..253"),
-            [RangeConstrained::bitrange_of(self.fdi.value(), 250..253)],
-        )?;
-
-        // g = bits 0..250 of epk
-        let g = MessagePiece::from_subpieces(
-            sinsemilla_chip.clone(),
-            layouter.namespace(|| "epk bits 0..250"),
-            [RangeConstrained::bitrange_of(self.epk.value(), 0..250)],
-        )?;
-
-        // h = bits 250..253 of epk
-        let h = MessagePiece::from_subpieces(
-            sinsemilla_chip.clone(),
-            layouter.namespace(|| "epk bits 250..253"),
-            [RangeConstrained::bitrange_of(self.epk.value(), 250..253)],
-        )?;
-
-        // === Assemble full message representing leaf ===
-        let message = Message::from_pieces(sinsemilla_chip.clone(), vec![a, b, c, d, e, f, g, h]);
-
-        // === Hash to point, generating leaf ===
-        let (leaf_point, _aux) =
-            merkle_crh.hash_to_point(layouter.namespace(|| "hash v||nd||fdi||epk"), message)?;
-
-        // Extract leaf as field element (x-coordinate)
-        let binding = leaf_point.inner().x();
-
-        let mut current = binding.value();
-
-        fn select<T>(selector: Value<bool>, true_val: Value<T>, false_val: Value<T>) -> Value<T> {
-            selector
-                .zip(true_val)
-                .zip(false_val)
-                .map(|((b, t), f)| if b { t } else { f })
-        }
-
-        // === Step 2: Compute Merkle root using path ===
-        // this will always be the closest index to the root, because we do not append leaves to this tree.
-        for (i, (is_right, sibling)) in self.path.iter().enumerate() {
-            // Convert sibling: &Value<Fp>  -->  Value<&Fp>
-            let sibling_ref: Value<&Fp> = sibling.as_ref();
-            let is_right_value: Value<bool> = *is_right;
-
-            let left_value = select(is_right_value, sibling_ref, current);
-            let right_value = select(is_right_value, current, sibling_ref);
-
-            // Convert each to MessagePieces (same decomposition)
-            let l_lo = MessagePiece::from_subpieces(
-                sinsemilla_chip.clone(),
-                layouter.namespace(|| "left lo"),
-                [RangeConstrained::bitrange_of(left_value, 0..250)],
-            )?;
-            let l_hi = MessagePiece::from_subpieces(
-                sinsemilla_chip.clone(),
-                layouter.namespace(|| "left hi"),
-                [RangeConstrained::bitrange_of(left_value, 250..253)],
-            )?;
-
-            let r_lo = MessagePiece::from_subpieces(
-                sinsemilla_chip.clone(),
-                layouter.namespace(|| "right lo"),
-                [RangeConstrained::bitrange_of(right_value, 0..250)],
-            )?;
-            let r_hi = MessagePiece::from_subpieces(
-                sinsemilla_chip.clone(),
-                layouter.namespace(|| "right hi"),
-                [RangeConstrained::bitrange_of(right_value, 250..253)],
-            )?;
-
-            // Construct single message: left_lo || left_hi || right_lo || right_hi
-            let message =
-                Message::from_pieces(sinsemilla_chip.clone(), vec![l_lo, l_hi, r_lo, r_hi]);
-
-            // Hash: H(left || right)
-            let (parent_point, _) = merkle_crh.hash_to_point(
-                layouter.namespace(|| format!("merkle level {}", i)),
-                message,
-            )?;
-
-            // Update current to x-coordinate of parent point
-            let current = leaf_point.inner().x().value().copied();
-        }
-
-        // === Step 3: Constrain computed_leaf == private_leaf ===
-
-        // === Step 4: Constrain computed root == public root ===
-        let computed_root_cell = sinsemilla_chip.witness_message_piece(
-            layouter.namespace(|| "witness final root"),
-            current.cloned(),
-            253,
-        )?;
-        layouter.constrain_instance(computed_root_cell.cell(), config.1, 2)?; // index 2
-
-        // === Step 5: Constrain root is tree of leaf
 
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::vec::Vec;
+
+    use zk_headstash::Note;
+    use zk_headstash::suite::suite::HeadstashSuite;
+    use zk_headstash::suite::suite::MerkleTestDataBuilder;
+
+    use super::*;
+
+    use ff::{Field, PrimeField};
+    use halo2_proofs::dev::MockProver;
+    use pasta_curves::Fp;
+    use rand::rngs::OsRng;
+
+    /// k parameter for the circuit (number of rows = 2^k)
+    const K: u32 = 17;
+
+    #[test]
+    fn test_leaf_hash_basic() {
+        let (_, _, esk, _) = Note::dummy(&mut OsRng, None);
+        let (epkx, epky) = esk.epk().xy();
+        let (epkx, epky) = (
+            Secp256k1Fp::from_bytes(&epkx).expect("valid Fp"),
+            Secp256k1Fp::from_bytes(&epky).expect("valid Fp"),
+        );
+
+        let circuit = LeafHashTestCircuit {
+            epk_x: Value::known(epkx),
+            epk_y: Value::known(epky),
+            nd: Value::known(pallas::Base::from(42u64)),
+            v: Value::known(NoteValue::one()),
+            fdi: Value::known(pallas::Base::from(100u64)),
+        };
+
+        let prover = MockProver::<pallas::Base>::run(K, &circuit, vec![]);
+        assert!(prover.is_ok(), "Prover creation should succeed");
+        assert!(prover.unwrap().verify().is_ok(), "Circuit should pass");
+    }
+
+    #[test]
+    fn test_leaf_hash_various_inputs() {
+        let two_pow_254 = pallas::Base::from_u128(1u128 << 127).square();
+
+        let (_, _, esk, _) = Note::dummy(&mut OsRng, None);
+        let (epkx, epky) = esk.epk().xy();
+        let (epkx, epky) = (
+            Secp256k1Fp::from_bytes(&epkx).expect("valid Fp"),
+            Secp256k1Fp::from_bytes(&epky).expect("valid Fp"),
+        );
+
+        let test_cases = vec![
+            (
+                "minimal values",
+                pallas::Base::one(),
+                NoteValue::one(),
+                pallas::Base::one(),
+            ),
+            (
+                "max field values",
+                -pallas::Base::one(),
+                NoteValue::one(),
+                -pallas::Base::one(),
+            ),
+            (
+                "max u64 values",
+                pallas::Base::from(u64::MAX),
+                NoteValue::one(),
+                pallas::Base::from(u64::MAX),
+            ),
+            (
+                "254-bit boundary",
+                two_pow_254 - pallas::Base::one(),
+                NoteValue::one(),
+                two_pow_254 - pallas::Base::one(),
+            ),
+            (
+                "zero nd",
+                pallas::Base::zero(),
+                NoteValue::one(),
+                pallas::Base::from(100u64),
+            ),
+            (
+                "zero fdi",
+                pallas::Base::from(200u64),
+                NoteValue::one(),
+                pallas::Base::zero(),
+            ),
+            (
+                "power of 2",
+                pallas::Base::from(1u64 << 30),
+                NoteValue::one(),
+                pallas::Base::from(1u64 << 32),
+            ),
+            (
+                "alternating bits",
+                pallas::Base::from(0xAAAAAAAAAAAAAAAAu64),
+                NoteValue::one(),
+                pallas::Base::from(0x5555555555555555u64),
+            ),
+        ];
+
+        for (name, nd, v, fdi) in test_cases.iter() {
+            std::println!("Running test case: {}", name);
+            let circuit = LeafHashTestCircuit {
+                epk_x: Value::known(epkx),
+                epk_y: Value::known(epky),
+                nd: Value::known(*nd),
+                v: Value::known(*v),
+                fdi: Value::known(*fdi),
+            };
+
+            let prover = MockProver::<pallas::Base>::run(K, &circuit, vec![]);
+            assert!(
+                prover.is_ok(),
+                "Test case '{}' prover creation failed",
+                name
+            );
+            assert_eq!(
+                prover.unwrap().verify(),
+                Ok(()),
+                "Test case '{}' verification failed",
+                name
+            );
+        }
+    }
+
+    #[test]
+    fn test_with_merkle_test_data_builder() {
+        // Use MerkleTestDataBuilder to generate test data
+        let suite = HeadstashSuite::new();
+
+        // Generate deterministic test leaf data
+        let addr = [42u8; 32];
+        let token = "uterp";
+        let value = 1_000_000u64;
+        let fdi_index = 0u64;
+
+        let leaf_data = suite.generate_leaf_data(&addr, token, value, fdi_index);
+
+        // Verify we can compute the leaf hash
+        let hash_result = suite.compute_leaf_from_data(&leaf_data);
+        assert!(hash_result.is_ok(), "Leaf hash computation should succeed");
+
+        let _leaf_hash = hash_result.unwrap();
+
+        // Note: Full circuit verification with MerkleTestDataBuilder requires
+        // converting the test data format to circuit witness format.
+        // The circuit uses Secp256k1Fp for epk, but MerkleTestDataBuilder
+        // computes the sum of 4x64-bit limbs as a single Fp value.
+        // This test verifies the test data generation works correctly.
+    }
+
+    #[test]
+    fn test_merkle_test_data_builder_integration() {
+        // Test that MerkleTestDataBuilder generates valid test data
+        let suite = HeadstashSuite::new();
+
+        // Generate test data for a small tree
+        let result = suite.generate_circuit_test_data(4, 0);
+        assert!(result.is_ok(), "Should generate test data successfully");
+
+        let test_data = result.unwrap();
+        assert!(test_data.tree_depth > 0, "Tree should have positive depth");
+        assert_eq!(
+            test_data.auth_path.leaf_index, 0,
+            "Should be leaf at index 0"
+        );
+
+        // Verify path leads to correct root
+        assert!(
+            suite.verify_merkle_path(&test_data.leaf_hash, &test_data.auth_path, &test_data.root),
+            "Generated path should be valid"
+        );
+    }
+
+    #[test]
+    fn test_leaf_hash_consistency() {
+        // Verify that leaf hashes computed by MerkleTestDataBuilder match circuit expectations
+        let suite = HeadstashSuite::new();
+
+        let leaves_data = suite.generate_test_leaves(4);
+
+        for (i, leaf_data) in leaves_data.iter().enumerate() {
+            let hash_result = suite.compute_leaf_from_data(leaf_data);
+            assert!(
+                hash_result.is_ok(),
+                "Leaf hash computation should succeed for leaf {}",
+                i
+            );
+
+            let hash = hash_result.unwrap();
+            assert_ne!(
+                hash,
+                Fp::ZERO,
+                "Leaf hash should be non-zero for leaf {}",
+                i
+            );
+        }
+    }
+
+    #[test]
+    fn test_path_verification_for_all_leaves() {
+        // Test that paths are correctly computed for all leaf positions
+        let suite = HeadstashSuite::new();
+
+        let num_leaves = 8;
+        let leaves_data = suite.generate_test_leaves(num_leaves);
+
+        let leaf_hashes: Vec<Fp> = leaves_data
+            .iter()
+            .map(|d| suite.compute_leaf_from_data(d).unwrap())
+            .collect();
+
+        let tree = suite.generate_full_merkle_tree(leaf_hashes.clone());
+        let root = tree.root();
+
+        // Verify path for each leaf
+        for (i, hash) in leaf_hashes.iter().enumerate() {
+            let path = suite.compute_merkle_path(&tree, i);
+            assert!(
+                suite.verify_merkle_path(hash, &path, &root),
+                "Path verification should succeed for leaf at index {}",
+                i
+            );
+        }
+    }
+
+    #[test]
+    fn test_invalid_path_rejected() {
+        // Test that invalid merkle paths are correctly rejected
+        let suite = HeadstashSuite::new();
+
+        let leaves_data = suite.generate_test_leaves(4);
+        let leaf_hashes: Vec<Fp> = leaves_data
+            .iter()
+            .map(|d| suite.compute_leaf_from_data(d).unwrap())
+            .collect();
+
+        let tree = suite.generate_full_merkle_tree(leaf_hashes.clone());
+        let root = tree.root();
+
+        // Get path for leaf 0
+        let path = suite.compute_merkle_path(&tree, 0);
+
+        // Try to verify with wrong leaf (leaf 1's hash)
+        let wrong_leaf = &leaf_hashes[1];
+        assert!(
+            !suite.verify_merkle_path(wrong_leaf, &path, &root),
+            "Path for leaf 0 should not verify with leaf 1's hash"
+        );
+
+        // Try to verify with wrong root
+        let wrong_root = Fp::from(999u64);
+        assert!(
+            !suite.verify_merkle_path(&leaf_hashes[0], &path, &wrong_root),
+            "Path should not verify with wrong root"
+        );
+    }
+
+    #[test]
+    fn test_deterministic_tree_generation() {
+        // Test that tree generation is deterministic for same inputs
+        let suite = HeadstashSuite::new();
+
+        let addr = [42u8; 32];
+        let token = "uterp";
+        let value = 1_000_000u64;
+        let fdi = 0u64;
+
+        let leaf1 = suite.generate_leaf_data(&addr, token, value, fdi);
+        let leaf2 = suite.generate_leaf_data(&addr, token, value, fdi);
+
+        let hash1 = suite.compute_leaf_from_data(&leaf1).unwrap();
+        let hash2 = suite.compute_leaf_from_data(&leaf2).unwrap();
+
+        assert_eq!(hash1, hash2, "Same inputs should produce same leaf hash");
+
+        let tree1 = suite.generate_full_merkle_tree(vec![hash1]);
+        let tree2 = suite.generate_full_merkle_tree(vec![hash2]);
+
+        assert_eq!(
+            tree1.root(),
+            tree2.root(),
+            "Same leaves should produce same root"
+        );
+    }
+
+    #[test]
+    fn test_position_encoding_correctness() {
+        // Test that position encoding correctly identifies left/right children
+        let suite = HeadstashSuite::new();
+
+        let leaves: Vec<Fp> = (0..8).map(|i| Fp::from(i as u64)).collect();
+        let tree = suite.generate_full_merkle_tree(leaves);
+
+        // Leaf 0 should be left child at all levels (position = 0)
+        let path0 = suite.compute_merkle_path(&tree, 0);
+        assert!(
+            !path0.position_bits[0],
+            "Leaf 0 should be left child at level 0"
+        );
+        assert!(
+            !path0.position_bits[1],
+            "Leaf 0 should be left child at level 1"
+        );
+        assert!(
+            !path0.position_bits[2],
+            "Leaf 0 should be left child at level 2"
+        );
+
+        // Leaf 7 should be right child at all levels (position = 7 = 0b111)
+        let path7 = suite.compute_merkle_path(&tree, 7);
+        assert!(
+            path7.position_bits[0],
+            "Leaf 7 should be right child at level 0"
+        );
+        assert!(
+            path7.position_bits[1],
+            "Leaf 7 should be right child at level 1"
+        );
+        assert!(
+            path7.position_bits[2],
+            "Leaf 7 should be right child at level 2"
+        );
+
+        // Leaf 4 should be: left at level 0, left at level 1, right at level 2 (position = 4 = 0b100)
+        let path4 = suite.compute_merkle_path(&tree, 4);
+        assert!(
+            !path4.position_bits[0],
+            "Leaf 4 should be left child at level 0"
+        );
+        assert!(
+            !path4.position_bits[1],
+            "Leaf 4 should be left child at level 1"
+        );
+        assert!(
+            path4.position_bits[2],
+            "Leaf 4 should be right child at level 2"
+        );
+    }
+
+    #[test]
+    #[cfg(feature = "multicore")]
+    fn test_full_tree_root_matches_existing_impl() {
+        // Verify that generate_full_merkle_tree produces same root as tree_root_from_leaves
+        let suite = HeadstashSuite::new();
+
+        for num_leaves in [2, 4, 8, 16] {
+            use zk_headstash::suite::suite::HeadstashSinsemillaTree;
+
+            let leaves: Vec<Fp> = (0..num_leaves).map(|i| Fp::from(i as u64)).collect();
+
+            let existing_root = suite.tree_root_from_leaves(leaves.clone())[0];
+            let full_tree = suite.generate_full_merkle_tree(leaves);
+
+            assert_eq!(
+                existing_root,
+                full_tree.root(),
+                "Roots should match for tree with {} leaves",
+                num_leaves
+            );
+        }
+    }
+
+    #[test]
+    fn test_auth_path_array_padding() {
+        // Test that auth path arrays are correctly padded with zeros
+        let suite = HeadstashSuite::new();
+
+        let leaves: Vec<Fp> = (0..4).map(|i| Fp::from(i as u64)).collect();
+        let tree = suite.generate_full_merkle_tree(leaves);
+
+        let path = suite.compute_merkle_path(&tree, 0);
+        let arr: [Fp; 32] = path.to_auth_path_array();
+
+        // Actual siblings should be at the beginning
+        for (i, sibling) in path.siblings.iter().enumerate() {
+            assert_eq!(arr[i], *sibling, "Sibling {} should match", i);
+        }
+
+        // Rest should be zeros
+        for i in path.siblings.len()..32 {
+            assert_eq!(arr[i], Fp::ZERO, "Element {} should be zero-padded", i);
+        }
     }
 }

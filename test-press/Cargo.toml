@@ -28,7 +28,11 @@ name = "gen_randomness"
 required-features = ["interface"]
 
 [features]
+default = ["interface"]
 library = []
+# Enables TerpVmSuite implementations for each test circuit.
+# Requires native (non-wasm) target — pulls in ict-rs (tokio, bollard, etc.).
+interface = ["dep:ict-rs", "dep:cw-headstash", "dep:cw-headstash-manifold", "dep:cw-orch"]
 
 [dependencies]
 base64  = { workspace = true }
@@ -37,14 +41,26 @@ cosmwasm-std  = { workspace = true }
 ff   = { workspace = true }
 halo2-base  = { workspace = true }
 halo2_proofs  = { workspace = true }
+halo2_gadgets = { workspace = true }
 headstash-randomness  = { workspace = true }
 hex  = { workspace = true }
+ict-rs                = { workspace = true, optional = true, features = ["terp"] }
+cw-headstash          = { workspace = true, optional = true, features = ["interface"] }
+cw-headstash-manifold = { workspace = true, optional = true, features = ["interface"] }
+
 pasta_curves = "=0.5.1"
+serde  = { workspace = true }
 rand_core = "0.6"
+schemars = "0.8.22"
 secp256k1  = { workspace = true }
 serde_json  = { workspace = true }
 sinsemilla  = { workspace = true }
 zk-cosmwasm  = { workspace = true }
 zk-headstash  = { workspace = true }
+cw-orch  = { workspace = true, optional = true }
+thiserror = "2.0.18"
+async-trait = "0.1.89"
+group.workspace = true
+rand.workspace = true
 
 [dev-dependencies]

@@ -5,9 +5,15 @@ extern crate alloc;
 #[cfg(feature = "std")]
 extern crate std;
 
-use alloc::vec::Vec;
-
-pub mod suite;
-pub mod unit;
 pub mod circuits;
-pub use suite::{HeadstashSuite};
+pub mod suite;
+pub mod suites;
+pub mod unit;
+
+#[cfg(feature = "interface")]
+pub use suite::TestPressSuite;
+#[cfg(feature = "interface")]
+pub use suites::{
+    headstash::{HeadstashDeployData, HeadstashSuite, ZkDeployError},
+    no_rick::NoRickSuite,
+};
