@@ -1,0 +1,79 @@
+[workspace]
+resolver = "2"
+members = [
+    "circuit",
+    "contract/cw-headstash",
+    "contract/manifold",
+    "test-press",
+    "test-press/src/contracts/no-rick",
+]
+exclude = [
+    # Minimal stub — include when ready
+    "contract/cw-headstash/scripts",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+
+[workspace.dependencies]
+base64     = "0.22"
+bitvec       = "1"
+blake2b_simd = "1"
+blake3       = "1"
+ff           = "0.13"
+fpe          = "0.6"
+group        = "0.13"
+hex        = "0.4"
+memuse      = "0.2"
+num-bigint   = "0.4"
+num-traits   = "0.2"
+pasta_curves = "=0.5.1"
+prost       = "0.14.3"
+rand       = "0.8"
+rayon      = "1"
+reddsa      = "0.5"
+secp256k1    = "0.31"
+serde      = { version = "1", features = ["derive"] }
+serde_json = "1"
+sinsemilla  = "0.1"
+subtle       = "2"
+tonic       = "0.14.4"
+tonic-prost = "0.14"
+zcash_spec  = "0.2"
+zip32       = "0.2"
+
+# ── Utility ───────────────────────────────────────────────────────────────
+anyhow       = "1"
+core2 = "0.3"
+getset      = "0.1"
+lazy_static = "1"
+nonempty    = "0.10"
+proptest    = ">=1.0.0, <1.7.0"
+sha2        = "0.10"
+tracing     = "0.1"
+visibility  = "0.1"
+
+cosmwasm-schema = { git = "https://github.com/permissionlessweb/cosmwasm", branch = "zk-mvp" }
+cosmwasm-std = { git = "https://github.com/permissionlessweb/cosmwasm", branch = "zk-mvp" }
+cw-headstash          = { path = "contract/cw-headstash" }
+cw-headstash-manifold = { path = "contract/manifold" }
+cw-multi-test = { package = "abstract-cw-multi-test", git = "https://github.com/permissionlessweb/cw-multi-test-fork", branch = "zk-mvp" }
+cw-orch = { git = "https://github.com/permissionlessweb/cw-orchestrator", branch = "zk-mvp" }
+cw-ownable = { git = "https://github.com/permissionlessweb/cw-plus-plus", branch = "zk-mvp" }
+cw-storage-plus = { git = "https://github.com/permissionlessweb/cw-storage-plus", branch = "zk-mvp" }
+halo2-base    = { path = "../../../../zcash/halo2-lib/halo2-base" }
+halo2_gadgets = { path = "../../../../zcash/halo2/halo2_gadgets" }
+halo2_proofs  = { path = "../../../../zcash/halo2/halo2_proofs", default-features = false }
+headstash-randomness = { path = "../../public/randomness" }
+
+terp-account = { path = "../../public/terp-account-billboards/packages/terp-account" }
+terp-auth    = { path = "../../public/terp-account-billboards/packages/terp-auth" }
+zk-cosmwasm = { git = "https://github.com/permissionlessweb/cosmwasm", branch = "zk-mvp" }
+zk-headstash = { path = "circuit" }
+zk-test-press = { path = "test-press" }
+
+[patch."https://github.com/permissionlessweb/halo2"]
+halo2_proofs  = { path = "../../../../zcash/halo2/halo2_proofs" }
+halo2_gadgets = { path = "../../../../zcash/halo2/halo2_gadgets" }
+halo2_poseidon = { path = "../../../../zcash/halo2/halo2_poseidon" }

@@ -1,0 +1,1 @@
+dd4c76204e75c945695ce88e565b3c2a41380eba9fa525909fbcc40b5bde7f7e  zk_no_rick.wasm
