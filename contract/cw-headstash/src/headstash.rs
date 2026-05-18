@@ -95,14 +95,6 @@ pub struct HeadstashCoin {
 }
 
 /// Validates nullifiers uniqueness & distribute funds
-pub fn set_verifying_key(deps: DepsMut, env: Env, vk: Binary) -> Result<Response, StdError> {
-    // ensure sender is this contract owner (or this contract)
-    // hash & save vk
-    let mut r: Response = Response::new();
-    Ok(r)
-}
-
-/// Validates nullifiers uniqueness & distribute funds
 pub fn process_headstash(
     deps: DepsMut,
     env: Env,

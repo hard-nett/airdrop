@@ -824,6 +824,7 @@ mod tests {
         let (note_val, note_denom, fdi) = value.into_parts();
 
         assert_eq!(note_val.inner(), 1000);
+        assert_eq!(fdi, 0);
         assert_eq!(note_denom, NoteDenom::new_for_proof("uterp"));
     }
 
@@ -977,27 +978,22 @@ mod tests {
     #[test]
     fn test_nd_to_fp_single_bit_difference() {
         // Small change in input should cause different output
-        let mut bytes1 = [0u8; 32];
         let mut bytes2 = [0u8; 32];
         bytes2[0] = 1; // Only change first byte
-
-        let nd1 = make_note_denom(bytes1);
+        let nd1 = make_note_denom([0u8; 32]);
         let nd2 = make_note_denom(bytes2);
-
         let fp1 = nd_to_fp(&nd1);
         let fp2 = nd_to_fp(&nd2);
-
         assert_ne!(fp1, fp2);
     }
 
     #[test]
     fn test_nd_to_fp_last_byte_matters() {
         // Change in last byte should affect output
-        let mut bytes1 = [0u8; 32];
         let mut bytes2 = [0u8; 32];
         bytes2[31] = 1; // Change last byte
 
-        let nd1 = make_note_denom(bytes1);
+        let nd1 = make_note_denom([0u8; 32]);
         let nd2 = make_note_denom(bytes2);
 
         let fp1 = nd_to_fp(&nd1);

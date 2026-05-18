@@ -28,6 +28,31 @@ use std::{
     vec::Vec,
 };
 
+// ── Input type ────────────────────────────────────────────────────────────────
+
+/// Combined input to the No-Rick circuit.
+///
+/// The `TerpVmSuite::prove` signature takes a single `PublicInputs` value,
+/// so this struct bundles the *private* witness (the word being checked) and
+/// the *public* instance (the forbidden word).
+#[derive(Clone, Debug)]
+pub struct NoRickInputs {
+    /// The private word to prove does not contain the forbidden substring
+    /// (padded internally to 20 bytes).
+    pub private_word: String,
+    /// The public forbidden word (typically `"rick"`).
+    pub forbidden_word: String,
+}
+
+impl NoRickInputs {
+    pub fn new(private_word: impl Into<String>, forbidden_word: impl Into<String>) -> Self {
+        Self {
+            private_word: private_word.into(),
+            forbidden_word: forbidden_word.into(),
+        }
+    }
+}
+
 // ANCHOR: instructions
 trait NumericInstructions<F: PrimeField>: Chip<F> {
     /// Variable representing a number.
@@ -49,13 +74,6 @@ trait NumericInstructions<F: PrimeField>: Chip<F> {
         a: Self::Num,
         b: Self::Num,
     ) -> Result<Self::Num, Error>;
-    /// Exposes a number as a public input to the circuit.
-    fn expose_public(
-        &self,
-        layouter: impl Layouter<F>,
-        num: Self::Num,
-        row: usize,
-    ) -> Result<(), Error>;
 }
 // ANCHOR_END: instructions
 
@@ -269,17 +287,6 @@ impl<F: PrimeField> NumericInstructions<F> for FieldChip<F> {
                     .map(Number)
             },
         )
-    }
-
-    fn expose_public(
-        &self,
-        mut layouter: impl Layouter<F>,
-        num: Self::Num,
-        row: usize,
-    ) -> Result<(), Error> {
-        let config = self.config();
-
-        layouter.constrain_instance(num.0.cell(), config.instance, row)
     }
 }
 // ANCHOR_END: instructions-impl

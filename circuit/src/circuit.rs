@@ -611,6 +611,51 @@ impl VerifyingKey {
         let vk = plonk::keygen_vk(&params, &circuit).unwrap();
         VerifyingKey { params, vk }
     }
+
+    /// Generate a v2 [] (CS-inclusive) for this VK.
+    ///
+    /// The footer encodes constraint-system dimensions needed by the on-chain VM
+    /// to deserialize and verify proofs without the original Rust circuit type.
+    pub fn generate_footer(&self) -> zk_cosmwasm::CircuitFooter {
+        use halo2_proofs::plonk::Circuit as Halo2Circuit;
+
+        // Configure a throwaway CS to extract structural counts.
+        let mut cs = plonk::ConstraintSystem::<pallas::Base>::default();
+        let _ = <Circuit as Halo2Circuit<pallas::Base>>::configure(&mut cs);
+
+        // Serialize params, vk, and cs to measure byte lengths.
+        let mut params_buf = Vec::new();
+        self.params
+            .write(&mut params_buf)
+            .expect("params serialization");
+        let mut vk_buf = Vec::new();
+        self.vk.write(&mut vk_buf).expect("vk serialization");
+        let mut cs_buf = Vec::new();
+        cs.write(&mut cs_buf).expect("cs serialization");
+
+        // Parse num_gates from CS header: bytes [10..12] are u16 LE gate count.
+        let num_gates = if cs_buf.len() >= 12 {
+            u16::from_le_bytes([cs_buf[10], cs_buf[11]]) as u32
+        } else {
+            0
+        };
+
+        zk_cosmwasm::CircuitFooter::new(
+            zk_cosmwasm::CircuitType::Plonkish,
+            6, // instance_count: anchor, nd, v, recp, nf, cmx
+            cs.get_num_fixed_columns(),
+            cs.get_num_advice(),
+            cs.get_num_instance_columns(),
+            cs.degree() as u8,
+            params_buf.len() as u32,
+            vk_buf.len() as u32,
+            cs_buf.len() as u32,
+            cs.get_num_selectors(),
+            num_gates,
+            true, // has_lookups (circuit uses lookup arguments)
+            0,    // crc32 placeholder
+        )
+    }
 }
 
 /// The proving key for the Orchard Action circuit.

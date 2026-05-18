@@ -34,6 +34,7 @@ mod constants;
 #[cfg(feature = "circuit")]
 pub mod circuit;
 
+#[cfg(feature = "circuit")]
 pub mod keys;
 pub mod note;
 // pub mod note_encryption;
@@ -41,12 +42,12 @@ pub mod note;
 pub mod gen;
 pub mod primitives;
 mod spec;
+pub mod suite;
 #[cfg(test)]
 mod test_vectors;
 pub mod tree;
 pub mod value;
 pub mod zip32;
-
 pub use action::Action;
 pub use address::Address;
 // pub use bundle::Bundle;
@@ -56,10 +57,10 @@ pub use constants::{
     OrchardHashDomains, MERKLE_DEPTH_ORCHARD as NOTE_COMMITMENT_TREE_DEPTH,
 };
 pub use note::Note;
-pub use spec::{biguint_to_fe_simple, decompose_biguint_simple, recp_to_fp, to_native_out_of_circuit};
+pub use spec::{
+    biguint_to_fe_simple, decompose_biguint_simple, recp_to_fp, to_native_out_of_circuit,
+};
 pub use tree::Anchor;
-
-pub mod suite;
 
 /// A proof of the validity of an Orchard [`Bundle`].
 ///

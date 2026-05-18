@@ -14,9 +14,6 @@ pub enum ExecuteMsg {
     ProcessHeadstash {
         claims: Vec<HeadstashNote>,
     },
-    LoadVk {
-        vk: Binary,
-    },
     Mint {
         to_address: String,
         amount: Uint128,

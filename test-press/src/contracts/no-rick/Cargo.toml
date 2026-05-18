@@ -1,12 +1,35 @@
 [package]
-name = "no-rick"
+name = "cw-no-rick"
 version = "0.2.0"
 authors = ["A Hardnett"]
 edition = "2024"
 
+[package.metadata.docs.rs]
+targets = ["wasm32-unknown-unknown"]
 
 [lib]
 crate-type = ["cdylib", "rlib"]
+
+[features]
+# use library feature to disable all instantiate/execute/query exports
+default = ["interface"]
+library = []
+interface = []
+
+[dependencies]
+ff = "0.13"
+lol_alloc = "0.4.1"
+pasta_curves = "0.5"
+prost = "0.14"
+rand_core = "0.6"
+thiserror = { version = "2.0.16" }
+
+# for local development
+cosmwasm-schema = { path = "../../../../../cosmwasm/packages/schema" }
+cosmwasm-std = { path = "../../../../../cosmwasm/packages/std", features = ["cosmwasm_1_4", "cosmwasm_3_0", "stargate"] }
+cw-orch = { path = "../../../../../cw-orchestrator/cw-orch" }
+
+[dev-dependencies]
 
 [profile.release]
 opt-level = 3
@@ -18,25 +41,3 @@ codegen-units = 1
 panic = 'abort'
 incremental = false
 overflow-checks = true
-
-[features]
-# use library feature to disable all instantiate/execute/query exports
-library = []
-
-[dependencies]
-thiserror = { version = "2.0.16" }
-pasta_curves = "0.5"
-ff = "0.13"
-lol_alloc = "0.4.1"
-prost = "0.14"
-rand_core = "0.6"
-
-# for local development
-cosmwasm-std = { git = "https://github.com/permissionlessweb/cosmwasm", branch = "zk-mvp", features = ["cosmwasm_1_4", "cosmwasm_3_0", "stargate"] }
-cosmwasm-schema = { git = "https://github.com/permissionlessweb/cosmwasm", branch = "zk-mvp" }
-cw-orch = { git = "https://github.com/permissionlessweb/cw-orchestrator", branch = "zk-mvp" }
-
-[dev-dependencies]
-
-[package.metadata.docs.rs]
-targets = ["wasm32-unknown-unknown"]

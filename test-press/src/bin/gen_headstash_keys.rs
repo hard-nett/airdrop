@@ -1,7 +1,7 @@
 use std::path::Path;
 
-use zk_headstash::suite::{suite::CircuitKeysGenerator, *};
-use zk_test_press::suite::BoxError;
+// use zk_headstash::suite::{suite::CircuitKeysGenerator, *};
+use zk_test_press::BoxError;
 
 /// # create headstash circuit keys
 /// - generates default Headstash [VerifyingKey] and [ProvingKey]

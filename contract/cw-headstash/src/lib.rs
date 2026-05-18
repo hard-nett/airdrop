@@ -150,17 +150,11 @@ pub fn instantiate(
     msg: InstantiateMsg,
 ) -> Result<Response, StdError> {
     // set_contract_version(deps.storage, CONTRACT_NAME, CONTRACT_VERSION)?;
-
-    // Owner is the sender of the initial InstantiateMsg
     cw_ownable::initialize_owner(deps.storage, deps.api, Some(info.sender.as_str()))?;
-
-    // validate initialization params
     msg.wavs.verify()?;
     msg.token_strategy.validate()?;
-
     let ts = msg.token_strategy;
     let c = env.contract.address.clone();
-
     match ts.clone() {
         tokenfactory::TokenStrategy::NewFungible(ref cfg) => {
             // Save config for reply handler to access initial mints
@@ -235,7 +229,6 @@ pub fn execute(
         ExecuteMsg::ProcessHeadstash { claims } => {
             crate::headstash::process_headstash(deps, env, claims)
         }
-        ExecuteMsg::LoadVk { vk } => crate::headstash::set_verifying_key(deps, env, vk),
         ExecuteMsg::Mint { to_address, amount } => {
             execute_mint(deps, env, info, to_address, amount)
         }

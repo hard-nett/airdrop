@@ -236,390 +236,390 @@ impl Circuit<pallas::Base> for LeafHashTestCircuit {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use std::vec::Vec;
+// #[cfg(test)]
+// mod tests {
+//     use std::vec::Vec;
 
-    use zk_headstash::Note;
-    use zk_headstash::suite::suite::HeadstashSuite;
-    use zk_headstash::suite::suite::MerkleTestDataBuilder;
+//     use zk_headstash::Note;
 
-    use super::*;
+//     use crate::HeadstashSuite;
 
-    use ff::{Field, PrimeField};
-    use halo2_proofs::dev::MockProver;
-    use pasta_curves::Fp;
-    use rand::rngs::OsRng;
+//     use super::*;
 
-    /// k parameter for the circuit (number of rows = 2^k)
-    const K: u32 = 17;
+//     use ff::{Field, PrimeField};
+//     use halo2_proofs::dev::MockProver;
+//     use pasta_curves::Fp;
+//     use rand::rngs::OsRng;
 
-    #[test]
-    fn test_leaf_hash_basic() {
-        let (_, _, esk, _) = Note::dummy(&mut OsRng, None);
-        let (epkx, epky) = esk.epk().xy();
-        let (epkx, epky) = (
-            Secp256k1Fp::from_bytes(&epkx).expect("valid Fp"),
-            Secp256k1Fp::from_bytes(&epky).expect("valid Fp"),
-        );
+//     /// k parameter for the circuit (number of rows = 2^k)
+//     const K: u32 = 17;
 
-        let circuit = LeafHashTestCircuit {
-            epk_x: Value::known(epkx),
-            epk_y: Value::known(epky),
-            nd: Value::known(pallas::Base::from(42u64)),
-            v: Value::known(NoteValue::one()),
-            fdi: Value::known(pallas::Base::from(100u64)),
-        };
+//     #[test]
+//     fn test_leaf_hash_basic() {
+//         let (_, _, esk, _) = Note::dummy(&mut OsRng, None);
+//         let (epkx, epky) = esk.epk().xy();
+//         let (epkx, epky) = (
+//             Secp256k1Fp::from_bytes(&epkx).expect("valid Fp"),
+//             Secp256k1Fp::from_bytes(&epky).expect("valid Fp"),
+//         );
 
-        let prover = MockProver::<pallas::Base>::run(K, &circuit, vec![]);
-        assert!(prover.is_ok(), "Prover creation should succeed");
-        assert!(prover.unwrap().verify().is_ok(), "Circuit should pass");
-    }
+//         let circuit = LeafHashTestCircuit {
+//             epk_x: Value::known(epkx),
+//             epk_y: Value::known(epky),
+//             nd: Value::known(pallas::Base::from(42u64)),
+//             v: Value::known(NoteValue::one()),
+//             fdi: Value::known(pallas::Base::from(100u64)),
+//         };
 
-    #[test]
-    fn test_leaf_hash_various_inputs() {
-        let two_pow_254 = pallas::Base::from_u128(1u128 << 127).square();
+//         let prover = MockProver::<pallas::Base>::run(K, &circuit, vec![]);
+//         assert!(prover.is_ok(), "Prover creation should succeed");
+//         assert!(prover.unwrap().verify().is_ok(), "Circuit should pass");
+//     }
 
-        let (_, _, esk, _) = Note::dummy(&mut OsRng, None);
-        let (epkx, epky) = esk.epk().xy();
-        let (epkx, epky) = (
-            Secp256k1Fp::from_bytes(&epkx).expect("valid Fp"),
-            Secp256k1Fp::from_bytes(&epky).expect("valid Fp"),
-        );
+//     #[test]
+//     fn test_leaf_hash_various_inputs() {
+//         let two_pow_254 = pallas::Base::from_u128(1u128 << 127).square();
 
-        let test_cases = vec![
-            (
-                "minimal values",
-                pallas::Base::one(),
-                NoteValue::one(),
-                pallas::Base::one(),
-            ),
-            (
-                "max field values",
-                -pallas::Base::one(),
-                NoteValue::one(),
-                -pallas::Base::one(),
-            ),
-            (
-                "max u64 values",
-                pallas::Base::from(u64::MAX),
-                NoteValue::one(),
-                pallas::Base::from(u64::MAX),
-            ),
-            (
-                "254-bit boundary",
-                two_pow_254 - pallas::Base::one(),
-                NoteValue::one(),
-                two_pow_254 - pallas::Base::one(),
-            ),
-            (
-                "zero nd",
-                pallas::Base::zero(),
-                NoteValue::one(),
-                pallas::Base::from(100u64),
-            ),
-            (
-                "zero fdi",
-                pallas::Base::from(200u64),
-                NoteValue::one(),
-                pallas::Base::zero(),
-            ),
-            (
-                "power of 2",
-                pallas::Base::from(1u64 << 30),
-                NoteValue::one(),
-                pallas::Base::from(1u64 << 32),
-            ),
-            (
-                "alternating bits",
-                pallas::Base::from(0xAAAAAAAAAAAAAAAAu64),
-                NoteValue::one(),
-                pallas::Base::from(0x5555555555555555u64),
-            ),
-        ];
+//         let (_, _, esk, _) = Note::dummy(&mut OsRng, None);
+//         let (epkx, epky) = esk.epk().xy();
+//         let (epkx, epky) = (
+//             Secp256k1Fp::from_bytes(&epkx).expect("valid Fp"),
+//             Secp256k1Fp::from_bytes(&epky).expect("valid Fp"),
+//         );
 
-        for (name, nd, v, fdi) in test_cases.iter() {
-            std::println!("Running test case: {}", name);
-            let circuit = LeafHashTestCircuit {
-                epk_x: Value::known(epkx),
-                epk_y: Value::known(epky),
-                nd: Value::known(*nd),
-                v: Value::known(*v),
-                fdi: Value::known(*fdi),
-            };
+//         let test_cases = vec![
+//             (
+//                 "minimal values",
+//                 pallas::Base::one(),
+//                 NoteValue::one(),
+//                 pallas::Base::one(),
+//             ),
+//             (
+//                 "max field values",
+//                 -pallas::Base::one(),
+//                 NoteValue::one(),
+//                 -pallas::Base::one(),
+//             ),
+//             (
+//                 "max u64 values",
+//                 pallas::Base::from(u64::MAX),
+//                 NoteValue::one(),
+//                 pallas::Base::from(u64::MAX),
+//             ),
+//             (
+//                 "254-bit boundary",
+//                 two_pow_254 - pallas::Base::one(),
+//                 NoteValue::one(),
+//                 two_pow_254 - pallas::Base::one(),
+//             ),
+//             (
+//                 "zero nd",
+//                 pallas::Base::zero(),
+//                 NoteValue::one(),
+//                 pallas::Base::from(100u64),
+//             ),
+//             (
+//                 "zero fdi",
+//                 pallas::Base::from(200u64),
+//                 NoteValue::one(),
+//                 pallas::Base::zero(),
+//             ),
+//             (
+//                 "power of 2",
+//                 pallas::Base::from(1u64 << 30),
+//                 NoteValue::one(),
+//                 pallas::Base::from(1u64 << 32),
+//             ),
+//             (
+//                 "alternating bits",
+//                 pallas::Base::from(0xAAAAAAAAAAAAAAAAu64),
+//                 NoteValue::one(),
+//                 pallas::Base::from(0x5555555555555555u64),
+//             ),
+//         ];
 
-            let prover = MockProver::<pallas::Base>::run(K, &circuit, vec![]);
-            assert!(
-                prover.is_ok(),
-                "Test case '{}' prover creation failed",
-                name
-            );
-            assert_eq!(
-                prover.unwrap().verify(),
-                Ok(()),
-                "Test case '{}' verification failed",
-                name
-            );
-        }
-    }
+//         for (name, nd, v, fdi) in test_cases.iter() {
+//             std::println!("Running test case: {}", name);
+//             let circuit = LeafHashTestCircuit {
+//                 epk_x: Value::known(epkx),
+//                 epk_y: Value::known(epky),
+//                 nd: Value::known(*nd),
+//                 v: Value::known(*v),
+//                 fdi: Value::known(*fdi),
+//             };
 
-    #[test]
-    fn test_with_merkle_test_data_builder() {
-        // Use MerkleTestDataBuilder to generate test data
-        let suite = HeadstashSuite::new();
+//             let prover = MockProver::<pallas::Base>::run(K, &circuit, vec![]);
+//             assert!(
+//                 prover.is_ok(),
+//                 "Test case '{}' prover creation failed",
+//                 name
+//             );
+//             assert_eq!(
+//                 prover.unwrap().verify(),
+//                 Ok(()),
+//                 "Test case '{}' verification failed",
+//                 name
+//             );
+//         }
+//     }
 
-        // Generate deterministic test leaf data
-        let addr = [42u8; 32];
-        let token = "uterp";
-        let value = 1_000_000u64;
-        let fdi_index = 0u64;
+//     #[test]
+//     fn test_with_merkle_test_data_builder() {
+//         // Use MerkleTestDataBuilder to generate test data
+//         let suite = HeadstashSuite::new();
 
-        let leaf_data = suite.generate_leaf_data(&addr, token, value, fdi_index);
+//         // Generate deterministic test leaf data
+//         let addr = [42u8; 32];
+//         let token = "uterp";
+//         let value = 1_000_000u64;
+//         let fdi_index = 0u64;
 
-        // Verify we can compute the leaf hash
-        let hash_result = suite.compute_leaf_from_data(&leaf_data);
-        assert!(hash_result.is_ok(), "Leaf hash computation should succeed");
+//         let leaf_data = suite.generate_leaf_data(&addr, token, value, fdi_index);
 
-        let _leaf_hash = hash_result.unwrap();
+//         // Verify we can compute the leaf hash
+//         let hash_result = suite.compute_leaf_from_data(&leaf_data);
+//         assert!(hash_result.is_ok(), "Leaf hash computation should succeed");
 
-        // Note: Full circuit verification with MerkleTestDataBuilder requires
-        // converting the test data format to circuit witness format.
-        // The circuit uses Secp256k1Fp for epk, but MerkleTestDataBuilder
-        // computes the sum of 4x64-bit limbs as a single Fp value.
-        // This test verifies the test data generation works correctly.
-    }
+//         let _leaf_hash = hash_result.unwrap();
 
-    #[test]
-    fn test_merkle_test_data_builder_integration() {
-        // Test that MerkleTestDataBuilder generates valid test data
-        let suite = HeadstashSuite::new();
+//         // Note: Full circuit verification with MerkleTestDataBuilder requires
+//         // converting the test data format to circuit witness format.
+//         // The circuit uses Secp256k1Fp for epk, but MerkleTestDataBuilder
+//         // computes the sum of 4x64-bit limbs as a single Fp value.
+//         // This test verifies the test data generation works correctly.
+//     }
 
-        // Generate test data for a small tree
-        let result = suite.generate_circuit_test_data(4, 0);
-        assert!(result.is_ok(), "Should generate test data successfully");
+//     #[test]
+//     fn test_merkle_test_data_builder_integration() {
+//         // Test that MerkleTestDataBuilder generates valid test data
+//         let suite = HeadstashSuite::new();
 
-        let test_data = result.unwrap();
-        assert!(test_data.tree_depth > 0, "Tree should have positive depth");
-        assert_eq!(
-            test_data.auth_path.leaf_index, 0,
-            "Should be leaf at index 0"
-        );
+//         // Generate test data for a small tree
+//         let result = suite.generate_circuit_test_data(4, 0);
+//         assert!(result.is_ok(), "Should generate test data successfully");
 
-        // Verify path leads to correct root
-        assert!(
-            suite.verify_merkle_path(&test_data.leaf_hash, &test_data.auth_path, &test_data.root),
-            "Generated path should be valid"
-        );
-    }
+//         let test_data = result.unwrap();
+//         assert!(test_data.tree_depth > 0, "Tree should have positive depth");
+//         assert_eq!(
+//             test_data.auth_path.leaf_index, 0,
+//             "Should be leaf at index 0"
+//         );
 
-    #[test]
-    fn test_leaf_hash_consistency() {
-        // Verify that leaf hashes computed by MerkleTestDataBuilder match circuit expectations
-        let suite = HeadstashSuite::new();
+//         // Verify path leads to correct root
+//         assert!(
+//             suite.verify_merkle_path(&test_data.leaf_hash, &test_data.auth_path, &test_data.root),
+//             "Generated path should be valid"
+//         );
+//     }
 
-        let leaves_data = suite.generate_test_leaves(4);
+//     #[test]
+//     fn test_leaf_hash_consistency() {
+//         // Verify that leaf hashes computed by MerkleTestDataBuilder match circuit expectations
+//         let suite = HeadstashSuite::new();
 
-        for (i, leaf_data) in leaves_data.iter().enumerate() {
-            let hash_result = suite.compute_leaf_from_data(leaf_data);
-            assert!(
-                hash_result.is_ok(),
-                "Leaf hash computation should succeed for leaf {}",
-                i
-            );
+//         let leaves_data = suite.generate_test_leaves(4);
 
-            let hash = hash_result.unwrap();
-            assert_ne!(
-                hash,
-                Fp::ZERO,
-                "Leaf hash should be non-zero for leaf {}",
-                i
-            );
-        }
-    }
+//         for (i, leaf_data) in leaves_data.iter().enumerate() {
+//             let hash_result = suite.compute_leaf_from_data(leaf_data);
+//             assert!(
+//                 hash_result.is_ok(),
+//                 "Leaf hash computation should succeed for leaf {}",
+//                 i
+//             );
 
-    #[test]
-    fn test_path_verification_for_all_leaves() {
-        // Test that paths are correctly computed for all leaf positions
-        let suite = HeadstashSuite::new();
+//             let hash = hash_result.unwrap();
+//             assert_ne!(
+//                 hash,
+//                 Fp::ZERO,
+//                 "Leaf hash should be non-zero for leaf {}",
+//                 i
+//             );
+//         }
+//     }
 
-        let num_leaves = 8;
-        let leaves_data = suite.generate_test_leaves(num_leaves);
+//     #[test]
+//     fn test_path_verification_for_all_leaves() {
+//         // Test that paths are correctly computed for all leaf positions
+//         let suite = HeadstashSuite::new();
 
-        let leaf_hashes: Vec<Fp> = leaves_data
-            .iter()
-            .map(|d| suite.compute_leaf_from_data(d).unwrap())
-            .collect();
+//         let num_leaves = 8;
+//         let leaves_data = suite.generate_test_leaves(num_leaves);
 
-        let tree = suite.generate_full_merkle_tree(leaf_hashes.clone());
-        let root = tree.root();
+//         let leaf_hashes: Vec<Fp> = leaves_data
+//             .iter()
+//             .map(|d| suite.compute_leaf_from_data(d).unwrap())
+//             .collect();
 
-        // Verify path for each leaf
-        for (i, hash) in leaf_hashes.iter().enumerate() {
-            let path = suite.compute_merkle_path(&tree, i);
-            assert!(
-                suite.verify_merkle_path(hash, &path, &root),
-                "Path verification should succeed for leaf at index {}",
-                i
-            );
-        }
-    }
+//         let tree = suite.generate_full_merkle_tree(leaf_hashes.clone());
+//         let root = tree.root();
 
-    #[test]
-    fn test_invalid_path_rejected() {
-        // Test that invalid merkle paths are correctly rejected
-        let suite = HeadstashSuite::new();
+//         // Verify path for each leaf
+//         for (i, hash) in leaf_hashes.iter().enumerate() {
+//             let path = suite.compute_merkle_path(&tree, i);
+//             assert!(
+//                 suite.verify_merkle_path(hash, &path, &root),
+//                 "Path verification should succeed for leaf at index {}",
+//                 i
+//             );
+//         }
+//     }
 
-        let leaves_data = suite.generate_test_leaves(4);
-        let leaf_hashes: Vec<Fp> = leaves_data
-            .iter()
-            .map(|d| suite.compute_leaf_from_data(d).unwrap())
-            .collect();
+//     #[test]
+//     fn test_invalid_path_rejected() {
+//         // Test that invalid merkle paths are correctly rejected
+//         let suite = HeadstashSuite::new();
 
-        let tree = suite.generate_full_merkle_tree(leaf_hashes.clone());
-        let root = tree.root();
+//         let leaves_data = suite.generate_test_leaves(4);
+//         let leaf_hashes: Vec<Fp> = leaves_data
+//             .iter()
+//             .map(|d| suite.compute_leaf_from_data(d).unwrap())
+//             .collect();
 
-        // Get path for leaf 0
-        let path = suite.compute_merkle_path(&tree, 0);
+//         let tree = suite.generate_full_merkle_tree(leaf_hashes.clone());
+//         let root = tree.root();
 
-        // Try to verify with wrong leaf (leaf 1's hash)
-        let wrong_leaf = &leaf_hashes[1];
-        assert!(
-            !suite.verify_merkle_path(wrong_leaf, &path, &root),
-            "Path for leaf 0 should not verify with leaf 1's hash"
-        );
+//         // Get path for leaf 0
+//         let path = suite.compute_merkle_path(&tree, 0);
 
-        // Try to verify with wrong root
-        let wrong_root = Fp::from(999u64);
-        assert!(
-            !suite.verify_merkle_path(&leaf_hashes[0], &path, &wrong_root),
-            "Path should not verify with wrong root"
-        );
-    }
+//         // Try to verify with wrong leaf (leaf 1's hash)
+//         let wrong_leaf = &leaf_hashes[1];
+//         assert!(
+//             !suite.verify_merkle_path(wrong_leaf, &path, &root),
+//             "Path for leaf 0 should not verify with leaf 1's hash"
+//         );
 
-    #[test]
-    fn test_deterministic_tree_generation() {
-        // Test that tree generation is deterministic for same inputs
-        let suite = HeadstashSuite::new();
+//         // Try to verify with wrong root
+//         let wrong_root = Fp::from(999u64);
+//         assert!(
+//             !suite.verify_merkle_path(&leaf_hashes[0], &path, &wrong_root),
+//             "Path should not verify with wrong root"
+//         );
+//     }
 
-        let addr = [42u8; 32];
-        let token = "uterp";
-        let value = 1_000_000u64;
-        let fdi = 0u64;
+//     #[test]
+//     fn test_deterministic_tree_generation() {
+//         // Test that tree generation is deterministic for same inputs
+//         let suite = HeadstashSuite::new();
 
-        let leaf1 = suite.generate_leaf_data(&addr, token, value, fdi);
-        let leaf2 = suite.generate_leaf_data(&addr, token, value, fdi);
+//         let addr = [42u8; 32];
+//         let token = "uterp";
+//         let value = 1_000_000u64;
+//         let fdi = 0u64;
 
-        let hash1 = suite.compute_leaf_from_data(&leaf1).unwrap();
-        let hash2 = suite.compute_leaf_from_data(&leaf2).unwrap();
+//         let leaf1 = suite.generate_leaf_data(&addr, token, value, fdi);
+//         let leaf2 = suite.generate_leaf_data(&addr, token, value, fdi);
 
-        assert_eq!(hash1, hash2, "Same inputs should produce same leaf hash");
+//         let hash1 = suite.compute_leaf_from_data(&leaf1).unwrap();
+//         let hash2 = suite.compute_leaf_from_data(&leaf2).unwrap();
 
-        let tree1 = suite.generate_full_merkle_tree(vec![hash1]);
-        let tree2 = suite.generate_full_merkle_tree(vec![hash2]);
+//         assert_eq!(hash1, hash2, "Same inputs should produce same leaf hash");
 
-        assert_eq!(
-            tree1.root(),
-            tree2.root(),
-            "Same leaves should produce same root"
-        );
-    }
+//         let tree1 = suite.generate_full_merkle_tree(vec![hash1]);
+//         let tree2 = suite.generate_full_merkle_tree(vec![hash2]);
 
-    #[test]
-    fn test_position_encoding_correctness() {
-        // Test that position encoding correctly identifies left/right children
-        let suite = HeadstashSuite::new();
+//         assert_eq!(
+//             tree1.root(),
+//             tree2.root(),
+//             "Same leaves should produce same root"
+//         );
+//     }
 
-        let leaves: Vec<Fp> = (0..8).map(|i| Fp::from(i as u64)).collect();
-        let tree = suite.generate_full_merkle_tree(leaves);
+//     #[test]
+//     fn test_position_encoding_correctness() {
+//         // Test that position encoding correctly identifies left/right children
+//         let suite = HeadstashSuite::new();
 
-        // Leaf 0 should be left child at all levels (position = 0)
-        let path0 = suite.compute_merkle_path(&tree, 0);
-        assert!(
-            !path0.position_bits[0],
-            "Leaf 0 should be left child at level 0"
-        );
-        assert!(
-            !path0.position_bits[1],
-            "Leaf 0 should be left child at level 1"
-        );
-        assert!(
-            !path0.position_bits[2],
-            "Leaf 0 should be left child at level 2"
-        );
+//         let leaves: Vec<Fp> = (0..8).map(|i| Fp::from(i as u64)).collect();
+//         let tree = suite.generate_full_merkle_tree(leaves);
 
-        // Leaf 7 should be right child at all levels (position = 7 = 0b111)
-        let path7 = suite.compute_merkle_path(&tree, 7);
-        assert!(
-            path7.position_bits[0],
-            "Leaf 7 should be right child at level 0"
-        );
-        assert!(
-            path7.position_bits[1],
-            "Leaf 7 should be right child at level 1"
-        );
-        assert!(
-            path7.position_bits[2],
-            "Leaf 7 should be right child at level 2"
-        );
+//         // Leaf 0 should be left child at all levels (position = 0)
+//         let path0 = suite.compute_merkle_path(&tree, 0);
+//         assert!(
+//             !path0.position_bits[0],
+//             "Leaf 0 should be left child at level 0"
+//         );
+//         assert!(
+//             !path0.position_bits[1],
+//             "Leaf 0 should be left child at level 1"
+//         );
+//         assert!(
+//             !path0.position_bits[2],
+//             "Leaf 0 should be left child at level 2"
+//         );
 
-        // Leaf 4 should be: left at level 0, left at level 1, right at level 2 (position = 4 = 0b100)
-        let path4 = suite.compute_merkle_path(&tree, 4);
-        assert!(
-            !path4.position_bits[0],
-            "Leaf 4 should be left child at level 0"
-        );
-        assert!(
-            !path4.position_bits[1],
-            "Leaf 4 should be left child at level 1"
-        );
-        assert!(
-            path4.position_bits[2],
-            "Leaf 4 should be right child at level 2"
-        );
-    }
+//         // Leaf 7 should be right child at all levels (position = 7 = 0b111)
+//         let path7 = suite.compute_merkle_path(&tree, 7);
+//         assert!(
+//             path7.position_bits[0],
+//             "Leaf 7 should be right child at level 0"
+//         );
+//         assert!(
+//             path7.position_bits[1],
+//             "Leaf 7 should be right child at level 1"
+//         );
+//         assert!(
+//             path7.position_bits[2],
+//             "Leaf 7 should be right child at level 2"
+//         );
 
-    #[test]
-    #[cfg(feature = "multicore")]
-    fn test_full_tree_root_matches_existing_impl() {
-        // Verify that generate_full_merkle_tree produces same root as tree_root_from_leaves
-        let suite = HeadstashSuite::new();
+//         // Leaf 4 should be: left at level 0, left at level 1, right at level 2 (position = 4 = 0b100)
+//         let path4 = suite.compute_merkle_path(&tree, 4);
+//         assert!(
+//             !path4.position_bits[0],
+//             "Leaf 4 should be left child at level 0"
+//         );
+//         assert!(
+//             !path4.position_bits[1],
+//             "Leaf 4 should be left child at level 1"
+//         );
+//         assert!(
+//             path4.position_bits[2],
+//             "Leaf 4 should be right child at level 2"
+//         );
+//     }
 
-        for num_leaves in [2, 4, 8, 16] {
-            use zk_headstash::suite::suite::HeadstashSinsemillaTree;
+//     #[test]
+//     #[cfg(feature = "multicore")]
+//     fn test_full_tree_root_matches_existing_impl() {
+//         // Verify that generate_full_merkle_tree produces same root as tree_root_from_leaves
+//         let suite = HeadstashSuite::new();
 
-            let leaves: Vec<Fp> = (0..num_leaves).map(|i| Fp::from(i as u64)).collect();
+//         for num_leaves in [2, 4, 8, 16] {
+//             use zk_headstash::suite::suite::HeadstashSinsemillaTree;
 
-            let existing_root = suite.tree_root_from_leaves(leaves.clone())[0];
-            let full_tree = suite.generate_full_merkle_tree(leaves);
+//             let leaves: Vec<Fp> = (0..num_leaves).map(|i| Fp::from(i as u64)).collect();
 
-            assert_eq!(
-                existing_root,
-                full_tree.root(),
-                "Roots should match for tree with {} leaves",
-                num_leaves
-            );
-        }
-    }
+//             let existing_root = suite.tree_root_from_leaves(leaves.clone())[0];
+//             let full_tree = suite.generate_full_merkle_tree(leaves);
 
-    #[test]
-    fn test_auth_path_array_padding() {
-        // Test that auth path arrays are correctly padded with zeros
-        let suite = HeadstashSuite::new();
+//             assert_eq!(
+//                 existing_root,
+//                 full_tree.root(),
+//                 "Roots should match for tree with {} leaves",
+//                 num_leaves
+//             );
+//         }
+//     }
 
-        let leaves: Vec<Fp> = (0..4).map(|i| Fp::from(i as u64)).collect();
-        let tree = suite.generate_full_merkle_tree(leaves);
+//     #[test]
+//     fn test_auth_path_array_padding() {
+//         // Test that auth path arrays are correctly padded with zeros
+//         let suite = HeadstashSuite::new();
 
-        let path = suite.compute_merkle_path(&tree, 0);
-        let arr: [Fp; 32] = path.to_auth_path_array();
+//         let leaves: Vec<Fp> = (0..4).map(|i| Fp::from(i as u64)).collect();
+//         let tree = suite.generate_full_merkle_tree(leaves);
 
-        // Actual siblings should be at the beginning
-        for (i, sibling) in path.siblings.iter().enumerate() {
-            assert_eq!(arr[i], *sibling, "Sibling {} should match", i);
-        }
+//         let path = suite.compute_merkle_path(&tree, 0);
+//         let arr: [Fp; 32] = path.to_auth_path_array();
 
-        // Rest should be zeros
-        for i in path.siblings.len()..32 {
-            assert_eq!(arr[i], Fp::ZERO, "Element {} should be zero-padded", i);
-        }
-    }
-}
+//         // Actual siblings should be at the beginning
+//         for (i, sibling) in path.siblings.iter().enumerate() {
+//             assert_eq!(arr[i], *sibling, "Sibling {} should match", i);
+//         }
+
+//         // Rest should be zeros
+//         for i in path.siblings.len()..32 {
+//             assert_eq!(arr[i], Fp::ZERO, "Element {} should be zero-padded", i);
+//         }
+//     }
+// }

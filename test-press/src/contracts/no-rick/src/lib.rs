@@ -1,7 +1,9 @@
 extern crate alloc;
 
-// #[cfg(feature = "interface")]
+#[cfg(feature = "interface")]
 pub mod interface;
+#[cfg(feature = "interface")]
+pub use interface::NoRickContractSuite;
 
 // ── Circuit bridge primitives ────────────────────────────────────────────────
 // These types are the contract between zk-cosmwasm circuits and the CosmWasm
@@ -128,15 +130,15 @@ pub mod example_circuits {
 
 // ────────────────────────────────────────────────────────────────────────────
 
-#[cfg(target_arch = "wasm32")]
-use lol_alloc::{AssumeSingleThreaded, FreeListAllocator};
-// SAFETY: This application is single threaded, so using AssumeSingleThreaded is allowed.
-#[cfg(target_arch = "wasm32")]
-#[global_allocator]
-static ALLOCATOR: AssumeSingleThreaded<FreeListAllocator> =
-    unsafe { AssumeSingleThreaded::new(FreeListAllocator::new()) };
+// #[cfg(target_arch = "wasm32")]
+// use lol_alloc::{AssumeSingleThreaded, FreeListAllocator};
+// // SAFETY: This application is single threaded, so using AssumeSingleThreaded is allowed.
+// #[cfg(target_arch = "wasm32")]
+// #[global_allocator]
+// static ALLOCATOR: AssumeSingleThreaded<FreeListAllocator> =
+//     unsafe { AssumeSingleThreaded::new(FreeListAllocator::new()) };
 
-use cosmwasm_schema::{cw_serde, QueryResponses};
+use cosmwasm_schema::{QueryResponses, cw_serde};
 #[cfg(not(feature = "library"))]
 use cosmwasm_std::entry_point;
 use cosmwasm_std::{
@@ -144,7 +146,7 @@ use cosmwasm_std::{
     StdResult, VerificationError,
 };
 use ff::PrimeField;
-use pasta_curves::{vesta, Fp};
+use pasta_curves::{Fp, vesta};
 use prost::Message as _;
 use thiserror::Error;
 
@@ -199,9 +201,6 @@ pub struct Config {
     /// words we are prooving a privte instance does not contain
     pub words: Vec<String>,
 }
-
-const CONTRACT_NAME: &str = "crates.io:cw-cadence";
-const CONTRACT_VERSION: &str = env!("CARGO_PKG_VERSION");
 
 #[cw_serde]
 pub struct InstantiateMsg {}

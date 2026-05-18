@@ -5,16 +5,10 @@
 pub mod no_rick;
 pub mod sinsemilla_hashdomain;
 
-pub use no_rick::{
-    NoRickCircuit, NoRickInstance, Proof as NoRickProof, ProvingKey as NoRickProvingKey,
-    VerifyingKey as NoRickVerifyingKey,
-};
-
 #[cfg(test)]
 mod tests {
-    // use zk_headstash::suite::suite::HeadstashSuite;
 
-    use super::super::suite::*;
+    use crate::BoxError;
     use std::path::PathBuf;
 
     #[test]

@@ -32,7 +32,7 @@ default = ["interface"]
 library = []
 # Enables TerpVmSuite implementations for each test circuit.
 # Requires native (non-wasm) target — pulls in ict-rs (tokio, bollard, etc.).
-interface = ["dep:ict-rs", "dep:cw-headstash", "dep:cw-headstash-manifold", "dep:cw-orch"]
+interface = ["dep:ict-rs", "dep:cw-headstash", "dep:cw-headstash-manifold", "dep:cw-orch", "dep:cw-no-rick"]
 
 [dependencies]
 base64  = { workspace = true }
@@ -45,6 +45,7 @@ halo2_gadgets = { workspace = true }
 headstash-randomness  = { workspace = true }
 hex  = { workspace = true }
 ict-rs                = { workspace = true, optional = true, features = ["terp"] }
+cw-no-rick          = { workspace = true, optional = true, features = ["interface"] }
 cw-headstash          = { workspace = true, optional = true, features = ["interface"] }
 cw-headstash-manifold = { workspace = true, optional = true, features = ["interface"] }
 

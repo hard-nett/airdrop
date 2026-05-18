@@ -1,7 +1,6 @@
 //! Helper functions defined in the Zcash Protocol Specification.
 
-use core::iter;
-use core::ops::Deref;
+use core::{iter, ops::Deref};
 use std::vec::Vec;
 
 use ff::{Field, FromUniformBytes, PrimeField, PrimeFieldBits};
@@ -331,11 +330,9 @@ pub(crate) fn esk_to_base(esk: &crate::keys::EligibleSk) -> pallas::Base {
     // Convert secp256k1 Fq to pallas::Base via modular reduction.
     // This matches the .native value from the CrtInteger representation.
     let big = num_bigint::BigUint::from_bytes_le(
-        &halo2_base::halo2_proofs::halo2curves::secq256k1::Fp::from_repr(
-            esk.secret_bytes(),
-        )
-        .expect("valid Fq")
-        .to_repr(),
+        &halo2_base::halo2_proofs::halo2curves::secq256k1::Fp::from_repr(esk.secret_bytes())
+            .expect("valid Fq")
+            .to_repr(),
     );
     biguint_to_fe_simple(&big)
 }
