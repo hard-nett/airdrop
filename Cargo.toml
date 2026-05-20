@@ -54,26 +54,27 @@ sha2        = "0.10"
 tracing     = "0.1"
 visibility  = "0.1"
 
-cosmwasm-schema = { git = "https://github.com/permissionlessweb/cosmwasm", branch = "zk-mvp" }
-cosmwasm-std = { git = "https://github.com/permissionlessweb/cosmwasm", branch = "zk-mvp" }
+cosmwasm-schema = { path = "../cosmwasm/packages/schema" }
+cosmwasm-std = { path = "../cosmwasm/packages/std" }
 cw-headstash          = { path = "contract/cw-headstash" }
 cw-headstash-manifold = { path = "contract/manifold" }
-cw-multi-test = { package = "abstract-cw-multi-test", git = "https://github.com/permissionlessweb/cw-multi-test-fork", branch = "zk-mvp" }
-cw-orch = { git = "https://github.com/permissionlessweb/cw-orchestrator", branch = "zk-mvp" }
-cw-ownable = { git = "https://github.com/permissionlessweb/cw-plus-plus", branch = "zk-mvp" }
-cw-storage-plus = { git = "https://github.com/permissionlessweb/cw-storage-plus", branch = "zk-mvp" }
-halo2-base    = { path = "../../../../zcash/halo2-lib/halo2-base" }
-halo2_gadgets = { path = "../../../../zcash/halo2/halo2_gadgets" }
-halo2_proofs  = { path = "../../../../zcash/halo2/halo2_proofs", default-features = false }
-headstash-randomness = { path = "../../public/randomness" }
-ict-rs = { path = "../../public/ict-rs/ict-rs" }
-terp-account = { path = "../../public/terp-account-billboards/packages/terp-account" }
-terp-auth    = { path = "../../public/terp-account-billboards/packages/terp-auth" }
-zk-cosmwasm = { git = "https://github.com/permissionlessweb/cosmwasm", branch = "zk-mvp" }
+cw-multi-test = { package = "abstract-cw-multi-test", path = "../cw-multi-test-fork" }
+cw-orch = { path = "../cw-orchestrator/cw-orch" }
+cw-ownable = { path = "../cw-plus-plus/packages/ownable" }
+cw-storage-plus = { path = "../cw-storage-plus" }
+halo2-base    = { path = "../zcash/halo2-lib/halo2-base" }
+halo2_gadgets = { path = "../zcash/halo2/halo2_gadgets" }
+halo2_proofs = { path = "../zcash/halo2/halo2_proofs", default-features = false, features = ["batch"] }
+headstash-randomness = { path = "../terp-rs/crates/public/randomness" }
+ict-rs = { path = "../ict-rs/ict-rs" }
+cw-no-rick = { path = "./test-press/src/contracts/no-rick", features = ["interface"] }
+terp-account = { path = "../terp-account-billboards/packages/terp-account" }
+terp-auth    = { path = "../terp-account-billboards/packages/terp-auth" }
+zk-cosmwasm = { path = "../cosmwasm/packages/zk" }
 zk-headstash = { path = "circuit" }
 zk-test-press = { path = "test-press" }
 
 [patch."https://github.com/permissionlessweb/halo2"]
-halo2_proofs  = { path = "../../../../zcash/halo2/halo2_proofs" }
-halo2_gadgets = { path = "../../../../zcash/halo2/halo2_gadgets" }
-halo2_poseidon = { path = "../../../../zcash/halo2/halo2_poseidon" }
+halo2_proofs  = { path = "../zcash/halo2/halo2_proofs" }
+halo2_gadgets = { path = "../zcash/halo2/halo2_gadgets" }
+halo2_poseidon = { path = "../zcash/halo2/halo2_poseidon" }

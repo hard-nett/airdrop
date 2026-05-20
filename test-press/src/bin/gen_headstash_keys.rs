@@ -1,6 +1,7 @@
 use std::path::Path;
 
-// use zk_headstash::suite::{suite::CircuitKeysGenerator, *};
+use zk_headstash::suite::HeadstashSuite;
+use zk_headstash::suite::{suite::CircuitKeysGenerator, *};
 use zk_test_press::BoxError;
 
 /// # create headstash circuit keys

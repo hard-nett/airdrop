@@ -19,4 +19,21 @@ impl<Chain: CwEnv> Uploadable for NoRickContractSuite<Chain> {
     }
 }
 
+impl<Chain: CwEnv> Deploy<Chain> for NoRickContractSuite<Chain> {
+    type Error = CwOrchError;
+    type DeployData = NoRickDeployData;
+
+    fn store_on(chain: Chain) -> Result<Self, Self::Error> {
+        todo!()
+    }
+
+    fn get_contracts_mut(&mut self) -> Vec<Box<&mut dyn ContractInstance<Chain>>> {
+        todo!()
+    }
+
+    fn load_from(chain: Chain) -> Result<Self, Self::Error> {
+        todo!()
+    }
+}
+#[derive(Clone, Debug)]
 pub struct NoRickDeployData {}

@@ -670,7 +670,6 @@ impl ProvingKey {
     pub fn build() -> Self {
         let params = halo2_proofs::poly::commitment::Params::new(K);
         let circuit: Circuit = Default::default();
-
         let vk = plonk::keygen_vk(&params, &circuit).unwrap();
         let pk = plonk::keygen_pk(&params, vk, &circuit).unwrap();
 

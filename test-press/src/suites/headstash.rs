@@ -17,7 +17,7 @@ use std::marker::PhantomData;
 use std::path::{Path, PathBuf};
 
 use async_trait::async_trait;
-use cw_orch::contract::circuits::circuit_interface_traits::CircuitUploadable;
+use cw_orch::{anyhow, contract::circuits::circuit_interface_traits::CircuitUploadable};
 use halo2_proofs::{COSMWASM_METADATA_LENGTH, plonk};
 use ict_rs::chain::Chain as _;
 use ict_rs::chain::cosmos::CosmosChain;
@@ -36,20 +36,19 @@ use zk_headstash::{
 };
 
 use base64::Engine as _;
+use std::string::String;
 
 use cw_headstash::interface::HeadstashContract;
 use cw_headstash_manifold::interface::CwHeadstashManifold;
 use cw_headstash_manifold::msg::{ExecuteMsgFns, InstantiateMsg as ManifoldInstantiateMsg};
 use cw_orch::prelude::*;
-use std::string::String;
 
 use cosmwasm_std::{Addr, Binary};
 use cw_headstash::tokenfactory::{HeadstashTokenObject, TokenStrategy};
 use cw_headstash::wavs::{WavsAuthMetadata, WavsProofOfOwnership};
-use cw_orch::anyhow;
 
-use crate::suite::ZkDeployError;
-use crate::suites::interface::HeadstashCircuitSuite;
+#[cw_orch::circuit_interface(id = "headstash")]
+pub struct HeadstashCircuitSuite;
 
 /// ZK headstash deployment suite: cw-headstash contract + manifold factory.
 ///
@@ -61,9 +60,69 @@ pub struct HeadstashSuite<Chain: ZkCwEnv> {
     pub circuit: HeadstashCircuitSuite<Chain>,
 }
 
-impl<Chain: ZkCwEnv + CircuitUploadable> HeadstashSuite<Chain> {}
+impl<Chain: ZkCwEnv> HeadstashSuite<Chain> {
+    pub fn new(chain: Chain) -> Self {
+        let circuit = HeadstashCircuitSuite::new(chain.clone());
+        let manifold = CwHeadstashManifold::new(chain.clone());
+        let headstash = HeadstashContract::new(chain.clone());
+        Self {
+            headstash,
+            manifold,
+            circuit,
+        }
+    }
+}
+
+impl<Chain: ZkCwEnv + cw_orch::prelude::CircuitUploadable> Deploy<Chain> for HeadstashSuite<Chain> {
+    type Error = CwOrchError;
+    type DeployData = HeadstashDeployData;
+
+    fn store_on(chain: Chain) -> Result<Self, Self::Error> {
+        let suite = HeadstashSuite::new(chain.clone());
+        suite.circuit.upload_circuit()?;
+        suite.manifold.upload()?;
+        suite.headstash.upload()?;
+        Ok(suite)
+    }
+
+    fn get_contracts_mut(&mut self) -> Vec<Box<&mut dyn ContractInstance<Chain>>> {
+        todo!()
+    }
+
+    fn load_from(chain: Chain) -> Result<Self, Self::Error> {
+        todo!()
+    }
+
+    fn deploy_on(chain: Chain, data: Self::DeployData) -> Result<Self, Self::Error> {
+        let circuit = HeadstashCircuitSuite::new(chain.clone());
+        let manifold = CwHeadstashManifold::new(chain.clone());
+        let headstash = HeadstashContract::new(chain.clone());
+
+        circuit.upload_circuit()?;
+        manifold.upload()?;
+        headstash.upload()?;
+
+        let headstash_code_id = headstash.code_id()?;
+        manifold.instantiate(
+            &ManifoldInstantiateMsg {
+                owner: data.owner,
+                headstash_code_id,
+            },
+            None,
+            &[],
+        )?;
+        headstash.instantiate(&data.headstash_init, None, &[])?;
+
+        Ok(Self {
+            headstash,
+            manifold,
+            circuit,
+        })
+    }
+}
 
 /// Deploy configuration for the ZK headstash system.
+#[derive(Clone, Debug)]
 pub struct HeadstashDeployData {
     /// Owner address for the manifold factory.
     pub owner: Option<String>,
@@ -101,90 +160,6 @@ impl HeadstashDeployData {
                 },
             },
         })
-    }
-}
-
-impl<Chain: ZkCwEnv> HeadstashSuite<Chain> {
-    pub fn deploy_on(chain: Chain, data: HeadstashDeployData) -> Result<Self, CwOrchError> {
-        let manifold = CwHeadstashManifold::new(chain.clone());
-        let headstash = HeadstashContract::new(chain.clone());
-        let circuit = HeadstashCircuitSuite::new(chain.clone());
-
-        manifold.upload()?;
-        headstash.upload()?;
-        circuit.upload_circuit()?;
-
-        let headstash_code_id = headstash.code_id()?;
-        let circuit_id = circuit.zk_id()?;
-
-        manifold.instantiate(
-            &cw_headstash_manifold::msg::InstantiateMsg {
-                owner: data.owner.clone(),
-                headstash_code_id,
-            },
-            None,
-            &[],
-        )?;
-        headstash.instantiate(&data.headstash_init, None, &[])?;
-        manifold.create_headstash(data.headstash_init, None, Some("terp-headstash".into()))?;
-
-        Ok(Self {
-            headstash,
-            manifold,
-            circuit,
-        })
-    }
-
-    // TODO: remove and replace for ZkTxHandler & CircuitUploadable trait implementations
-    pub async fn store_circuit_binary(
-        ict_chain: &CosmosChain,
-        circuit_path: &std::path::Path,
-        signer_key: &str,
-    ) -> Result<u64, ZkDeployError> {
-        let circuit_bytes = std::fs::read(circuit_path)?;
-        let circuit_b64 = base64::engine::general_purpose::STANDARD.encode(&circuit_bytes);
-        let remote_path = "/tmp/circuit.bin";
-
-        ict_chain
-            .chain_exec(&[
-                "sh",
-                "-c",
-                &format!("echo '{}' | base64 -d > {}", circuit_b64, remote_path),
-            ])
-            .await
-            .map_err(|e| ZkDeployError::Other(format!("copy circuit binary: {e}")))?;
-
-        let out = ict_chain
-            .chain_exec(&[
-                "terpd",
-                "tx",
-                "wasm",
-                "store-circuit",
-                remote_path,
-                "--from",
-                signer_key,
-                "--gas",
-                "auto",
-                "--gas-adjustment",
-                "1.5",
-                "--output",
-                "json",
-                "-y",
-            ])
-            .await
-            .map_err(|e| ZkDeployError::Other(format!("store circuit: {e}")))?;
-
-        let json: serde_json::Value = serde_json::from_slice(&out.stdout)?;
-        let circuit_id = json
-            .pointer("/logs/0/events/0/attributes/0/value")
-            .or_else(|| json.get("circuit_id"))
-            .and_then(|v| v.as_str())
-            .and_then(|s| s.parse::<u64>().ok())
-            .ok_or_else(|| {
-                ZkDeployError::Other("could not parse circuit_id from tx response".into())
-            })?;
-
-        Ok(circuit_id)
     }
 }
 

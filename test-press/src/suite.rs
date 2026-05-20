@@ -21,6 +21,7 @@ pub enum ZkDeployError {
 }
 
 /// Deploy configuration for the ZK headstash system.
+#[derive(Clone)]
 pub struct TestPressDeployData {
     pub no_rick: NoRickDeployData,
     pub headstash: HeadstashDeployData,
@@ -30,8 +31,7 @@ impl TestPressDeployData {
     pub fn local_default(admin: Addr, genesis_root: &[u8], keys_dir: std::path::PathBuf) -> Self {
         Self {
             no_rick: NoRickDeployData {},
-            headstash: HeadstashDeployData::local_default(admin, genesis_root )
-                .expect("oooooohhh"),
+            headstash: HeadstashDeployData::local_default(admin, genesis_root).expect("oooooohhh"),
         }
     }
 }
@@ -60,7 +60,7 @@ impl TestPressDeployData {
 pub struct TestPressSuite<Chain: ZkCwEnv> {
     /// No-Rick circuit: key management, prove, verify, on-chain deploy.
     #[cfg(feature = "interface")]
-    pub no_rick: crate::suites::no_rick::NoRickSuite<Chain>,
+    pub no_rick: crate::suites::no_rick::interface::NoRickSuite<Chain>,
     /// Headstash Orchard circuit: production spend-proof circuit.
     #[cfg(feature = "interface")]
     pub headstash: crate::suites::headstash::HeadstashSuite<Chain>,
@@ -72,12 +72,64 @@ pub struct TestPressSuite<Chain: ZkCwEnv> {
     // zk-tls
 }
 
+// ── TestPressSuite constructors & Deploy ──────────────────────────────────────
+
+#[cfg(feature = "interface")]
+impl<Chain: ZkCwEnv + cw_orch::prelude::CircuitUploadable> TestPressSuite<Chain> {
+    /// Build an un-deployed suite from a chain handle.
+    pub fn new(chain: Chain) -> Self
+    where
+        Chain: Clone,
+    {
+        Self {
+            no_rick: crate::suites::no_rick::interface::NoRickSuite::new(chain.clone()),
+            headstash: crate::suites::headstash::HeadstashSuite::new(chain),
+        }
+    }
+}
+
+#[cfg(feature = "interface")]
+impl<Chain> cw_orch::prelude::Deploy<Chain> for TestPressSuite<Chain>
+where
+    Chain: ZkCwEnv,
+    cw_orch::prelude::CwOrchError: From<cw_orch::core::CwEnvError>,
+{
+    type DeployData = TestPressDeployData;
+    type Error = ZkDeployError;
+
+    fn deploy_on(chain: Chain, data: Self::DeployData) -> Result<Self, Self::Error> {
+        let no_rick = crate::suites::no_rick::interface::NoRickSuite::new(chain.clone());
+        let headstash = crate::suites::headstash::HeadstashSuite::new(chain.clone());
+
+        // Upload circuits — call on the .circuit field which implements CwOrchCircuitUpload
+        use cw_orch::prelude::CwOrchCircuitUpload;
+        no_rick
+            .circuit
+            .upload_circuit()
+            .map_err(ZkDeployError::CwEnv)?;
+        headstash
+            .circuit
+            .upload_circuit()
+            .map_err(ZkDeployError::CwEnv)?;
+
+        Ok(Self { no_rick, headstash })
+    }
+
+    fn store_on(chain: Chain) -> Result<Self, Self::Error> {
+        todo!()
+    }
+
+    fn get_contracts_mut(
+        &mut self,
+    ) -> Vec<Box<&mut dyn cw_orch::prelude::ContractInstance<Chain>>> {
+        todo!()
+    }
+
+    fn load_from(chain: Chain) -> Result<Self, Self::Error> {
+        todo!()
+    }
+}
+
 /// TerpHeadstashConfig
 #[derive(Debug)]
 pub struct TerpHeadstashConfig {}
-
-// // All stateless circuit-utility traits are delegated with default impls.
-// impl<Chain: CwEnv> HeadstashBitwiseInstance for TestPressSuite<Chain> {}
-// impl<Chain: CwEnv> HeadstashSinsemillaTree for TestPressSuite<Chain> {}
-// impl<Chain: CwEnv> HeadstashIpfsInstance for TestPressSuite<Chain> {}
-// impl<Chain: CwEnv> HeadstashLaunchpadInstance for TestPressSuite<Chain> {}

@@ -974,7 +974,7 @@ pub trait CircuitKeysGenerator: HeadstashBitwiseInstance {
         &self,
         base_path: &Path,
     ) -> Result<(crate::circuit::VerifyingKey, crate::circuit::ProvingKey), BoxError> {
-        let keys_dir = base_path.join("headstash_keys");
+        let keys_dir = base_path.join("headstash");
         fs::create_dir_all(&keys_dir)?;
 
         println!("[1/3] Building verifying key (K={})...", Self::HEADSTASH_K);
