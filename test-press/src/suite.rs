@@ -115,7 +115,7 @@ where
         Ok(Self { no_rick, headstash })
     }
 
-    fn store_on(chain: Chain) -> Result<Self, Self::Error> {
+    fn store_on(_chain: Chain) -> Result<Self, Self::Error> {
         todo!()
     }
 
@@ -125,7 +125,7 @@ where
         todo!()
     }
 
-    fn load_from(chain: Chain) -> Result<Self, Self::Error> {
+    fn load_from(_chain: Chain) -> Result<Self, Self::Error> {
         todo!()
     }
 }

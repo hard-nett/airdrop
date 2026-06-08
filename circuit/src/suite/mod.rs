@@ -2,4 +2,5 @@
 
 pub mod suite;
 pub mod unit;
-pub use suite::HeadstashSuite;
+
+pub use suite::HeadstashCircuitSuite;

@@ -2,14 +2,14 @@
 resolver = "2"
 members = [
     "circuit",
-    "contract/cw-headstash",
-    "contract/manifold",
+    "contracts/cw-headstash",
+    "contracts/manifold",
     "test-press",
     "test-press/src/contracts/no-rick",
 ]
 exclude = [
     # Minimal stub — include when ready
-    "contract/cw-headstash/scripts",
+    "contracts/cw-headstash/scripts",
 ]
 
 [workspace.package]
@@ -17,59 +17,70 @@ version = "0.1.0"
 edition = "2024"
 
 [workspace.dependencies]
+aes = "0.8"
+
+# ── Utility ───────────────────────────────────────────────────────────────
+anyhow       = "1"
+ark-bls12-381 = "0.5.0"
+ark-ec = "0.5.0"
+ark-ff = "0.5.0"
+
+ark-serialize = "0.5.0"
+async-trait = "0.1.89"
 base64     = "0.22"
 bitvec       = "1"
 blake2b_simd = "1"
 blake3       = "1"
-ff           = "0.13"
-fpe          = "0.6"
-group        = "0.13"
-hex        = "0.4"
-memuse      = "0.2"
-num-bigint   = "0.4"
-num-traits   = "0.2"
-pasta_curves = "=0.5.1"
-prost       = "0.14.3"
-rand       = "0.8"
-rayon      = "1"
-reddsa      = "0.5"
-secp256k1    = "0.31"
-serde      = { version = "1", features = ["derive"] }
-serde_json = "1"
-sinsemilla  = "0.1"
-subtle       = "2"
-tonic       = "0.14.4"
-tonic-prost = "0.14"
-zcash_spec  = "0.2"
-zip32       = "0.2"
-
-# ── Utility ───────────────────────────────────────────────────────────────
-anyhow       = "1"
-core2 = "0.3"
-getset      = "0.1"
-lazy_static = "1"
-nonempty    = "0.10"
-proptest    = ">=1.0.0, <1.7.0"
-sha2        = "0.10"
-tracing     = "0.1"
-visibility  = "0.1"
-
+core3 = "0.1"
 cosmwasm-schema = { path = "../cosmwasm/packages/schema" }
-cosmwasm-std = { path = "../cosmwasm/packages/std" }
-cw-headstash          = { path = "contract/cw-headstash" }
-cw-headstash-manifold = { path = "contract/manifold" }
+cosmwasm-std = { path = "../cosmwasm/packages/std", features = ["zk"] }
+cw-headstash          = { path = "contracts/cw-headstash" }
+cw-headstash-manifold = { path = "contracts/manifold" }
 cw-multi-test = { package = "abstract-cw-multi-test", path = "../cw-multi-test-fork" }
+cw-no-rick = { path = "./test-press/src/contracts/no-rick", features = ["interface"] }
 cw-orch = { path = "../cw-orchestrator/cw-orch" }
 cw-ownable = { path = "../cw-plus-plus/packages/ownable" }
 cw-storage-plus = { path = "../cw-storage-plus" }
+ff           = "0.13"
+fpe          = "0.6"
+getset      = "0.1"
+group        = "0.13"
 halo2-base    = { path = "../zcash/halo2-lib/halo2-base" }
 halo2_gadgets = { path = "../zcash/halo2/halo2_gadgets" }
 halo2_proofs = { path = "../zcash/halo2/halo2_proofs", default-features = false, features = ["batch"] }
-headstash-randomness = { path = "../terp-rs/crates/public/randomness" }
+headstash-randomness = { path = "../terp-rs/crates/randomness" }
+hex        = "0.4"
 ict-rs = { path = "../ict-rs/ict-rs" }
-cw-no-rick = { path = "./test-press/src/contracts/no-rick", features = ["interface"] }
+incrementalmerkletree = { version = "0.8.1", features = ["test-dependencies"] }
+lazy_static = "1"
+lol_alloc = "0.4.1"
+memuse      = "0.2"
+nonempty    = "0.10"
+num-bigint   = "0.4"
+num-traits   = "0.2"
+pasta_curves = "=0.5.1"
+proptest    = ">=1.0.0, <1.7.0"
+prost       = "0.14.3"
+rand       = "0.8"
+rand_core = "0.6"
+rayon      = "1"
+reddsa      = "0.5"
+schemars  = "0.8.22"
+secp256k1    = "0.31"
+serde      = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2        = "0.10"
+shardtree = "0.6"
+sinsemilla  = "0.1"
+subtle       = "2"
 terp-account = { path = "../terp-account-billboards/packages/terp-account" }
 terp-auth    = { path = "../terp-account-billboards/packages/terp-auth" }
+thiserror = { version = "2.0.16" }
+tracing     = "0.1"
+visibility  = "0.1"
+zcash_note_encryption = { version = "0.4", features = ["pre-zip-212"] }
+zcash_spec  = "0.2"
+zip32       = "0.2"
 zk-cosmwasm = { path = "../cosmwasm/packages/zk" }
 zk-headstash = { path = "circuit" }
 zk-test-press = { path = "test-press" }

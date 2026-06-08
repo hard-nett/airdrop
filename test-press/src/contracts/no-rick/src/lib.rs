@@ -1,135 +1,4 @@
 extern crate alloc;
-
-#[cfg(feature = "interface")]
-pub mod interface;
-#[cfg(feature = "interface")]
-pub use interface::NoRickContractSuite;
-
-// ── Circuit bridge primitives ────────────────────────────────────────────────
-// These types are the contract between zk-cosmwasm circuits and the CosmWasm
-// host. They are always available (no feature gate) since they are pure
-// Vec<u8> / generic wrappers with no heavy dependencies.
-
-/// Wraps a concrete halo2 circuit so it can be named uniformly across the
-/// headstash proving pipeline and the on-chain CosmWasm verifier.
-pub struct CosmwasmCircuit<C> {
-    inner: C,
-}
-
-impl<C> CosmwasmCircuit<C> {
-    /// Wrap a circuit instance.
-    pub fn new(inner: C) -> Self {
-        Self { inner }
-    }
-    /// Borrow the wrapped circuit.
-    pub fn inner(&self) -> &C {
-        &self.inner
-    }
-    /// Consume and unwrap.
-    pub fn into_inner(self) -> C {
-        self.inner
-    }
-}
-
-impl<C: Clone> Clone for CosmwasmCircuit<C> {
-    fn clone(&self) -> Self {
-        Self {
-            inner: self.inner.clone(),
-        }
-    }
-}
-
-/// Public instance values for a proof, stored as a flat byte vector.
-///
-/// On-chain the VM passes instances as raw bytes; use `new_from_vm` to decode.
-#[derive(Clone, Debug, Default)]
-pub struct Instance(pub Vec<u8>);
-
-impl Instance {
-    /// Construct from the byte representation produced by the on-chain VM.
-    pub fn new_from_vm(bytes: Vec<u8>) -> Option<Self> {
-        Some(Self(bytes))
-    }
-    /// Raw bytes.
-    pub fn as_bytes(&self) -> &[u8] {
-        &self.0
-    }
-}
-
-/// A serialised halo2 proof blob.
-///
-/// `Proof::create` is a stub — fill in the halo2 `create_proof` call in the
-/// circuit crate's concrete implementation once the proving key format is
-/// settled.
-#[derive(Clone, Debug)]
-pub struct Proof(pub Vec<u8>);
-
-impl Proof {
-    /// Wrap existing proof bytes (e.g. read from disk).
-    pub fn from_bytes(bytes: Vec<u8>) -> Self {
-        Self(bytes)
-    }
-    /// Raw proof bytes.
-    pub fn as_bytes(&self) -> &[u8] {
-        &self.0
-    }
-    /// Consume into owned bytes.
-    pub fn into_bytes(self) -> Vec<u8> {
-        self.0
-    }
-
-    /// Create a proof.
-    ///
-    /// **Stub** — replace with `halo2_proofs::plonk::create_proof` once the
-    /// proving-key format and transcript strategy are finalised.
-    #[allow(unused_variables)]
-    pub fn create<C>(
-        pk: &ProvingKey,
-        circuits: &[CosmwasmCircuit<C>],
-        instances: &[Instance],
-        rng: &mut impl rand_core::RngCore,
-    ) -> Result<Self, alloc::boxed::Box<dyn core::fmt::Debug>> {
-        todo!("implement with halo2_proofs::plonk::create_proof")
-    }
-}
-
-/// Opaque proving-key wrapper (bytes serialised by the circuit-specific
-/// `ProvingKey::build_and_write` method).
-#[derive(Clone)]
-pub struct ProvingKey(pub Vec<u8>);
-
-impl ProvingKey {
-    /// Wrap already-serialised proving-key bytes.
-    pub fn from_bytes(bytes: Vec<u8>) -> Self {
-        Self(bytes)
-    }
-    /// Serialised bytes.
-    pub fn as_bytes(&self) -> &[u8] {
-        &self.0
-    }
-    /// Build a proving key and persist it to `path`.
-    ///
-    /// **Stub** — replace with `halo2_proofs::plonk::keygen_pk` call in the
-    /// concrete circuit implementation.
-    pub fn build_and_write(path: &str) -> Result<Self, alloc::string::String> {
-        todo!("implement with halo2_proofs::plonk::keygen_pk")
-    }
-}
-
-/// Circuit-specific proof and instance helpers, re-exported under the
-/// `example_circuits` namespace so callers can do:
-/// ```ignore
-/// use zk_cosmwasm::example_circuits::NoRickProof;
-/// ```
-pub mod example_circuits {
-    /// Proof type for the No-Rick circuit.
-    pub type NoRickProof = super::Proof;
-    /// Instance type for the No-Rick circuit.
-    pub type NoRickInstance = super::Instance;
-}
-
-// ────────────────────────────────────────────────────────────────────────────
-
 // #[cfg(target_arch = "wasm32")]
 // use lol_alloc::{AssumeSingleThreaded, FreeListAllocator};
 // // SAFETY: This application is single threaded, so using AssumeSingleThreaded is allowed.
@@ -137,51 +6,38 @@ pub mod example_circuits {
 // #[global_allocator]
 // static ALLOCATOR: AssumeSingleThreaded<FreeListAllocator> =
 //     unsafe { AssumeSingleThreaded::new(FreeListAllocator::new()) };
+#[cfg(feature = "interface")]
+pub mod interface;
+#[cfg(feature = "interface")]
+pub use interface::NoRickContractSuite;
+
+/// Circuit-specific proof and instance helpers, re-exported under the
+/// `example_circuits` namespace so callers can do:
+/// ```ignore
+/// use zk_cosmwasm::example_circuits::NoRickProof;
+/// ```
+pub mod example_circuits {
+    use zk_cosmwasm::{Instance, Proof};
+
+    /// Proof type for the No-Rick circuit.
+    pub type NoRickProof = Proof;
+    /// Instance type for the No-Rick circuit.
+    pub type NoRickInstance = Instance;
+}
+
+// ────────────────────────────────────────────────────────────────────────────
 
 use cosmwasm_schema::{QueryResponses, cw_serde};
 #[cfg(not(feature = "library"))]
 use cosmwasm_std::entry_point;
 use cosmwasm_std::{
     AnyMsg, Binary, Checksum, CosmosMsg, Deps, DepsMut, Env, MessageInfo, Response, StdError,
-    StdResult, VerificationError,
+    StdResult, VerificationError, to_json_binary,
 };
 use ff::PrimeField;
-use pasta_curves::{Fp, vesta};
+use pasta_curves::vesta;
 use prost::Message as _;
 use thiserror::Error;
-
-// ---------------------------------------------------------------------------
-// Tokenfactory protobuf types (mirrors terp_rs::osmosis::tokenfactory::v1beta1)
-// ---------------------------------------------------------------------------
-
-/// cosmos.base.v1beta1.Coin
-#[derive(Clone, PartialEq, ::prost::Message)]
-pub struct ProtoCoin {
-    #[prost(string, tag = "1")]
-    pub denom: ::prost::alloc::string::String,
-    #[prost(string, tag = "2")]
-    pub amount: ::prost::alloc::string::String,
-}
-
-/// osmosis.tokenfactory.v1beta1.MsgCreateDenom
-#[derive(Clone, PartialEq, ::prost::Message)]
-pub struct MsgCreateDenom {
-    #[prost(string, tag = "1")]
-    pub sender: ::prost::alloc::string::String,
-    #[prost(string, tag = "2")]
-    pub subdenom: ::prost::alloc::string::String,
-}
-
-/// osmosis.tokenfactory.v1beta1.MsgMint
-#[derive(Clone, PartialEq, ::prost::Message)]
-pub struct MsgMint {
-    #[prost(string, tag = "1")]
-    pub sender: ::prost::alloc::string::String,
-    #[prost(message, optional, tag = "2")]
-    pub amount: ::core::option::Option<ProtoCoin>,
-    #[prost(string, tag = "3")]
-    pub mint_to_address: ::prost::alloc::string::String,
-}
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -225,7 +81,7 @@ pub enum ExecuteMsg {
 #[derive(QueryResponses)]
 pub enum QueryMsg {
     #[returns(Checksum)]
-    VkChecksum {},
+    VkChecksum { cid: u64 },
 }
 
 #[derive(Error, Debug)]
@@ -314,18 +170,17 @@ pub fn execute(
             forbidden,
             proof,
         } => {
-            let valid = deps.api.halo2_proof_instance_verify(
+            let subdenom = match deps.api.halo2_proof_instance_verify(
                 cid.into(),
                 &proof,
                 &to_cosmwasm_instance(&forbidden),
-            )?;
+            )? {
+                true => RANDY_SUBDENOM,
+                false => RICK_SUBDENOM,
+            };
 
             let contract_addr = env.contract.address.to_string();
             let recipient = info.sender.to_string();
-
-            // valid proof → content is rick-free → mint "randy"
-            // invalid proof → content contained rick → mint "rick"
-            let subdenom = if valid { RANDY_SUBDENOM } else { RICK_SUBDENOM };
             let denom = format!("factory/{}/{}", contract_addr, subdenom);
 
             let mint_msg = CosmosMsg::Any(AnyMsg {
@@ -352,9 +207,11 @@ pub fn execute(
 }
 
 #[cfg_attr(not(feature = "library"), entry_point)]
-pub fn query(_deps: Deps, _env: Env, msg: QueryMsg) -> StdResult<Binary> {
+pub fn query(deps: Deps, _env: Env, msg: QueryMsg) -> StdResult<Binary> {
     match msg {
-        QueryMsg::VkChecksum {} => unimplemented!(),
+        QueryMsg::VkChecksum { cid } => {
+            to_json_binary(&deps.querier.query_circuit_info(cid)?.checksum)
+        }
     }
 }
 
@@ -396,4 +253,37 @@ pub fn str_to_field<F: PrimeField>(s: &str) -> F {
     let len = core::cmp::min(src.len(), repr.as_ref().len());
     repr.as_mut()[..len].copy_from_slice(&src[..len]);
     F::from_repr(repr).expect("str_to_field")
+}
+
+// ---------------------------------------------------------------------------
+// Tokenfactory protobuf types (mirrors terp_rs::osmosis::tokenfactory::v1beta1)
+// ---------------------------------------------------------------------------
+
+/// cosmos.base.v1beta1.Coin
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct ProtoCoin {
+    #[prost(string, tag = "1")]
+    pub denom: ::prost::alloc::string::String,
+    #[prost(string, tag = "2")]
+    pub amount: ::prost::alloc::string::String,
+}
+
+/// osmosis.tokenfactory.v1beta1.MsgCreateDenom
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct MsgCreateDenom {
+    #[prost(string, tag = "1")]
+    pub sender: ::prost::alloc::string::String,
+    #[prost(string, tag = "2")]
+    pub subdenom: ::prost::alloc::string::String,
+}
+
+/// osmosis.tokenfactory.v1beta1.MsgMint
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct MsgMint {
+    #[prost(string, tag = "1")]
+    pub sender: ::prost::alloc::string::String,
+    #[prost(message, optional, tag = "2")]
+    pub amount: ::core::option::Option<ProtoCoin>,
+    #[prost(string, tag = "3")]
+    pub mint_to_address: ::prost::alloc::string::String,
 }

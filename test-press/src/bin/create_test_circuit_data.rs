@@ -1,5 +1,6 @@
 use std::path::Path;
 
+use cw_orch::mock::Mock;
 use zk_test_press::BoxError;
 
 use zk_test_press::TestPressSuite;
@@ -12,9 +13,9 @@ use zk_test_press::TestPressSuite;
 /// ```q
 // Generate test circuit keys for all example circuits
 fn main() -> Result<(), BoxError> {
-    // let path = Path::new("./data/test_keys");
-
-    // let proofs = TestPressSuite::new().awaitgen_test_circuit_keys(&TestPressSuite::new(), path, None, vec![])?; // vec![("randy".to_string(), "rick".to_string())];
+    let path = Path::new("./artifacts");
+    // TODO: MockBase: ZkTxHandler
+    // let proofs = TestPressSuite::new(Mock::new("sender")); // vec![("randy".to_string(), "rick".to_string())];
     // eprintln!("\n🎉 All circuit keys generated successfully!");
     // // println!("{:#?}", proofs);
     Ok(())

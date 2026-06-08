@@ -1,9 +1,7 @@
 use cosmwasm_std::{
     Addr, Api, BLS12_381_G1_GENERATOR as G1, BLS12_381_G2_GENERATOR as G2, Binary, HashFunction,
-    StdError, StdResult, to_json_binary,
+    StdError, StdResult,
 };
-
-use sha2::{Digest, Sha256};
 
 #[cosmwasm_schema::cw_serde]
 pub struct BlsThresholdAuthData {
@@ -82,7 +80,7 @@ pub struct WavsOperatorSet {
 }
 #[cosmwasm_schema::cw_serde]
 pub struct WavsOpAuth {
-    /// `bls12_381` public key
+    ///  <contract-addr>-<pubkey>>, where pubkey is the `bls12_381`,and contract-addr is this contract-addr
     pub key: String,
     /// proof of ownership signature of `H(WavsAuthMetadata)` from the public key
     pub poo: String,

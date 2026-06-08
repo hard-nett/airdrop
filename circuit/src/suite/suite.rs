@@ -1,6 +1,6 @@
 //! main suite for headstash
 //!
-//! This module provides the `HeadstashSuite` which implements various traits
+//! This module provides the `HeadstashCircuitSuite` which implements various traits
 //! for headstash operations including merkle tree generation, test data building,
 //! and circuit key management.
 use alloc::boxed::Box;
@@ -33,7 +33,7 @@ use std::sync::Mutex;
 use std::vec::Vec;
 use std::{env, eprintln, fs, println};
 
-const KEYS_DIR: &str = "./circuit_keys";
+const KEYS_DIR: &str = "artifacts";
 const PARAMS_FILE: &str = "params.bin";
 const VK_FILE: &str = "verifying_key.bin";
 const PK_FILE: &str = "proving_key.bin";
@@ -60,19 +60,14 @@ pub struct TerpHeadstashConfig {
     // node params
 }
 
-/// HeadstashSuite
+#[cw_orch::circuit_interface(id = "headstash")]
 #[derive(Debug, Default)]
-pub struct HeadstashSuite {}
-impl HeadstashBitwiseInstance for HeadstashSuite {}
-impl HeadstashLaunchpadInstance for HeadstashSuite {}
-impl HeadstashSinsemillaTree for HeadstashSuite {}
-impl HeadstashIpfsInstance for HeadstashSuite {}
-impl HeadstashSuite {
-    /// create new headsatsh suite
-    pub fn new() -> Self {
-        Self {}
-    }
-}
+pub struct HeadstashCircuitSuite;
+
+impl<Chain> HeadstashBitwiseInstance for HeadstashCircuitSuite<Chain> {}
+impl<Chain> HeadstashLaunchpadInstance for HeadstashCircuitSuite<Chain> {}
+impl<Chain> HeadstashSinsemillaTree for HeadstashCircuitSuite<Chain> {}
+impl<Chain> HeadstashIpfsInstance for HeadstashCircuitSuite<Chain> {}
 
 /// HeadstashBitwiseInstance
 pub trait HeadstashBitwiseInstance {
@@ -88,7 +83,7 @@ pub trait HeadstashBitwiseInstance {
     /// Derives the native pallas representations of the secp256k1 public key
     /// from a secret key. Computes `epk = esk * G` on secp256k1, then reduces
     /// both coordinates mod pallas_p to match the in-circuit `.native` values.
-    fn derive_epk_natives(&self, sk: [u8; 32]) -> (Fp, Fp) {
+    fn derive_epk_natives(sk: [u8; 32]) -> (Fp, Fp) {
         use crate::spec::to_native_out_of_circuit;
         use halo2_base::halo2_proofs::halo2curves::secp256k1::Fp as Secp256k1Fp;
         let secret_key = secp256k1::SecretKey::from_byte_array(sk).expect("valid secret key");
@@ -128,7 +123,7 @@ pub trait HeadstashBitwiseInstance {
     }
 
     /// Note‑Denom (nd): blake3 hash of the token, 1 bit cleared.
-    fn derive_nd(&self, raw_nd: &str) -> [u8; 32] {
+    fn derive_nd(raw_nd: &str) -> [u8; 32] {
         NoteDenom::new_for_proof(raw_nd)
             .as_bytes()
             .try_into()
@@ -187,10 +182,7 @@ pub trait HeadstashSinsemillaTree: HeadstashBitwiseInstance {
     }
 
     /// gen_headstash_tree
-    fn gen_headstash_tree(&self, output_path: PathBuf) -> Result<String, BoxError>
-    where
-        Self: Sync,
-    {
+    fn gen_headstash_tree(&self, output_path: PathBuf) -> Result<String, BoxError> {
         let mut data: Value = serde_json::from_str(&fs::read_to_string(&self.get_input_path()?)?)?;
         let mut leaves = Vec::new();
         let balances = data.as_object_mut().ok_or("Input JSON must be an object")?;
@@ -278,10 +270,7 @@ pub trait HeadstashSinsemillaTree: HeadstashBitwiseInstance {
         addr: &str,
         token_name: &str,
         v: u64,
-    ) -> Result<(Vec<(u64, usize, String)>, Vec<Fp>), BoxError>
-    where
-        Self: Sync,
-    {
+    ) -> Result<(Vec<(u64, usize, String)>, Vec<Fp>), BoxError> {
         // ---------- build work list ------------------------------------------------
         let mut work_items: Vec<u64> = Vec::new();
         let mut remainder = v;
@@ -314,11 +303,11 @@ pub trait HeadstashSinsemillaTree: HeadstashBitwiseInstance {
         #[cfg(feature = "multicore")]
         work_items.par_iter().enumerate().try_for_each(
             |(idx, &fixed_amount)| -> Result<(), BoxError> {
-                let (epk_x, epk_y) = self.derive_epk_natives(*addr_bytes);
-                let nd_fp = Fp::from_repr(self.derive_nd(token_name)).unwrap();
+                let (epk_x, epk_y) = Self::derive_epk_natives(*addr_bytes);
+                let nd_fp = Fp::from_repr(Self::derive_nd(token_name)).unwrap();
                 let v_fp = Fp::from(fixed_amount);
                 let fdi_fp = Fp::from(idx as u64);
-                let leaf = self.leaf_hash(epk_x, epk_y, nd_fp, v_fp, fdi_fp)?;
+                let leaf = Self::leaf_hash(epk_x, epk_y, nd_fp, v_fp, fdi_fp)?;
                 let leaf_hex = format!("0x{}", hex::encode(leaf.to_repr()));
                 leaf_hexes
                     .lock()
@@ -328,6 +317,21 @@ pub trait HeadstashSinsemillaTree: HeadstashBitwiseInstance {
                 Ok(())
             },
         )?;
+
+        #[cfg(not(feature = "multicore"))]
+        for (idx, &fixed_amount) in work_items.iter().enumerate() {
+            let (epk_x, epk_y) = Self::derive_epk_natives(*addr_bytes);
+            let nd_fp = Fp::from_repr(Self::derive_nd(token_name)).unwrap();
+            let v_fp = Fp::from(fixed_amount);
+            let fdi_fp = Fp::from(idx as u64);
+            let leaf = Self::leaf_hash(epk_x, epk_y, nd_fp, v_fp, fdi_fp)?;
+            let leaf_hex = format!("0x{}", hex::encode(leaf.to_repr()));
+            leaf_hexes
+                .lock()
+                .unwrap()
+                .push((fixed_amount, idx, leaf_hex));
+            raw_leaves.lock().unwrap().push(leaf);
+        }
 
         Ok((
             leaf_hexes.into_inner().unwrap(),
@@ -373,14 +377,8 @@ pub trait HeadstashSinsemillaTree: HeadstashBitwiseInstance {
             message.push((layer >> i) & 1 == 1);
         }
 
-        <HeadstashSuite as HeadstashBitwiseInstance>::extend_with_base_field_bits(
-            &mut message,
-            left,
-        );
-        <HeadstashSuite as HeadstashBitwiseInstance>::extend_with_base_field_bits(
-            &mut message,
-            right,
-        );
+        <Self as HeadstashBitwiseInstance>::extend_with_base_field_bits(&mut message, left);
+        <Self as HeadstashBitwiseInstance>::extend_with_base_field_bits(&mut message, right);
 
         // Hash and return x-coordinate
         let point = domain.hash_to_point(message.into_iter()).unwrap();
@@ -391,14 +389,7 @@ pub trait HeadstashSinsemillaTree: HeadstashBitwiseInstance {
     ///
     /// 640-bit Sinsemilla message layout:
     ///   epk_x[0..255) || epk_y[0..1) || nd[0..255) || v[0..64) || fdi[0..64) || 0_pad
-    fn leaf_hash(
-        &self,
-        epk_x: Fp,
-        epk_y: Fp,
-        nd: Fp,
-        v: Fp,
-        fdi: Fp,
-    ) -> Result<pallas::Base, BoxError> {
+    fn leaf_hash(epk_x: Fp, epk_y: Fp, nd: Fp, v: Fp, fdi: Fp) -> Result<pallas::Base, BoxError> {
         use ff::PrimeFieldBits;
         let mut bits: Vec<bool> = Vec::with_capacity(640);
         bits.extend(epk_x.to_le_bits().iter().by_vals().take(255));
@@ -681,9 +672,9 @@ impl CircuitTestData {
 /// ## Usage
 ///
 /// ```ignore
-/// use zk_test_press::suite::{HeadstashSuite, MerkleTestDataBuilder};
+/// use zk_test_press::suite::{HeadstashCircuitSuite, MerkleTestDataBuilder};
 ///
-/// let suite = HeadstashSuite::new();
+/// let suite = HeadstashCircuitSuite::new(Mock::new("sender"));
 ///
 /// // Generate test leaf data
 /// let leaves_data = suite.generate_test_leaves(4);
@@ -721,11 +712,11 @@ pub trait MerkleTestDataBuilder: HeadstashSinsemillaTree {
                 let raw_token = tokens[i % tokens.len()].to_string();
                 let value = values[i % values.len()];
 
-                let (epk_x, epk_y) = self.derive_epk_natives(raw_addr);
+                let (epk_x, epk_y) = Self::derive_epk_natives(raw_addr);
                 TestLeafData {
                     epk_x_native: epk_x,
                     epk_y_native: epk_y,
-                    nd: Fp::from_repr(self.derive_nd(&raw_token)).unwrap(),
+                    nd: Fp::from_repr(Self::derive_nd(&raw_token)).unwrap(),
                     v: Fp::from(value),
                     fdi: Fp::from(i as u64),
                     raw_v: value,
@@ -745,12 +736,12 @@ pub trait MerkleTestDataBuilder: HeadstashSinsemillaTree {
         value: u64,
         fdi_index: u64,
     ) -> TestLeafData {
-        let (epk_x, epk_y) = self.derive_epk_natives(*addr);
+        let (epk_x, epk_y) = Self::derive_epk_natives(*addr);
 
         TestLeafData {
             epk_x_native: epk_x,
             epk_y_native: epk_y,
-            nd: Fp::from_repr(self.derive_nd(token)).unwrap(),
+            nd: Fp::from_repr(Self::derive_nd(token)).unwrap(),
             v: Fp::from(value),
             fdi: Fp::from(fdi_index),
             raw_v: value,
@@ -762,7 +753,7 @@ pub trait MerkleTestDataBuilder: HeadstashSinsemillaTree {
 
     /// Compute leaf hash from TestLeafData.
     fn compute_leaf_from_data(&self, data: &TestLeafData) -> Result<Fp, BoxError> {
-        self.leaf_hash(
+        Self::leaf_hash(
             data.epk_x_native,
             data.epk_y_native,
             data.nd,
@@ -805,7 +796,7 @@ pub trait MerkleTestDataBuilder: HeadstashSinsemillaTree {
             for chunk in current_level.chunks(2) {
                 let left = chunk[0];
                 let right = if chunk.len() > 1 { chunk[1] } else { Fp::ZERO };
-                let parent = HeadstashSuite::merkle_crh(layer, left, right);
+                let parent = <Self as HeadstashSinsemillaTree>::merkle_crh(layer, left, right);
                 next_level.push(parent);
             }
 
@@ -877,7 +868,7 @@ pub trait MerkleTestDataBuilder: HeadstashSinsemillaTree {
             } else {
                 (current, *sibling)
             };
-            current = HeadstashSuite::merkle_crh(level as u32, left, right);
+            current = <Self as HeadstashSinsemillaTree>::merkle_crh(level as u32, left, right);
         }
 
         current == *expected_root
@@ -933,8 +924,8 @@ pub trait MerkleTestDataBuilder: HeadstashSinsemillaTree {
     }
 }
 
-// Implement MerkleTestDataBuilder for HeadstashSuite
-impl MerkleTestDataBuilder for HeadstashSuite {}
+// Implement MerkleTestDataBuilder for HeadstashCircuitSuite
+impl<Chain> MerkleTestDataBuilder for HeadstashCircuitSuite<Chain> {}
 
 /// All actions any user would take for creating a new headstash 100% client side using this launchpad framework.
 ///  Requires struct implementing trait to also implement `HeadstashBitwiseInstance` default members.
@@ -974,26 +965,18 @@ pub trait CircuitKeysGenerator: HeadstashBitwiseInstance {
         &self,
         base_path: &Path,
     ) -> Result<(crate::circuit::VerifyingKey, crate::circuit::ProvingKey), BoxError> {
-        let keys_dir = base_path.join("headstash");
-        fs::create_dir_all(&keys_dir)?;
-
+        fs::create_dir_all(&base_path)?;
         println!("[1/3] Building verifying key (K={})...", Self::HEADSTASH_K);
         let vk = crate::circuit::VerifyingKey::build();
-
         println!("[2/3] Building proving key...");
         let pk = crate::circuit::ProvingKey::build();
-
-        println!("[3/3] Writing keys to {:?}...", keys_dir);
-
-        // Write verifying key (params + vk)
-        let vk_path = keys_dir.join(VK_FILE);
+        println!("[3/3] Writing keys to {:?}...", base_path);
+        let vk_path = base_path.join(VK_FILE);
         let mut vk_file = std::fs::File::create(&vk_path)?;
         vk.params.write(&mut vk_file)?;
         vk.vk.write(&mut vk_file)?;
         println!("  Written: {:?}", vk_path);
-
-        // Write proving key using existing method
-        let pk_path = keys_dir.join(PK_FILE);
+        let pk_path = base_path.join(PK_FILE);
         crate::circuit::ProvingKey::build_and_write(pk_path.clone())?;
         println!("  Written: {:?}", pk_path);
 
@@ -1006,8 +989,7 @@ pub trait CircuitKeysGenerator: HeadstashBitwiseInstance {
     }
 }
 
-
-impl CircuitKeysGenerator for HeadstashSuite {}
+impl<Chain> CircuitKeysGenerator for HeadstashCircuitSuite<Chain> {}
 
 /// Proof bundle containing proof and public inputs for a headstash claim.
 #[derive(Clone, Debug)]
@@ -1106,7 +1088,7 @@ pub trait HeadstashProofBuilder:
     // }
 }
 
-impl HeadstashProofBuilder for HeadstashSuite {}
+impl<Chain> HeadstashProofBuilder for HeadstashCircuitSuite<Chain> {}
 
 /// launchpad
 pub trait HeadstashLaunchpadInstance: HeadstashBitwiseInstance + HeadstashIpfsInstance {
@@ -1233,10 +1215,7 @@ pub struct HeadstashAccountTestData {
 /// Trait for generating complete E2E test data for headstash circuits.
 /// Consolidates all test generation logic into the suite for reuse across projects.
 pub trait HeadstashTestDataGenerator:
-    HeadstashBitwiseInstance
-    + MerkleTestDataBuilder
-    + CircuitKeysGenerator
-    + HeadstashProofBuilder
+    HeadstashBitwiseInstance + MerkleTestDataBuilder + CircuitKeysGenerator + HeadstashProofBuilder
 {
     /// Generate a complete E2E test bundle with circuit keys, merkle tree, and proofs.
     ///
@@ -1451,7 +1430,7 @@ pub trait HeadstashTestDataGenerator:
     }
 }
 
-impl HeadstashTestDataGenerator for HeadstashSuite {}
+impl<Chain> HeadstashTestDataGenerator for HeadstashCircuitSuite<Chain> {}
 
 // TODO:
 // - notecommitment derivation accuracy
@@ -1465,6 +1444,8 @@ impl HeadstashTestDataGenerator for HeadstashSuite {}
 
 #[cfg(test)]
 mod test {
+    use cw_orch::mock::Mock;
+
     use super::*;
     use std::boxed::Box;
     use std::collections::HashMap;
@@ -1606,7 +1587,7 @@ mod test {
 
     #[test]
     fn test_generate_test_leaves() {
-        let suite = HeadstashSuite::new();
+        let suite = HeadstashCircuitSuite::new(Mock::new("sender"));
         let leaves = suite.generate_test_leaves(4);
 
         assert_eq!(leaves.len(), 4);
@@ -1622,7 +1603,7 @@ mod test {
 
     #[test]
     fn test_full_merkle_tree_single_leaf() {
-        let suite = HeadstashSuite::new();
+        let suite = HeadstashCircuitSuite::new(Mock::new("sender"));
         let leaf = Fp::from(42u64);
 
         let tree = suite.generate_full_merkle_tree(vec![leaf]);
@@ -1635,7 +1616,7 @@ mod test {
 
     #[test]
     fn test_full_merkle_tree_four_leaves() {
-        let suite = HeadstashSuite::new();
+        let suite = HeadstashCircuitSuite::new(Mock::new("sender"));
         let leaves: Vec<Fp> = (0..4).map(|i| Fp::from(i as u64)).collect();
 
         let tree = suite.generate_full_merkle_tree(leaves.clone());
@@ -1648,7 +1629,7 @@ mod test {
 
     #[test]
     fn test_merkle_path_computation() {
-        let suite = HeadstashSuite::new();
+        let suite = HeadstashCircuitSuite::new(Mock::new("sender"));
         let leaves: Vec<Fp> = (0..4).map(|i| Fp::from(i as u64)).collect();
 
         let tree = suite.generate_full_merkle_tree(leaves.clone());
@@ -1663,7 +1644,7 @@ mod test {
 
     #[test]
     fn test_merkle_path_verification() {
-        let suite = HeadstashSuite::new();
+        let suite = HeadstashCircuitSuite::new(Mock::new("sender"));
         let leaves: Vec<Fp> = (0..8).map(|i| Fp::from(i as u64)).collect();
 
         let tree = suite.generate_full_merkle_tree(leaves.clone());
@@ -1682,7 +1663,7 @@ mod test {
 
     #[test]
     fn test_merkle_path_verification_fails_wrong_leaf() {
-        let suite = HeadstashSuite::new();
+        let suite = HeadstashCircuitSuite::new(Mock::new("sender"));
         let leaves: Vec<Fp> = (0..4).map(|i| Fp::from(i as u64)).collect();
 
         let tree = suite.generate_full_merkle_tree(leaves.clone());
@@ -1700,7 +1681,7 @@ mod test {
 
     #[test]
     fn test_generate_inclusion_test_case() {
-        let suite = HeadstashSuite::new();
+        let suite = HeadstashCircuitSuite::new(Mock::new("sender"));
         let result = suite.generate_inclusion_test_case(8, 3);
         assert!(result.is_ok());
 
@@ -1716,7 +1697,7 @@ mod test {
 
     #[test]
     fn test_circuit_test_data_generation() {
-        let suite = HeadstashSuite::new();
+        let suite = HeadstashCircuitSuite::new(Mock::new("sender"));
         let result = suite.generate_circuit_test_data(4, 1);
         assert!(result.is_ok());
 
@@ -1735,7 +1716,7 @@ mod test {
 
     #[test]
     fn test_deterministic_leaf_generation() {
-        let suite = HeadstashSuite::new();
+        let suite = HeadstashCircuitSuite::new(Mock::new("sender"));
         let addr = [0u8; 32];
         let token = "uterp";
         let value = 1_000_000u64;
@@ -1758,7 +1739,7 @@ mod test {
     #[test]
     #[cfg(feature = "multicore")]
     fn test_tree_root_consistency_with_existing() {
-        let suite = HeadstashSuite::new();
+        let suite = HeadstashCircuitSuite::new(Mock::new("sender"));
         let leaves: Vec<Fp> = (0..4).map(|i| Fp::from(i as u64)).collect();
 
         // Compare with existing tree_root_from_leaves (requires multicore feature)
@@ -1774,7 +1755,7 @@ mod test {
 
     #[test]
     fn test_position_encoding() {
-        let suite = HeadstashSuite::new();
+        let suite = HeadstashCircuitSuite::new(Mock::new("sender"));
         let leaves: Vec<Fp> = (0..8).map(|i| Fp::from(i as u64)).collect();
         let tree = suite.generate_full_merkle_tree(leaves);
 
@@ -1797,7 +1778,7 @@ mod test {
 
     #[test]
     fn test_auth_path_array_conversion() {
-        let suite = HeadstashSuite::new();
+        let suite = HeadstashCircuitSuite::new(Mock::new("sender"));
         let leaves: Vec<Fp> = (0..4).map(|i| Fp::from(i as u64)).collect();
         let tree = suite.generate_full_merkle_tree(leaves);
 
@@ -1816,7 +1797,7 @@ mod test {
 
     #[test]
     fn test_larger_tree() {
-        let suite = HeadstashSuite::new();
+        let suite = HeadstashCircuitSuite::new(Mock::new("sender"));
         let leaves: Vec<Fp> = (0..64).map(|i| Fp::from(i as u64)).collect();
 
         let tree = suite.generate_full_merkle_tree(leaves.clone());
@@ -1838,7 +1819,7 @@ mod test {
 
     #[test]
     fn test_odd_number_of_leaves() {
-        let suite = HeadstashSuite::new();
+        let suite = HeadstashCircuitSuite::new(Mock::new("sender"));
         // 5 leaves (odd number)
         let leaves: Vec<Fp> = (0..5).map(|i| Fp::from(i as u64)).collect();
 
@@ -1861,7 +1842,7 @@ mod test {
 
     #[test]
     fn test_merkle_auth_path_to_circuit_path() {
-        let suite = HeadstashSuite::new();
+        let suite = HeadstashCircuitSuite::new(Mock::new("sender"));
 
         // Generate a small tree
         let test_leaves = suite.generate_test_leaves(4);
@@ -1899,7 +1880,7 @@ mod test {
     #[test]
     #[ignore] // Expensive test - run with: cargo test test_headstash_e2e_proof_generation -- --ignored
     fn test_headstash_e2e_proof_generation() -> Result<(), BoxError> {
-        let suite = HeadstashSuite::new();
+        let suite = HeadstashCircuitSuite::new(Mock::new("sender"));
 
         // Step 1: Generate circuit keys
         println!("Generating circuit keys...");

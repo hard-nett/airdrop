@@ -1,9 +1,8 @@
 //! Data structures used for note construction.
 // use cosmwasm_std::CanonicalAddr;
 use core::fmt;
-use memuse::DynamicUsage;
-
 use ff::PrimeField;
+use memuse::DynamicUsage;
 use pasta_curves::pallas;
 use rand::RngCore;
 use subtle::CtOption;
@@ -19,7 +18,6 @@ use crate::{
 
 pub(crate) mod commitment;
 pub use self::commitment::{ExtractedNoteCommitment, NoteCommitment};
-
 pub(crate) mod nullifier;
 pub use self::nullifier::Nullifier;
 
@@ -238,9 +236,9 @@ impl Note {
         rho: Option<Rho>,
     ) -> (SpendingKey, FullViewingKey, EligibleSk, Self) {
         let esk = EligibleSk::random(rng);
-        let sk = SpendingKey::random(rng);
+        let sk = SpendingKey::from_bytes(esk.secret_bytes()).expect("should work");
         let fvk: FullViewingKey = (&sk).into();
-        // let _recipient = fvk.address_at(0u32, Scope::External);
+        let _recipient = fvk.address_at(0u32, Scope::External);
 
         let note = Note::new(
               NoteDenom::new_for_proof("I hope you got the necessary doguments and fucking permutations to suck on my shaved balls"),

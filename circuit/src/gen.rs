@@ -7,43 +7,43 @@
 #![allow(non_snake_case)]
 #![cfg_attr(docsrs, feature(doc_auto_cfg))]
 
-pub use prost::{Message, Name};
+// pub use prost::{Message, Name};
 
-// /// Helper methods used for shaping the JSON (and other Serde) formats derived from the protos.
-// pub mod serializers;
+// // /// Helper methods used for shaping the JSON (and other Serde) formats derived from the protos.
+// // pub mod serializers;
 
-pub use headstash::*;
+// pub use headstash::*;
 
-/// headstash module
-pub mod headstash {
+// /// headstash module
+// pub mod headstash {
 
-    /// Top-level structures for the Penumbra application.
-    pub mod actions {
-        /// v1
-        pub mod v1 {
-            include!("gen/headstash.actions.v1.rs");
-        }
-    }
+//     /// Top-level structures for the Penumbra application.
+//     pub mod actions {
+//         /// v1
+//         pub mod v1 {
+//             include!("gen/headstash.actions.v1.rs");
+//         }
+//     }
 
-    /// metamask snap-n-pull types
-    pub mod snp {
-        /// v1  
-        pub mod v1 {
-            include!("gen/headstash.snp.v1.rs");
-        }
-    }
-    /// Top-level structures for the Penumbra application.
-    pub mod types {
-        /// v1  
-        pub mod v1 {
-            include!("gen/headstash.types.v1.rs");
-        }
-    }
-    /// vote extensions information
-    pub mod extendo {
-        /// v1
-        pub mod v1 {
-            include!("gen/headstash.extendo.v1.rs");
-        }
-    }
-}
+//     /// metamask snap-n-pull types
+//     pub mod snp {
+//         /// v1  
+//         pub mod v1 {
+//             include!("gen/headstash.snp.v1.rs");
+//         }
+//     }
+//     /// Top-level structures for the Penumbra application.
+//     pub mod types {
+//         /// v1  
+//         pub mod v1 {
+//             include!("gen/headstash.types.v1.rs");
+//         }
+//     }
+//     /// vote extensions information
+//     pub mod extendo {
+//         /// v1
+//         pub mod v1 {
+//             include!("gen/headstash.extendo.v1.rs");
+//         }
+//     }
+// }

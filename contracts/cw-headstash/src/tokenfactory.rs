@@ -1,8 +1,5 @@
 // src/tokenfactory.rs
-use cosmwasm_std::{
-    Addr, BankMsg, Binary, Coin, CosmosMsg, Deps, Response, StdResult, Uint128, coins,
-    to_json_binary,
-};
+use cosmwasm_std::{Addr, BankMsg, Binary, CosmosMsg, StdResult, Uint128, coins, to_json_binary};
 
 // Hardcoded protobuf type URLs for tokenfactory messages
 const MSG_MINT_TYPE_URL: &str = "/osmosis.tokenfactory.v1beta1.MsgMint";

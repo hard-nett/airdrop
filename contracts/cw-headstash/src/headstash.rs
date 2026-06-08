@@ -4,15 +4,12 @@ use super::*;
 use cosmwasm_std::{CanonicalAddr, Uint128};
 use pasta_curves::group::ff::PrimeField;
 use pasta_curves::pallas;
+use std::collections::{HashMap, HashSet};
+use zk_headstash::Anchor;
 use zk_headstash::address::RecpAddr;
+use zk_headstash::circuit::Instance;
 use zk_headstash::note::{ExtractedNoteCommitment, Nullifier};
 use zk_headstash::value::{NoteDenom, NoteValue};
-
-use std::collections::{HashMap, HashSet};
-use std::io::{self, Cursor};
-
-use zk_headstash::circuit::{Instance, VerifyingKey};
-use zk_headstash::{Anchor, Proof};
 
 #[cosmwasm_schema::cw_serde]
 pub struct HeadstashCfg {
@@ -142,7 +139,7 @@ pub fn process_headstash(
     for t in cfg.ts {
         let td = t.denom(&env.contract.address);
 
-        let mut denom_entries: Vec<_> = cts
+        let denom_entries: Vec<_> = cts
             .iter()
             .filter(|((_, d), _)| d == &t.proof_representation())
             .map(|(k, &v)| (k.clone(), v))

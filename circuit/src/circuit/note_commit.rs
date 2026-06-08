@@ -6,7 +6,7 @@
 // generate circuits to automatically of decompose sections based on unique ∫n
 
 use core::iter;
-use std::{println, vec::Vec};
+// use std::println;
 
 use group::ff::PrimeField;
 use halo2_proofs::{
@@ -115,7 +115,7 @@ impl DecomposeB {
         // Constrain b_0 to be 5 bits
         let b0 = RangeConstrained::witness_short(lc, lo.namespace(|| "b_0"), nd.value(), 250..255)?;
         let b1 = RangeConstrained::bitrange_of(value_val.value(), 0..55); // 55 v
-        println!("b: {:#?}", (b0.num_bits(), b1.num_bits()));
+                                                                          // println!("b: {:#?}", (b0.num_bits(), b1.num_bits()));
         let b = MessagePiece::from_subpieces(
             chip.clone(),
             lo.namespace(|| "piece_b: nd[250..255) || v[0..55)"),
@@ -218,7 +218,7 @@ impl DecomposeC {
         let (c, c0, c1) = {
             let c0 = RangeConstrained::bitrange_of(value_val.value(), 55..64); // 9 v
             let c1 = RangeConstrained::bitrange_of(fdi.value(), 0..51); // 51 fdi
-            println!("c: {:#?}", (c0.num_bits(), c1.num_bits()));
+                                                                        // println!("c: {:#?}", (c0.num_bits(), c1.num_bits()));
             (
                 MessagePiece::from_subpieces(
                     chip.clone(),
@@ -324,7 +324,7 @@ impl DecomposeD {
             RangeConstrained::bitrange_of(fdi.value(), 51..64), // 13 fdi
             RangeConstrained::bitrange_of(recp.value(), 0..7),  // 7 recp
         );
-        println!("d: {:#?}", (d0.num_bits(), d1.num_bits(),));
+        // println!("d: {:#?}", (d0.num_bits(), d1.num_bits(),));
         let d = MessagePiece::from_subpieces(chip.clone(), lo.namespace(|| "d"), [d0, d1])?;
 
         Ok((d, d0, d1))
@@ -414,7 +414,7 @@ impl DecomposeF {
             RangeConstrained::bitrange_of(recp.value(), 247..255), // 8
             RangeConstrained::bitrange_of(esk.value(), 0..2),      // 2
         );
-        println!("f: {:#?}", (f0.num_bits(), f1.num_bits()));
+        // println!("f: {:#?}", (f0.num_bits(), f1.num_bits()));
 
         let f = MessagePiece::from_subpieces(chip.clone(), lo.namespace(|| "f"), [f0, f1])?;
 
@@ -508,7 +508,7 @@ impl DecomposeH {
         );
 
         let h = MessagePiece::from_subpieces(chip.clone(), lo.namespace(|| "h"), [h0, h1])?;
-        println!("h: {:#?}", (h0.num_bits(), h1.num_bits()));
+        // println!("h: {:#?}", (h0.num_bits(), h1.num_bits()));
 
         Ok((h, [h0, h1]))
     }
@@ -599,7 +599,7 @@ impl DecomposeJ {
             RangeConstrained::bitrange_of(rho.value(), 247..255),
             RangeConstrained::bitrange_of(psi.value(), 0..2),
         );
-        println!("j: {:#?}", (j0.num_bits(), j1.num_bits()));
+        // println!("j: {:#?}", (j0.num_bits(), j1.num_bits()));
         let j = MessagePiece::from_subpieces(chip.clone(), lo.namespace(|| "j"), [j0, j1])?;
 
         Ok((j, [j0, j1]))
@@ -691,9 +691,7 @@ impl DecomposeL {
             RangeConstrained::bitrange_of(psi.value(), 252..255), //  3
             RangeConstrained::bitrange_of(Value::known(&pallas::Base::zero()), 0..7), // two bit padding
         );
-
-        println!("l: {:#?}", (l0.num_bits(), l1.num_bits()));
-
+        // println!("l: {:#?}", (l0.num_bits(), l1.num_bits()));
         let l = MessagePiece::from_subpieces(chip.clone(), lo.namespace(|| "l"), [l0, l1])?;
         Ok((l, [l0, l1]))
     }
@@ -1672,33 +1670,33 @@ pub(in crate::circuit) mod gadgets {
         // Piece l: bits 252..255 of psi (3 bits) || 7 bit padding (3+7 = 10 bits)
         let (l, [l0, l1]) = DecomposeL::decompose(chip.clone(), &mut lo, &psi)?;
 
-        println!("Message pieces:");
-        println!("a: {:?}", a);
-        println!("b: {:?}", b);
-        println!("b0: {:?}", b0);
-        println!("b1: {:?}", b1);
-        println!("c: {:?}", c);
-        println!("c0: {:?}", c0);
-        println!("c1: {:?}", c1);
-        println!("d: {:?}", d);
-        println!("d0: {:?}", d0);
-        println!("d1: {:?}", d1);
-        println!("e: {:?}", e);
-        println!("f0: {:?}", f0);
-        println!("f1: {:?}", f1);
-        println!("f: {:?}", f);
-        println!("g: {:?}", g);
-        println!("h0: {:?}", h0);
-        println!("h1: {:?}", h1);
-        println!("h: {:?}", h);
-        println!("i: {:?}", i);
-        println!("j0: {:?}", j0);
-        println!("j1: {:?}", j1);
-        println!("j: {:?}", j);
-        println!("k: {:?}", k);
-        println!("l0: {:?}", l0);
-        println!("l1: {:?}", l1);
-        println!("l: {:?}", l);
+        // println!("Message pieces:");
+        // println!("a: {:?}", a);
+        // println!("b: {:?}", b);
+        // println!("b0: {:?}", b0);
+        // println!("b1: {:?}", b1);
+        // println!("c: {:?}", c);
+        // println!("c0: {:?}", c0);
+        // println!("c1: {:?}", c1);
+        // println!("d: {:?}", d);
+        // println!("d0: {:?}", d0);
+        // println!("d1: {:?}", d1);
+        // println!("e: {:?}", e);
+        // println!("f0: {:?}", f0);
+        // println!("f1: {:?}", f1);
+        // println!("f: {:?}", f);
+        // println!("g: {:?}", g);
+        // println!("h0: {:?}", h0);
+        // println!("h1: {:?}", h1);
+        // println!("h: {:?}", h);
+        // println!("i: {:?}", i);
+        // println!("j0: {:?}", j0);
+        // println!("j1: {:?}", j1);
+        // println!("j: {:?}", j);
+        // println!("k: {:?}", k);
+        // println!("l0: {:?}", l0);
+        // println!("l1: {:?}", l1);
+        // println!("l: {:?}", l);
 
         // cm = NoteCommit^Headstash_rcm( nd || i2lebsp_{64}(v) || i2lebsp_{64}(fdi) || recp || esk  || rho || psi )
         //
@@ -1729,20 +1727,20 @@ pub(in crate::circuit) mod gadgets {
 
         // `CommitDomain::commit` returns the running sum for each `MessagePiece`. Grab
         // the outputs that we will need for canonicity checks.'
-        println!("Running sums length:");
-        println!("zs:{:#?}", zs.len());
-        println!("zs[0]:{:#?}", zs[0].len());
-        println!("zs[1]:{:#?}", zs[1].len());
-        println!("zs[2]:{:#?}", zs[2].len());
-        println!("zs[3]:{:#?}", zs[3].len());
-        println!("zs[4]:{:#?}", zs[4].len());
-        println!("zs[5]:{:#?}", zs[5].len());
-        println!("zs[6]:{:#?}", zs[6].len());
-        println!("zs[7]:{:#?}", zs[7].len());
-        println!("zs[8]:{:#?}", zs[8].len());
-        println!("zs[9]:{:#?}", zs[9].len());
-        println!("zs[10]:{:#?}", zs[10].len());
-        println!("zs[11]:{:#?}", zs[11].len());
+        // println!("Running sums length:");
+        // println!("zs:{:#?}", zs.len());
+        // println!("zs[0]:{:#?}", zs[0].len());
+        // println!("zs[1]:{:#?}", zs[1].len());
+        // println!("zs[2]:{:#?}", zs[2].len());
+        // println!("zs[3]:{:#?}", zs[3].len());
+        // println!("zs[4]:{:#?}", zs[4].len());
+        // println!("zs[5]:{:#?}", zs[5].len());
+        // println!("zs[6]:{:#?}", zs[6].len());
+        // println!("zs[7]:{:#?}", zs[7].len());
+        // println!("zs[8]:{:#?}", zs[8].len());
+        // println!("zs[9]:{:#?}", zs[9].len());
+        // println!("zs[10]:{:#?}", zs[10].len());
+        // println!("zs[11]:{:#?}", zs[11].len());
 
         // `CommitDomain::commit` returns the running sum for each `MessagePiece`. Grab
         // the outputs that we will need for canonicity checks.
@@ -1788,34 +1786,34 @@ pub(in crate::circuit) mod gadgets {
                                         // Piece l: psi[247..255) || padding(2) = 10 bits = 1 word → zs[11] has 2 elements
         let z1_l = zs[11][0].clone(); // End of piece l (completes psi high 8 bits)
 
-        println!("Running sums:");
-        // ===== ND CANONICITY =====
-        println!("z13_a: {:?}", z13_a);
-        println!("z25_a: {:?}", z25_a);
-        // ===== VALUE CANONICITY =====
-        println!("z1_b: {:?}", z1_b);
-        println!("z6_b: {:?}", z6_b);
-        println!("z1_c: {:?}", z1_c);
-        println!("z6_c: {:?}", z6_c);
-        // ===== FDI CANONICITY =====
-        println!("z1_d: {:?}", z1_d);
-        println!("z2_d: {:?}", z2_d);
-        // ===== RECP CANONICITY =====
-        println!("z13_e: {:?}", z13_e);
-        println!("z24_e: {:?}", z24_e);
-        println!("z1_f: {:?}", z1_f);
-        // ===== ESK CANONICITY =====
-        println!("z13_g: {:?}", z13_g);
-        println!("z24_g: {:?}", z24_g);
-        println!("z1_h: {:?}", z1_h);
-        // ===== RHO CANONICITY =====
-        println!("z13_i: {:?}", z13_i);
-        println!("z25_i: {:?}", z25_i);
-        println!("z1_j: {:?}", z1_j);
-        // ===== PSI CANONICITY =====
-        println!("z13_k: {:?}", z13_k);
-        println!("z24_k: {:?}", z24_k);
-        println!("z1_l: {:?}", z1_l);
+        // println!("Running sums:");
+        // // ===== ND CANONICITY =====
+        // println!("z13_a: {:?}", z13_a);
+        // println!("z25_a: {:?}", z25_a);
+        // // ===== VALUE CANONICITY =====
+        // println!("z1_b: {:?}", z1_b);
+        // println!("z6_b: {:?}", z6_b);
+        // println!("z1_c: {:?}", z1_c);
+        // println!("z6_c: {:?}", z6_c);
+        // // ===== FDI CANONICITY =====
+        // println!("z1_d: {:?}", z1_d);
+        // println!("z2_d: {:?}", z2_d);
+        // // ===== RECP CANONICITY =====
+        // println!("z13_e: {:?}", z13_e);
+        // println!("z24_e: {:?}", z24_e);
+        // println!("z1_f: {:?}", z1_f);
+        // // ===== ESK CANONICITY =====
+        // println!("z13_g: {:?}", z13_g);
+        // println!("z24_g: {:?}", z24_g);
+        // println!("z1_h: {:?}", z1_h);
+        // // ===== RHO CANONICITY =====
+        // println!("z13_i: {:?}", z13_i);
+        // println!("z25_i: {:?}", z25_i);
+        // println!("z1_j: {:?}", z1_j);
+        // // ===== PSI CANONICITY =====
+        // println!("z13_k: {:?}", z13_k);
+        // println!("z24_k: {:?}", z24_k);
+        // println!("z1_l: {:?}", z1_l);
 
         // Check decomposition of nd (a,b0)
         let (a_prime, z13_a_prime) = nd_canonicity(
@@ -2159,8 +2157,7 @@ pub(in crate::circuit) mod gadgets {
 
 #[cfg(test)]
 mod tests {
-    use core::{iter, u64};
-    use std::{println, vec::Vec};
+    use core::u64;
 
     use super::NoteCommitConfig;
     use crate::{
@@ -2179,15 +2176,8 @@ mod tests {
             chip::{EccChip, EccConfig},
             NonIdentityPoint, ScalarFixed,
         },
-        sinsemilla::{
-            chip::{SinsemillaChip, SinsemillaConfig},
-            primitives::CommitDomain,
-            Message, MessagePiece,
-        },
-        utilities::{
-            lookup_range_check::{LookupRangeCheck, LookupRangeCheckConfig},
-            FieldValue, RangeConstrained,
-        },
+        sinsemilla::{chip::SinsemillaChip, primitives::CommitDomain},
+        utilities::lookup_range_check::{LookupRangeCheck, LookupRangeCheckConfig},
     };
 
     use ff::{Field, PrimeField, PrimeFieldBits};
@@ -2199,7 +2189,7 @@ mod tests {
     };
     use pasta_curves::pallas;
 
-    use rand::{rngs::OsRng, RngCore};
+    use rand::rngs::OsRng;
 
     #[test]
     fn decomposition_values() {
@@ -2207,8 +2197,8 @@ mod tests {
 
         for i in &u.to_le_bytes()[0..7] {
             assert_eq!(i.to_le_bytes().len(), 1);
-            println!("H:{:#?}", i);
-            println!("H:{:#?}", u);
+            // println!("H:{:#?}", i);
+            // println!("H:{:#?}", u);
         }
     }
 
@@ -2444,9 +2434,9 @@ mod tests {
                         });
                     NonIdentityPoint::new(ecc_chip, lo.namespace(|| "witness cm"), point)?
                 };
-                println!("cm: {:#?}", cm.extract_p());
-                println!("{:#?}", expected_cm.extract_p());
-                println!("cm == synth");
+                // println!("cm: {:#?}", cm.extract_p());
+                // println!("{:#?}", expected_cm.extract_p());
+                // println!("cm == synth");
                 cm.constrain_equal(lo.namespace(|| "cm == expected cm"), &expected_cm)
             }
         }

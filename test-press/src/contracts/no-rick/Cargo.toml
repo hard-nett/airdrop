@@ -14,20 +14,19 @@ crate-type = ["cdylib", "rlib"]
 # use library feature to disable all instantiate/execute/query exports
 default = ["interface"]
 library = []
-interface = []
+interface = ["dep:cw-orch"]
 
 [dependencies]
-ff = "0.13"
-lol_alloc = "0.4.1"
-pasta_curves = "0.5"
-prost = "0.14"
-rand_core = "0.6"
-thiserror = { version = "2.0.16" }
-
-# for local development
-cosmwasm-schema = { path = "../../../../../cosmwasm/packages/schema" }
-cosmwasm-std = { path = "../../../../../cosmwasm/packages/std", features = ["cosmwasm_1_4", "cosmwasm_3_0", "stargate"] }
-cw-orch = { path = "../../../../../cw-orchestrator/cw-orch" }
+cosmwasm-schema = { workspace = true }
+cosmwasm-std = { workspace = true, features = ["zk"] }
+cw-orch = { workspace = true, optional = true }
+ff  = { workspace = true }
+lol_alloc  = { workspace = true }
+pasta_curves  = { workspace = true }
+prost = {workspace = true}
+rand_core  = { workspace = true }
+thiserror  = { workspace = true }
+zk-cosmwasm = { workspace = true }
 
 [dev-dependencies]
 

@@ -13,12 +13,12 @@ interface = ["dep:cw-orch"]
 
 [dependencies]
 ark-bls12-381 = "0.5.0"
-cw-headstash = { workspace = true }
-cw-ownable  = { workspace = true }
-cw-storage-plus = { workspace = true }
-cw-orch = { workspace = true, optional = true }
 cosmwasm-schema = { workspace = true }
 cosmwasm-std = { workspace = true, features = ["cosmwasm_2_0"] }
+cw-headstash = { workspace = true }
+cw-orch = { workspace = true, optional = true }
+cw-ownable  = { workspace = true }
+cw-storage-plus = { workspace = true }
 serde = { workspace = true }
 thiserror = "1.0"
 

@@ -1,6 +1,7 @@
 use std::path::Path;
 
-use zk_headstash::suite::HeadstashSuite;
+use cw_orch::mock::Mock;
+use zk_headstash::suite::HeadstashCircuitSuite;
 use zk_headstash::suite::{suite::CircuitKeysGenerator, *};
 use zk_test_press::BoxError;
 
@@ -11,6 +12,7 @@ use zk_test_press::BoxError;
 ///  cargo run -- --bin gen_headtash_keys0
 /// ```
 fn main() -> Result<(), BoxError> {
-    HeadstashSuite::new().gen_headstash_circuit_keys(Path::new("data/testkeys"))?;
+    HeadstashCircuitSuite::new(Mock::new("sender"))
+        .gen_headstash_circuit_keys(Path::new("artifacts"))?;
     Ok(())
 }

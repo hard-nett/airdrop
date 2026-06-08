@@ -26,25 +26,22 @@
 //!   proving_key.bin     — VK written for reference (pk rebuilt on load)
 //!   vk_combined.bin     — params || vk || cs || 32-byte footer (zk-wasmvm format)
 //! ```
-
-use cw_no_rick::NoRickContractSuite;
-use cw_no_rick::interface::NoRickDeployData;
 use cw_orch::prelude::*;
 use halo2_proofs::{COSMWASM_METADATA_LENGTH, plonk};
-use std::io::Cursor;
-
 use ict_rs::chain::terp::{Circuit, ZkSuiteError};
 use pasta_curves::{Fp, vesta};
 use rand_core::OsRng;
+use std::io::Cursor;
 
 use crate::circuits::no_rick::{NoRickCircuit, NoRickInputs, NoRickInstance};
-pub use interface::NoRickCircuitSuite;
 
+pub use interface::NoRickCircuitSuite;
 pub mod interface {
     use super::*;
+    use cw_no_rick::NoRickContractSuite;
+    use cw_no_rick::interface::NoRickDeployData;
 
     // ── NoRickSuite ───────────────────────────────────────────────────────────────
-
     /// Full development suite for the No-Rick ZK circuit + CosmWasm verifier pair.
     ///
     /// Holds typed references to the circuit and contract components so callers
@@ -99,17 +96,17 @@ pub mod interface {
         }
 
         fn store_on(chain: Chain) -> Result<Self, Self::Error> {
-            // Your deployment logic here
             let suite = Self::new(chain);
             suite.upload_circuit()?;
             Ok(suite)
         }
 
         fn get_contracts_mut(&mut self) -> Vec<Box<&mut dyn ContractInstance<Chain>>> {
-            todo!()
+            // noop
+            vec![]
         }
 
-        fn load_from(chain: Chain) -> Result<Self, Self::Error> {
+        fn load_from(_chain: Chain) -> Result<Self, Self::Error> {
             todo!()
         }
     }

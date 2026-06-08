@@ -14,7 +14,7 @@
 // Catch documentation errors caused by code changes.
 #![deny(rustdoc::broken_intra_doc_links)]
 #![deny(missing_debug_implementations)]
-#![deny(missing_docs)]
+// #![deny(missing_docs)]
 #![deny(unsafe_code)]
 
 #[macro_use]
@@ -42,7 +42,11 @@ pub mod note;
 pub mod gen;
 pub mod primitives;
 mod spec;
+
+
+#[cfg(feature = "interface")]
 pub mod suite;
+
 #[cfg(test)]
 mod test_vectors;
 pub mod tree;
