@@ -35,7 +35,7 @@ optimizer-clean:
 prepare-corridor-wasm-force:
         #!/usr/bin/env bash
         set -euo pipefail
-        FORCE_WASM_REBUILD=1 bash "{{justfile_directory()}}/../../docs/plans/spectrum/e2e/prepare-corridor-ict-wasm.sh"
+        FORCE_WASM_REBUILD=1 bash "{{justfile_directory()}}/../../crates/terp-rs/docs/private-bridge/e2e/prepare-corridor-ict-wasm.sh"
 
 # ── Demo path (see docs/circuit/DEMO-PATH.md) ─────────────────────────────
 
@@ -60,10 +60,10 @@ demo-keys:
         cargo run -p zk-test-press --bin cc_headstash --features interface
 
 # ── E2E harness L0 (pure seams + suite re-exports; no Docker / no H1 prove) ──
-# Inventory + E2E-id map: docs/plans/spectrum/E2E-HARNESS-PLAN.md
+# Inventory + E2E-id map: crates/terp-rs/docs/private-bridge/E2E-HARNESS-PLAN.md
 # L1 mock ZK: policy + mock proof bytes only; real prove = demo-h1 / nightly.
 
-spectrum_fixtures := justfile_directory() / "../../docs/plans/spectrum/fixtures"
+spectrum_fixtures := justfile_directory() / "../../terp-rs/crates"
 
 # Round-3: emit/validate Domain B BridgeMintClaimPublic golden fixture (mock LC).
 # Documents Tacit anvil roundtrip; optional --try-anvil if forge/anvil present.
@@ -148,10 +148,10 @@ e2e-l1:
 
 # ── Private Bridge corridor lab film (Layer A host; D1–D7 freezes) ───────────
 # Honest: lab_simulated notify + pure/Mock suites — NOT mainnet Cash App / BTC / ZEC.
-# SSOT: docs/plans/spectrum/e2e/CORRIDOR-LAB-STATUS.md
-# Design freezes: docs/plans/spectrum/DESIGN-DECISIONS-CORRIDOR-2026-07-20.md
+# SSOT: crates/terp-rs/docs/private-bridge/e2e/CORRIDOR-LAB-STATUS.md
+# Design freezes: crates/terp-rs/docs/private-bridge/DESIGN-DECISIONS-CORRIDOR-2026-07-20.md
 
-spectrum_e2e := justfile_directory() / "../../docs/plans/spectrum/e2e"
+spectrum_e2e := justfile_directory() / "../../terp-rs/docs/private-bridge/e2e"
 
 # One-command host film: cashapp pure + harness + hash-market notify smoke.
 demo-corridor-lab:
@@ -170,7 +170,7 @@ demo-corridor-lab:
         echo "OK demo-corridor-lab (lab only)"
         echo "  companion pure L0 spine: just demo-e2e-l0"
         echo "  companion L1 Mock mint:  just demo-e2e-l1"
-        echo "  status: docs/plans/spectrum/e2e/CORRIDOR-LAB-STATUS.md"
+        echo "  status: crates/terp-rs/docs/private-bridge/e2e/CORRIDOR-LAB-STATUS.md"
 
 # Notify plane only (build/start hash-market lab + smoke).
 demo-corridor-lab-smoke:
@@ -194,7 +194,7 @@ demo-corridor-mint-after-observe:
 # ── ict_local_funded (S1/S2/S6) — fresh Terp + regtest observe + chain mint ─
 # Honest: local multi-net fidelity, NOT mainnet money. mock_verify labeled.
 # Requires: Docker, dockerd, terpnetwork/terp-core:local-zk (or CORRIDOR_ICT_IMAGE_TAG).
-# SSOT: docs/plans/spectrum/e2e/CORRIDOR-LAB-STATUS.md + agents/.../STATUS-HARNESS-OBSERVE.md
+# SSOT: crates/terp-rs/docs/private-bridge/e2e/CORRIDOR-LAB-STATUS.md + agents/.../STATUS-HARNESS-OBSERVE.md
 
 prepare-corridor-ict-wasm:
         #!/usr/bin/env bash
@@ -286,7 +286,7 @@ demo-corridor-full-local:
         bash "$E2E/demo-corridor-full-local.sh"
 
 # ── Zakura local (D6) — ZEC dest / RPC; does not break demo-corridor-lab ─────
-# SSOT: docs/plans/spectrum/e2e/ZAKURA-LOCAL.md
+# SSOT: crates/terp-rs/docs/private-bridge/e2e/ZAKURA-LOCAL.md
 
 demo-zakura-local-dest:
         #!/usr/bin/env bash

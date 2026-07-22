@@ -45,13 +45,13 @@ async-trait = { workspace = true }
 base64  = { workspace = true }
 blake3  = { workspace = true }
 # Spectrum L0 pure seams (path crates; not in workspace members).
-bridge_auth_seams = { path = "../../../docs/plans/spectrum/fixtures/bridge_auth_seams" }
-compose_seams = { path = "../../../docs/plans/spectrum/fixtures/compose_seams" }
-private_dex_seams = { path = "../../../docs/plans/spectrum/fixtures/private_dex_seams" }
+bridge_auth_seams = { path = "../../terp-rs/crates/bridge_auth_seams" }
+compose_seams = { path = "../../terp-rs/crates/compose_seams" }
+private_dex_seams = { path = "../../terp-rs/crates/private_dex_seams" }
 # TODO(cashapp_zec_corridor): when fixtures/cashapp_zec_corridor lands in parent main,
 # add path dep and drop local DepositIntentV0 in harness/cashapp_zec_corridor.rs.
-# cashapp_zec_corridor = { path = "../../../docs/plans/spectrum/fixtures/cashapp_zec_corridor" }
-seam_note_out = { path = "../../../docs/plans/spectrum/fixtures/seam_note_out", optional = true }
+# cashapp_zec_corridor = { path = "../../terp-rs/crates/cashapp_zec_corridor" }
+seam_note_out = { path = "../../terp-rs/crates/seam_note_out", optional = true }
 sha2 = { workspace = true }
 corez = "0.1.1"
 cosmwasm-std  = { workspace = true }

@@ -5,7 +5,7 @@ members = [
     "test-press",
     "contracts/no-rick",
     "contracts/cw-headstash",
-    "contracts/cw-private-dex",
+    # private-dex lives in terp-rs/contracts/revenue/private-dex (product/revenue home)
 ]
 exclude = [
     # Minimal stub — include when ready
@@ -38,7 +38,7 @@ cosmwasm-schema = { path = "../cosmwasm/packages/schema" }
 cosmwasm-std = { path = "../cosmwasm/packages/std" }
 cw-headstash          = { path = "contracts/cw-headstash" }
 cw-headstash-manifold = { path = "contracts/manifold" }
-cw-private-dex        = { path = "contracts/cw-private-dex" }
+cw-private-dex        = { path = "../terp-rs/contracts/revenue/private-dex" }
 cw-multi-test = { package = "abstract-cw-multi-test", path = "../cw-multi-test-fork" }
 cw-norick = { path = "./contracts/no-rick", features = ["interface"] }
 cw-orch = { path = "../cw-orchestrator/cw-orch" }
