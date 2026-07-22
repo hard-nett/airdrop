@@ -33,6 +33,7 @@ use std::sync::Mutex;
 use std::vec::Vec;
 use std::{env, eprintln, fs, println};
 
+// TODO: use include to paths for publishing libraries
 const KEYS_DIR: &str = "artifacts";
 const PARAMS_FILE: &str = "params.bin";
 const VK_FILE: &str = "verifying_key.bin";

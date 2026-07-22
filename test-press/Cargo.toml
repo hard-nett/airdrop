@@ -6,29 +6,8 @@ edition = { workspace = true }
 [lib]
 crate-type = ["cdylib", "rlib"]
 
-# Binary targets with required features
-[[bin]]
-name = "gen_headstash_keys"
-required-features = ["interface"]
-
-[[bin]]
-name = "create_headstash_proof"
-required-features = ["interface"]
-
-[[bin]]
-name = "gen_headstash_notes"
-required-features = ["interface"]
-
-[[bin]]
-name = "create_test_circuit_data"
-required-features = []
-
-[[bin]]
-name = "gen_randomness"
-required-features = ["interface"]
-
 [features]
-default = ["interface","zk"]
+default = ["interface","zk","l0-seams"]
 library = []
 # Enables TerpVmSuite implementations for each test circuit.
 # Requires native (non-wasm) target — pulls in ict-rs (tokio, bollard, etc.).
@@ -36,20 +15,54 @@ interface = [
     "dep:ict-rs",
     "dep:cw-headstash",
     "dep:cw-headstash-manifold",
+    "cw-private-dex/interface",
     "dep:cw-orch",
-    "dep:cw-no-rick",
+    "dep:cw-norick",
 ]
 zk = ["cosmwasm-std/zk", "cw-orch/zk",]
+# Optional cross-crate decode of NoteOutSketch → SeamNoteOutV0 (compose L0)
+# + note encrypt / persist plan.
+l0-seams = ["dep:seam_note_out"]
+# Live HTTP PUT/GET against hash-market notes_base (reqwest via seam_note_out).
+note-http = ["l0-seams", "seam_note_out/http"]
+# L3 Daemon path: ict-rs Docker Terp + ict-rs-cw-orch Daemon + BridgeMintNote.
+# Required by `corridor_ict_funded` binary / `just demo-corridor-ict`.
+ict-daemon = [
+    "interface",
+    "dep:ict-rs-cw-orch",
+    "dep:tokio",
+    "ict-rs/docker",
+    "ict-rs/testing",
+]
+
+[[bin]]
+name = "corridor_ict_funded"
+path = "src/bin/corridor_ict_funded.rs"
+required-features = ["ict-daemon"]
 
 [dependencies]
 async-trait = { workspace = true }
 base64  = { workspace = true }
 blake3  = { workspace = true }
+# Spectrum L0 pure seams (path crates; not in workspace members).
+bridge_auth_seams = { path = "../../../docs/plans/spectrum/fixtures/bridge_auth_seams" }
+compose_seams = { path = "../../../docs/plans/spectrum/fixtures/compose_seams" }
+private_dex_seams = { path = "../../../docs/plans/spectrum/fixtures/private_dex_seams" }
+# TODO(cashapp_zec_corridor): when fixtures/cashapp_zec_corridor lands in parent main,
+# add path dep and drop local DepositIntentV0 in harness/cashapp_zec_corridor.rs.
+# cashapp_zec_corridor = { path = "../../../docs/plans/spectrum/fixtures/cashapp_zec_corridor" }
+seam_note_out = { path = "../../../docs/plans/spectrum/fixtures/seam_note_out", optional = true }
+sha2 = { workspace = true }
+corez = "0.1.1"
 cosmwasm-std  = { workspace = true }
 cw-headstash = { workspace = true, optional = true, features = ["interface"] }
 cw-headstash-manifold = { workspace = true, optional = true, features = ["interface"] }
-cw-no-rick = { workspace = true, optional = true, features = ["interface"] }
-cw-orch  = { workspace = true, optional = true }
+# Always: SwapStatementPublic map + lab handoff types (G3). interface feature enables cw-orch.
+cw-private-dex = { workspace = true }
+cw-norick = { workspace = true, optional = true, features = ["interface"] }
+cw-orch  = { workspace = true, optional = true, features = ["daemon"] }
+env_logger = "0.11.10"
+#cw-orch-interchain  = { workspace = true, optional = true, features = ["daemon"] }
 ff   = { workspace = true }
 group.workspace = true
 halo2-base  = { workspace = true }
@@ -58,16 +71,21 @@ halo2_proofs  = { workspace = true }
 headstash-randomness  = { workspace = true }
 hex  = { workspace = true }
 ict-rs = { workspace = true, optional = true, features = ["terp"] }
+ict-rs-cw-orch = { path = "../../ict-rs/ict-rs-cw-orch", optional = true }
+tokio = { version = "1", features = ["full"], optional = true }
 pasta_curves  = { workspace = true }
 rand = { workspace = true }
 rand_core = { workspace = true }
+rustls = "0.23.41"
 schemars   = { workspace = true }
 secp256k1  = { workspace = true }
 serde  = { workspace = true }
 serde_json  = { workspace = true }
 sinsemilla  = { workspace = true }
 thiserror = { workspace = true }
+tracing-subscriber = "0.3.23"
 zk-cosmwasm  = { workspace = true }
-zk-headstash  = { workspace = true }
+# Host prove path: re-enable host-crypto + multicore (guest uses workspace defaults only).
+zk-headstash = { workspace = true, features = ["host-crypto", "multicore", "interface"] }
 
 [dev-dependencies]

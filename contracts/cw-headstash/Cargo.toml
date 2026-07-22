@@ -10,6 +10,9 @@ crate-type = ["cdylib", "rlib"]
 default = []
 library = []
 interface = ["dep:cw-orch"]
+# Enable only when deploying to a chain whose wasmvm exports proof_instance_verify.
+# Mirrors cw-private-dex: pulls cosmwasm-std `zk` (host import in guest wasm).
+zk-api = ["cosmwasm-std/zk"]
 
 [dependencies]
 anyhow  = { workspace = true }
@@ -19,10 +22,16 @@ ark-ff  = { workspace = true }
 ark-serialize = { workspace = true }
 blake3 = { workspace = true }
 cosmwasm-schema  = { workspace = true }
-cosmwasm-std  = { workspace = true, features = ["cosmwasm_2_0"] }
+# Guest wasm: no cosmwasm-std `zk` feature (avoids env.proof_instance_verify import
+# missing on stock wasmd). Bridge mint uses pure mock_verify; claim proofs need zk-host.
+# cosmwasm_2_1 required for BLS host imports (hash_to_g2) used by WAVS PoP on instantiate.
+# Do not enable `zk` (proof_instance_verify) unless chain wasmvm exposes it.
+cosmwasm-std  = { workspace = true, features = ["cosmwasm_2_1", "stargate"] }
 cw-orch = { workspace = true, optional = true }
 cw-ownable = { workspace = true }
 cw-storage-plus  = { workspace = true }
+# CosmWasm guest: getrandom needs `custom` (no OS RNG on wasm32-unknown-unknown).
+getrandom = { version = "0.2", default-features = false, features = ["custom"] }
 halo2_proofs  = { workspace = true }
 hex  = { workspace = true }
 pasta_curves = { workspace = true }
@@ -30,7 +39,8 @@ rand_core  = { workspace = true }
 serde  = { workspace = true }
 sha2  = { workspace = true }
 terp-auth  = { workspace = true }
-zk-headstash  = { workspace = true }
+# Inherits workspace default-features=false (no multicore) — required for wasm32 guest.
+zk-headstash = { workspace = true }
 
 [dev-dependencies]
 cw-headstash-manifold = { workspace = true }

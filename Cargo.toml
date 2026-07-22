@@ -2,10 +2,10 @@
 resolver = "2"
 members = [
     "circuit",
-    "contracts/cw-headstash",
-    "contracts/manifold",
     "test-press",
-    "test-press/src/contracts/no-rick",
+    "contracts/no-rick",
+    "contracts/cw-headstash",
+    "contracts/cw-private-dex",
 ]
 exclude = [
     # Minimal stub — include when ready
@@ -33,11 +33,14 @@ blake2b_simd = "1"
 blake3       = "1"
 core3 = "0.1"
 cosmwasm-schema = { path = "../cosmwasm/packages/schema" }
-cosmwasm-std = { path = "../cosmwasm/packages/std", features = ["zk"] }
+# Guest wasm: do not enable `zk` here (injects env.proof_instance_verify). Host packages
+# that need zk APIs re-enable via package-level features.
+cosmwasm-std = { path = "../cosmwasm/packages/std" }
 cw-headstash          = { path = "contracts/cw-headstash" }
 cw-headstash-manifold = { path = "contracts/manifold" }
+cw-private-dex        = { path = "contracts/cw-private-dex" }
 cw-multi-test = { package = "abstract-cw-multi-test", path = "../cw-multi-test-fork" }
-cw-no-rick = { path = "./test-press/src/contracts/no-rick", features = ["interface"] }
+cw-norick = { path = "./contracts/no-rick", features = ["interface"] }
 cw-orch = { path = "../cw-orchestrator/cw-orch" }
 cw-ownable = { path = "../cw-plus-plus/packages/ownable" }
 cw-storage-plus = { path = "../cw-storage-plus" }
@@ -82,7 +85,9 @@ zcash_note_encryption = { version = "0.4", features = ["pre-zip-212"] }
 zcash_spec  = "0.2"
 zip32       = "0.2"
 zk-cosmwasm = { path = "../cosmwasm/packages/zk" }
-zk-headstash = { path = "circuit" }
+# default-features off so wasm guests (cw-headstash) can avoid multicore/rayon.
+# Host packages (test-press, circuit bins) re-enable multicore/interface as needed.
+zk-headstash = { path = "circuit", default-features = false, features = ["circuit", "std"] }
 zk-test-press = { path = "test-press" }
 
 [patch."https://github.com/permissionlessweb/halo2"]

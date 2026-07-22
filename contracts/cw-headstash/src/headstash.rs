@@ -1,3 +1,4 @@
+use crate::distro::{self, DistroHashDomain, GENESIS_ROOT_ID};
 use crate::tokenfactory::TokenStrategy;
 
 use super::*;
@@ -15,8 +16,11 @@ use zk_headstash::value::{NoteDenom, NoteValue};
 pub struct HeadstashCfg {
     // cid: circuit-id of stored circuit in vm
     pub cid: u64,
-    // gr: genesis tree root
+    // gr: genesis tree root (also stored under eligibility root_id = 0)
     pub gr: Binary,
+    /// Default / genesis public-inclusion hash domain (`poseidon-v1` for new drops).
+    #[serde(default)]
+    pub distro_hash_domain: DistroHashDomain,
     // ts: token strategies
     pub ts: Vec<TokenStrategy>,
     // w: wavs operator set
@@ -29,12 +33,18 @@ pub struct HeadstashNote {
     pub i: HeadstashInstances,
     // p: proof
     pub p: Binary,
-    // r: raw recipient of headstash. CanonicalAddr
+    // rr: raw recipient of headstash. CanonicalAddr
     pub rr: Binary,
+    /// Eligibility root this claim proves under. Default `0` = genesis set.
+    /// Circuit public input `anchor` must match the registered root for this id
+    /// once Poseidon-v1 inclusion proofs are live.
+    #[serde(default)]
+    pub root_id: u64,
 }
 
 impl HeadstashNote {
     // verifies a nullifier does not exist in the map, and will save to map if it does not
+    // TODO: ffi api pasta curves
     fn verify_recp_posiedon_hash(&self) -> Result<(), StdError> {
         match pallas::Base::from_repr(self.rr.as_slice().try_into()?)
             .expect("proof has been verified")
@@ -98,16 +108,32 @@ pub fn process_headstash(
     claims: Vec<HeadstashNote>,
 ) -> Result<Response, StdError> {
     let cfg = HEADSTASH_CFG.load(deps.storage)?;
+    // Batch-local keys are domain-separated by root_id so two claims under
+    // different additive sets with the same nf encoding do not collide.
     let mut n = HashSet::new();
     let mut cts = HashMap::new();
 
     for claim in &claims {
-        // verify no nullifier duplicates at once.
-        if !n.insert(claim.i.nf.clone()) {
-            return Err(StdError::msg(format!("null: {}", &claim.i.nf.to_hex())));
+        let root_id = claim.root_id;
+        // Claim must reference a registered eligibility root (additive set).
+        // Anchor must equal the registered root bytes (depth-32 Poseidon path root for new drops).
+        let root_entry =
+            distro::assert_claim_root(deps.storage, root_id, Some(&claim.i.anchor))?;
+        // Default product path: only Poseidon-v1 inclusion roots (ADR).
+        // Instantiation with `sinsemilla-legacy` genesis opts into recovery mode.
+        if cfg.distro_hash_domain == DistroHashDomain::PoseidonV1 {
+            distro::assert_claim_domain_poseidon_v1(&root_entry)?;
+        }
+
+        let nf_hex = claim.i.nf.to_hex();
+        let nf_key = distro::nullifier_storage_key(root_id, &nf_hex);
+
+        // verify no nullifier duplicates in this batch (same root scope).
+        if !n.insert(nf_key.clone()) {
+            return Err(StdError::msg(format!("null: {nf_hex} (root_id={root_id})")));
         }
         // verify nullifier is new. adds nullifier to map if so
-        verify_nullifier_stateful(deps.storage, claim.i.nf.to_hex())?;
+        verify_nullifier_stateful(deps.storage, nf_key)?;
 
         // verify denom is supported for this token strategy
         if !cfg
@@ -118,12 +144,30 @@ pub fn process_headstash(
             return Err(StdError::msg("incorrect token denom"));
         }
 
-        // verify headstash proof
-        deps.api.halo2_proof_instance_verify(
-            cfg.cid.into(),
-            &claim.p.to_vec(),
-            &<HeadstashInstances as Into<Instance>>::into(claim.i.clone()).to_bytes(),
-        )?;
+        // verify headstash proof (requires cosmwasm-std `zk` + chain wasmvm export).
+        // Guest builds omit that import so BridgeMintNote deploys on stock wasmd;
+        // claim path is fail-closed unless built with zk host support.
+        #[cfg(feature = "zk-api")]
+        {
+            let ok = deps
+                .api
+                .proof_instance_verify(
+                    cfg.cid.into(),
+                    &claim.p,
+                    &<HeadstashInstances as Into<Instance>>::into(claim.i.clone()).to_bytes(),
+                )
+                .map_err(|e| StdError::msg(e.to_string()))?;
+            if !ok {
+                return Err(StdError::msg("invalid headstash proof"));
+            }
+        }
+        #[cfg(not(feature = "zk-api"))]
+        {
+            let _ = (&cfg.cid, &claim.p, &claim.i);
+            return Err(StdError::msg(
+                "headstash claim proof verify requires zk-api feature + zk wasmvm (use BridgeMintNote for corridor)",
+            ));
+        }
 
         // verify recp integrity
         claim.verify_recp_posiedon_hash()?;
@@ -135,7 +179,6 @@ pub fn process_headstash(
 
     let mut res: Response = Response::new();
 
-    // TODO(hard-nett): implement multi-token support
     for t in cfg.ts {
         let td = t.denom(&env.contract.address);
 
@@ -204,6 +247,26 @@ pub fn verify_nullifier_stateful(
     Ok(())
 }
 
+/// Owner registers an additive eligibility root (Poseidon-v1 policy).
+pub fn register_eligibility_root(
+    deps: DepsMut,
+    info: MessageInfo,
+    root: Binary,
+    domain: Option<DistroHashDomain>,
+    label: Option<String>,
+) -> Result<Response, StdError> {
+    cw_ownable::assert_owner(deps.storage, &info.sender)?;
+    let cfg = HEADSTASH_CFG.load(deps.storage)?;
+    let domain = domain.unwrap_or(cfg.distro_hash_domain);
+    let entry = distro::register_eligibility_root(deps.storage, root, domain, label)?;
+
+    Ok(Response::new()
+        .add_attribute("action", "register_eligibility_root")
+        .add_attribute("root_id", entry.root_id.to_string())
+        .add_attribute("distro_hash_domain", entry.domain.as_str())
+        .add_attribute("root", entry.root.to_string()))
+}
+
 pub fn query_nullifiers(
     deps: Deps,
     start_after: Option<String>,
@@ -216,4 +279,39 @@ pub fn query_nullifiers(
         limit,
         cosmwasm_std::Order::Descending,
     )?)
+}
+
+pub fn query_distro_config(deps: Deps) -> StdResult<Binary> {
+    let cfg = HEADSTASH_CFG.load(deps.storage)?;
+    let next = NEXT_ROOT_ID.may_load(deps.storage)?.unwrap_or(1);
+    to_json_binary(&crate::msg::DistroConfigResponse {
+        default_domain: cfg.distro_hash_domain,
+        default_domain_tag: cfg.distro_hash_domain.as_str().to_string(),
+        next_root_id: next,
+        genesis_root: cfg.gr,
+    })
+}
+
+pub fn query_eligibility_root(deps: Deps, root_id: u64) -> StdResult<Binary> {
+    to_json_binary(&distro::require_root(deps.storage, root_id)?)
+}
+
+pub fn query_eligibility_roots(
+    deps: Deps,
+    start_after: Option<u64>,
+    limit: Option<u32>,
+) -> StdResult<Binary> {
+    let limit = limit.unwrap_or(30).min(100) as usize;
+    let start = start_after.map(cw_storage_plus::Bound::exclusive);
+    let roots: Vec<_> = distro::ELIGIBILITY_ROOTS
+        .range(deps.storage, start, None, Order::Ascending)
+        .take(limit)
+        .map(|r| r.map(|(_, v)| v))
+        .collect::<StdResult<_>>()?;
+    to_json_binary(&roots)
+}
+
+/// Convenience for tests / callers: genesis root_id.
+pub fn genesis_root_id() -> u64 {
+    GENESIS_ROOT_ID
 }

@@ -6,9 +6,10 @@ extern crate alloc;
 extern crate std;
 
 pub mod circuits;
+/// L0 pure harness: claim fixture + bridge_auth_seams re-exports (no Docker).
+pub mod harness;
 pub mod suite;
 pub mod suites;
-pub mod traits;
 pub mod unit;
 
 #[cfg(feature = "interface")]

@@ -1,3 +1,6 @@
+pub mod bridge;
+pub mod distro;
+pub mod egress;
 pub mod headstash;
 pub mod msg;
 pub mod tokenfactory;
@@ -6,7 +9,18 @@ pub mod wavs;
 #[cfg(feature = "interface")]
 pub mod interface;
 
+// CosmWasm guest has no OS RNG — register unsupported custom getrandom so the
+// dependency graph (via zk-headstash / rand) compiles for wasm32-unknown-unknown.
+// Required for Daemon upload of BridgeMintNote (ict_local_funded).
+#[cfg(target_arch = "wasm32")]
+fn guest_getrandom(_dest: &mut [u8]) -> Result<(), getrandom::Error> {
+    Err(getrandom::Error::UNSUPPORTED)
+}
+#[cfg(target_arch = "wasm32")]
+getrandom::register_custom_getrandom!(guest_getrandom);
+
 use crate::{
+    distro::{DistroHashDomain, ELIGIBILITY_ROOTS, GENESIS_ROOT_ID, NEXT_ROOT_ID},
     headstash::*,
     tokenfactory::TokenStrategy,
     wavs::{WavsOperatorSet, WavsProofOfOwnership},
@@ -15,9 +29,9 @@ use crate::{
 use ark_ff::Zero;
 use cosmwasm_schema::{QueryResponses, cw_serde, serde};
 use cosmwasm_std::{
-    Addr, AnyMsg, BLS12_381_G1_GENERATOR as G1, BLS12_381_G2_GENERATOR as G2, BankMsg, Binary,
-    Coin, CosmosMsg, Deps, DepsMut, Env, MessageInfo, Order, Reply, ReplyOn, Response, StdError,
-    StdResult, Storage, SubMsg, Uint128, coins, from_json, to_json_binary,
+    Addr, BLS12_381_G1_GENERATOR as G1, BLS12_381_G2_GENERATOR as G2, BankMsg, Binary, Coin,
+    CosmosMsg, Deps, DepsMut, Env, MessageInfo, Order, Reply, Response, StdError, StdResult,
+    Storage, SubMsg, Uint128, coins, from_json, to_json_binary,
 };
 use cw_storage_plus::{Bound, Bounder, Item, KeyDeserialize, Map};
 pub use msg::*;
@@ -142,6 +156,35 @@ fn msg_burn(
     })
 }
 
+fn save_headstash_cfg(
+    storage: &mut dyn Storage,
+    genesis_root: Binary,
+    distro_hash_domain: DistroHashDomain,
+    genesis_label: Option<String>,
+    ts: Vec<TokenStrategy>,
+    w: WavsOperatorSet,
+) -> Result<(), StdError> {
+    distro::validate_instantiate_domain(distro_hash_domain)?;
+    distro::register_genesis_root(
+        storage,
+        genesis_root.clone(),
+        distro_hash_domain,
+        genesis_label,
+    )?;
+    GENESIS_TREE_ROOT.save(storage, &genesis_root)?;
+    HEADSTASH_CFG.save(
+        storage,
+        &HeadstashCfg {
+            gr: genesis_root,
+            distro_hash_domain,
+            ts,
+            w,
+            cid: 0, // TODO: implement circuit ID
+        },
+    )?;
+    Ok(())
+}
+
 #[cfg_attr(not(feature = "library"), cosmwasm_std::entry_point)]
 pub fn instantiate(
     deps: DepsMut,
@@ -155,24 +198,27 @@ pub fn instantiate(
     msg.token_strategy.validate()?;
     let ts = msg.token_strategy;
     let c = env.contract.address.clone();
+    let domain = msg.distro_hash_domain;
+    let genesis_label = msg.genesis_label;
     match ts.clone() {
         tokenfactory::TokenStrategy::NewFungible(ref cfg) => {
             // Save config for reply handler to access initial mints
             let w = msg.wavs.proof_of_ownership(deps.api, &c)?;
-            HEADSTASH_CFG.save(
+            save_headstash_cfg(
                 deps.storage,
-                &HeadstashCfg {
-                    gr: msg.genesis_root.clone(),
-                    ts: vec![ts],
-                    w,
-                    cid: 0, // TODO: implement circuit ID
-                },
+                msg.genesis_root.clone(),
+                domain,
+                genesis_label,
+                vec![ts],
+                w,
             )?;
 
             Ok(Response::new()
                 .add_attribute("action", "instantiate")
                 .add_attribute("owner", info.sender)
                 .add_attribute("subdenom", cfg.subdenom.raw.clone())
+                .add_attribute("distro_hash_domain", domain.as_str())
+                .add_attribute("root_id", GENESIS_ROOT_ID.to_string())
                 .add_submessage(
                     // Create new denom, denom info is saved in the reply
                     SubMsg::reply_on_success(
@@ -199,20 +245,21 @@ pub fn instantiate(
 
             // Save config for existing tokens too
             let w = msg.wavs.proof_of_ownership(deps.api, &c)?;
-            HEADSTASH_CFG.save(
+            save_headstash_cfg(
                 deps.storage,
-                &HeadstashCfg {
-                    gr: msg.genesis_root.clone(),
-                    ts: vec![ts],
-                    w,
-                    cid: 0, // TODO: implement circuit ID
-                },
+                msg.genesis_root.clone(),
+                domain,
+                genesis_label,
+                vec![ts],
+                w,
             )?;
 
             Ok(Response::new()
                 .add_attribute("action", "instantiate")
                 .add_attribute("owner", info.sender)
-                .add_attribute("denom", denom.raw.clone()))
+                .add_attribute("denom", denom.raw.clone())
+                .add_attribute("distro_hash_domain", domain.as_str())
+                .add_attribute("root_id", GENESIS_ROOT_ID.to_string()))
         }
     }
 }
@@ -229,6 +276,11 @@ pub fn execute(
         ExecuteMsg::ProcessHeadstash { claims } => {
             crate::headstash::process_headstash(deps, env, claims)
         }
+        ExecuteMsg::RegisterEligibilityRoot {
+            root,
+            domain,
+            label,
+        } => crate::headstash::register_eligibility_root(deps, info, root, domain, label),
         ExecuteMsg::Mint { to_address, amount } => {
             execute_mint(deps, env, info, to_address, amount)
         }
@@ -236,6 +288,41 @@ pub fn execute(
             from_address,
             amount,
         } => execute_burn(deps, env, info, from_address, amount),
+        // Private-bridge mint router (CLARITY: cw-headstash is the mint)
+        ExecuteMsg::UpdateReflection {
+            pool_root,
+            spent_root,
+            burn_root,
+            source_height,
+            tip_height,
+        } => bridge::execute_update_reflection(
+            deps,
+            info,
+            pool_root,
+            spent_root,
+            burn_root,
+            source_height,
+            tip_height,
+        ),
+        ExecuteMsg::SetReflectionSnapshot { snapshot } => {
+            bridge::execute_set_reflection_snapshot(deps, info, snapshot)
+        }
+        ExecuteMsg::RegisterAsset {
+            asset_id,
+            local_denom,
+            origin,
+            status,
+        } => bridge::execute_register_asset(deps, info, asset_id, local_denom, origin, status),
+        ExecuteMsg::SetExternalAssetRegistry { addr } => {
+            bridge::execute_set_external_asset_registry(deps, info, addr)
+        }
+        ExecuteMsg::SetBridgeCfg { cfg } => bridge::execute_set_bridge_cfg(deps, info, cfg),
+        ExecuteMsg::BridgeMintNote { claim, proof } => {
+            bridge::execute_bridge_mint_note(deps, env, info, claim, proof)
+        }
+        ExecuteMsg::BridgeEgressBurn { statement, proof } => {
+            egress::execute_bridge_egress_burn(deps, env, info, statement, proof)
+        }
     }
 }
 
@@ -249,6 +336,17 @@ pub fn query(deps: Deps, _env: Env, msg: QueryMsg) -> StdResult<Binary> {
         QueryMsg::Nullifiers { start_after, limit } => {
             headstash::query_nullifiers(deps, start_after, limit)
         }
+        QueryMsg::DistroConfig {} => headstash::query_distro_config(deps),
+        QueryMsg::EligibilityRoot { root_id } => headstash::query_eligibility_root(deps, root_id),
+        QueryMsg::EligibilityRoots { start_after, limit } => {
+            headstash::query_eligibility_roots(deps, start_after, limit)
+        }
+        QueryMsg::ReflectionTip {} => bridge::query_reflection_tip(deps),
+        QueryMsg::IsBridgeMinted { nullifier } => bridge::query_is_bridge_minted(deps, nullifier),
+        QueryMsg::IsEgressSpent { nullifier } => egress::query_is_egress_spent(deps, nullifier),
+        QueryMsg::BridgeAsset { asset_id } => bridge::query_asset(deps, asset_id),
+        QueryMsg::BridgeConfig {} => bridge::query_bridge_cfg(deps),
+        QueryMsg::ExternalAssetRegistry {} => bridge::query_external_asset_registry(deps),
     }
 }
 
@@ -332,12 +430,12 @@ pub fn reply(deps: DepsMut, env: Env, msg: Reply) -> Result<Response, StdError> 
         CREATE_DENOM_REPLY_ID => {
             // Extract the new_token_denom from the reply data
             // In CosmWasm v3, the reply data contains the response from the submessage
-            let response_data = msg
+            let response_data = &msg
                 .result
                 .into_result()
-                .map_err(|_| StdError::msg("Submessage failed"))?
-                .data
-                .ok_or_else(|| StdError::msg("No response data"))?;
+                .map_err(|e| StdError::msg(e.to_string()))?
+                .msg_responses[0]
+                .value;
 
             #[derive(serde::Deserialize)]
             struct MsgCreateDenomResponse {
@@ -426,6 +524,8 @@ impl terp_auth::TerpAccountTrait for CwHeadstash {
         WAVS_OPERATORS.clear(deps.storage);
         HEADSTASH_CFG.remove(deps.storage);
         NULLIFIERS.clear(deps.storage);
+        ELIGIBILITY_ROOTS.clear(deps.storage);
+        NEXT_ROOT_ID.remove(deps.storage);
         Ok(Response::default())
     }
 
@@ -530,10 +630,8 @@ mod instantiate_tests {
 
     use super::*;
     use crate::tokenfactory::{DenomUnit, Metadata};
-    use ark_ff::UniformRand;
     use cosmwasm_std::testing::{message_info, mock_dependencies, mock_env};
-    use cosmwasm_std::{Addr, Api, HashFunction, Uint128, coins};
-    use rand_core::OsRng;
+    use cosmwasm_std::{Addr, Api, HashFunction, Uint128};
 
     #[test]
     fn minimal_test() {
@@ -544,6 +642,8 @@ mod instantiate_tests {
         let msg = InstantiateMsg {
             genesis_root: Binary::from_base64("AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=")
                 .unwrap(),
+            distro_hash_domain: Default::default(),
+            genesis_label: None,
             token_strategy: TokenStrategy::NewFungible(NewTokenConfig {
                 subdenom: HeadstashTokenObject {
                     proof: derive_nd("test"),
@@ -558,69 +658,20 @@ mod instantiate_tests {
         };
 
         let res = instantiate(deps.as_mut(), env.clone(), info, msg).unwrap();
-        // println!("{:#?}", res);
-        assert_eq!(res.messages.len(), 2);
+        // CreateDenom submessage only; initial mints (if any) land in reply.
+        assert_eq!(res.messages.len(), 1);
+        assert_eq!(
+            res.attributes
+                .iter()
+                .find(|a| a.key == "distro_hash_domain")
+                .map(|a| a.value.as_str()),
+            Some("poseidon-v1")
+        );
     }
 
-    // Helper: Create valid WAVS proof-of-ownership (matches your working tests)
+    // Helper: real BLS PoP for instantiate (see wavs::generate_test_wavs_proof).
     fn valid_wavs_proof(total_operators: usize) -> WavsProofOfOwnership {
-        use ark_bls12_381::{Fr, G1Affine, G1Projective, G2Affine};
-        use ark_ec::AffineRepr;
-        use ark_ff::UniformRand;
-        use ark_serialize::{CanonicalDeserialize, CanonicalSerialize};
-        use cosmwasm_std::testing::MockApi;
-        use rand_core::OsRng;
-
-        let api = MockApi::default();
-
-        let mut poos = vec![];
-        let mut agg_pk_projective = G1Projective::default();
-
-        // Generate valid keypairs + proof-of-possession for each operator
-        for _ in 0..total_operators {
-            let sk = Fr::rand(&mut OsRng);
-            let pk: G1Affine = (G1Affine::generator() * sk).into();
-
-            let pk_bytes = {
-                let mut buf = vec![];
-                pk.serialize_compressed(&mut buf).unwrap();
-                buf
-            };
-
-            // Hash pk → G2 point
-            let pop_hash = api
-                .bls12_381_hash_to_g2(HashFunction::Sha256, &pk_bytes, &G2)
-                .unwrap();
-
-            let h_point = G2Affine::deserialize_compressed(&pop_hash[..]).unwrap();
-
-            // PoP signature: sig = sk * H(pk)
-            let pop_sig: G2Affine = (h_point * sk).into();
-            let mut sig_bytes = vec![];
-            pop_sig.serialize_compressed(&mut sig_bytes).unwrap();
-
-            poos.push(wavs::WavsOpAuth {
-                key: hex::encode(&pk_bytes),
-                poo: hex::encode(&sig_bytes),
-            });
-
-            // Accumulate public key for aggregate
-            agg_pk_projective += pk;
-        }
-
-        let agg_pk: G1Affine = agg_pk_projective.into();
-        let mut agg_pk_bytes = vec![];
-        agg_pk.serialize_compressed(&mut agg_pk_bytes).unwrap();
-
-        WavsProofOfOwnership {
-            poos,
-            msg: wavs::WavsAuthMetadata {
-                aggregate_key: hex::encode(agg_pk_bytes),
-                threshold: (total_operators * 2 / 3) + 1, // standard 2f+1
-                total_operators,
-                nonce: 0,
-            },
-        }
+        wavs::generate_test_wavs_proof(total_operators)
     }
     fn mock_metadata() -> Metadata {
         Metadata {
@@ -656,6 +707,8 @@ mod instantiate_tests {
         let msg = InstantiateMsg {
             genesis_root: Binary::from_base64("AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=")
                 .unwrap(),
+            distro_hash_domain: Default::default(),
+            genesis_label: None,
             token_strategy: TokenStrategy::NewFungible(NewTokenConfig {
                 subdenom: HeadstashTokenObject {
                     proof: derive_nd(&"test"),
@@ -693,7 +746,7 @@ mod instantiate_tests {
                     }
                     _ => panic!("Expected Stargate message for CreateDenom"),
                 }
-                assert_eq!(reply_on, &ReplyOn::Success);
+                assert_eq!(reply_on, &cosmwasm_std::ReplyOn::Success);
             }
             _ => panic!("Expected SubMsg"),
         }
@@ -715,6 +768,8 @@ mod instantiate_tests {
 
         let msg = InstantiateMsg {
             genesis_root: Binary::from([0u8; 32]),
+            distro_hash_domain: Default::default(),
+            genesis_label: None,
             token_strategy: TokenStrategy::ExistingFungible(HeadstashTokenObject::new(
                 "existing_token".to_string(),
             )),
@@ -723,12 +778,14 @@ mod instantiate_tests {
 
         let res = instantiate(deps.as_mut(), env.clone(), info, msg).unwrap();
 
-        assert_eq!(res.messages.len(), 1);
+        // ExistingFungible does not enqueue CreateDenom.
+        assert_eq!(res.messages.len(), 0);
 
         // Config should be saved for existing fungible tokens
         let cfg = HEADSTASH_CFG.load(&deps.storage).unwrap();
         assert_eq!(cfg.ts.len(), 1);
         assert!(matches!(cfg.ts[0], TokenStrategy::ExistingFungible(_)));
+        assert_eq!(cfg.distro_hash_domain, DistroHashDomain::PoseidonV1);
     }
 
     #[test]
@@ -742,6 +799,8 @@ mod instantiate_tests {
 
         let msg = InstantiateMsg {
             genesis_root: Binary::from([0u8; 32]),
+            distro_hash_domain: Default::default(),
+            genesis_label: None,
             token_strategy: TokenStrategy::ExistingFungible(HeadstashTokenObject::new(
                 "test".to_string(),
             )),
@@ -769,6 +828,8 @@ mod instantiate_tests {
 
         let msg = InstantiateMsg {
             genesis_root: Binary::from([0u8; 32]),
+            distro_hash_domain: Default::default(),
+            genesis_label: None,
             token_strategy: TokenStrategy::NewFungible(NewTokenConfig {
                 subdenom: HeadstashTokenObject::new("test".to_string()),
                 metadata: mock_metadata(),
@@ -800,6 +861,8 @@ mod instantiate_tests {
 
         let msg = InstantiateMsg {
             genesis_root: Binary::from([0u8; 32]),
+            distro_hash_domain: Default::default(),
+            genesis_label: None,
             token_strategy: TokenStrategy::NewFungible(NewTokenConfig {
                 subdenom: HeadstashTokenObject::new("test".to_string()),
                 metadata: mock_metadata(),
@@ -823,10 +886,12 @@ mod instantiate_tests {
 
         let info = message_info(&sender, &[]);
 
-        let genesis_root = Binary::from_base64("YmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmI=").unwrap();
+        let genesis_root = Binary::from(vec![0xbb; 32]);
 
         let msg = InstantiateMsg {
             genesis_root: genesis_root.clone(),
+            distro_hash_domain: Default::default(),
+            genesis_label: None,
             token_strategy: TokenStrategy::NewFungible(NewTokenConfig {
                 subdenom: HeadstashTokenObject::new("test".to_string()),
                 metadata: mock_metadata(),
@@ -844,7 +909,124 @@ mod instantiate_tests {
 
         let cfg = HEADSTASH_CFG.load(&deps.storage).unwrap();
         assert_eq!(cfg.gr, genesis_root);
+        assert_eq!(cfg.distro_hash_domain, DistroHashDomain::PoseidonV1);
         assert_eq!(cfg.ts.len(), 1);
         assert!(cfg.w.msg.nonce == 0);
+
+        let elig = distro::require_root(&deps.storage, GENESIS_ROOT_ID).unwrap();
+        assert_eq!(elig.root, genesis_root);
+        assert_eq!(elig.domain, DistroHashDomain::PoseidonV1);
+    }
+
+    #[test]
+    fn instantiate_rejects_empty_root() {
+        let mut deps = mock_dependencies();
+        let env = mock_env();
+        let sender = deps.api.addr_make("sender");
+        let info = message_info(&sender, &[]);
+
+        let msg = InstantiateMsg {
+            genesis_root: Binary::default(),
+            distro_hash_domain: Default::default(),
+            genesis_label: None,
+            token_strategy: TokenStrategy::NewFungible(NewTokenConfig {
+                subdenom: HeadstashTokenObject::new("test".to_string()),
+                metadata: mock_metadata(),
+                initial_mint: None,
+                manager: None,
+                minters: vec![],
+            }),
+            wavs: valid_wavs_proof(1),
+        };
+
+        let err = instantiate(deps.as_mut(), env, info, msg).unwrap_err();
+        assert!(err.to_string().contains("empty"));
+    }
+
+    #[test]
+    fn register_second_root_additive_owner() {
+        let mut deps = mock_dependencies();
+        let env = mock_env();
+        let sender = deps.api.addr_make("sender");
+        let info = message_info(&sender, &[]);
+
+        let msg = InstantiateMsg {
+            genesis_root: Binary::from(vec![0x11; 32]),
+            distro_hash_domain: DistroHashDomain::PoseidonV1,
+            genesis_label: Some("drop-0".into()),
+            token_strategy: TokenStrategy::NewFungible(NewTokenConfig {
+                subdenom: HeadstashTokenObject::new("test".to_string()),
+                metadata: mock_metadata(),
+                initial_mint: None,
+                manager: None,
+                minters: vec![],
+            }),
+            wavs: valid_wavs_proof(1),
+        };
+        instantiate(deps.as_mut(), env.clone(), info.clone(), msg).unwrap();
+
+        let res = execute(
+            deps.as_mut(),
+            env.clone(),
+            info,
+            ExecuteMsg::RegisterEligibilityRoot {
+                root: Binary::from(vec![0x22; 32]),
+                domain: None,
+                label: Some("drop-1".into()),
+            },
+        )
+        .unwrap();
+        assert_eq!(
+            res.attributes
+                .iter()
+                .find(|a| a.key == "root_id")
+                .map(|a| a.value.as_str()),
+            Some("1")
+        );
+
+        let e1 = distro::require_root(&deps.storage, 1).unwrap();
+        assert_eq!(e1.root, Binary::from(vec![0x22; 32]));
+        assert_eq!(e1.domain, DistroHashDomain::PoseidonV1);
+    }
+
+    #[test]
+    fn claim_unregistered_root_rejected_without_proof() {
+        // Direct state-machine path used by process_headstash before ZK verify.
+        let mut deps = mock_dependencies();
+        let env = mock_env();
+        let sender = deps.api.addr_make("sender");
+        let info = message_info(&sender, &[]);
+
+        let msg = InstantiateMsg {
+            genesis_root: Binary::from(vec![0x11; 32]),
+            distro_hash_domain: Default::default(),
+            genesis_label: None,
+            token_strategy: TokenStrategy::NewFungible(NewTokenConfig {
+                subdenom: HeadstashTokenObject::new("test".to_string()),
+                metadata: mock_metadata(),
+                initial_mint: None,
+                manager: None,
+                minters: vec![],
+            }),
+            wavs: valid_wavs_proof(1),
+        };
+        instantiate(deps.as_mut(), env.clone(), info, msg).unwrap();
+
+        let claim = HeadstashNote {
+            i: HeadstashInstances {
+                anchor: Binary::from(vec![0x11; 32]),
+                nd: Binary::from(vec![0u8; 32]),
+                v: 1,
+                nf: Binary::from(vec![0xAB; 32]),
+                recp: Binary::from(vec![0u8; 32]),
+                cmx: Binary::from(vec![0u8; 32]),
+            },
+            p: Binary::default(),
+            rr: Binary::from(vec![0u8; 32]),
+            root_id: 99,
+        };
+
+        let err = process_headstash(deps.as_mut(), env, vec![claim]).unwrap_err();
+        assert!(err.to_string().contains("unregistered eligibility root_id"));
     }
 }
