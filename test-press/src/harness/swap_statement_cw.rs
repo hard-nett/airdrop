@@ -155,12 +155,34 @@ pub fn lab_swap_from_seam_params(
     out_owner: [u8; 32],
     out_rcm: [u8; 32],
 ) -> SwapFromSeamParams {
+    lab_swap_from_seam_params_with_reserves(
+        asset_in,
+        asset_out,
+        delta_in,
+        out_owner,
+        out_rcm,
+        LAB_R_IN,
+        LAB_R_OUT,
+    )
+}
+
+/// Like [`lab_swap_from_seam_params`] but with explicit pre-trade reserves
+/// (omni bridged-LP seed uses LP note values, not magic LAB_R_*).
+pub fn lab_swap_from_seam_params_with_reserves(
+    asset_in: AssetId32,
+    asset_out: AssetId32,
+    delta_in: Option<u128>,
+    out_owner: [u8; 32],
+    out_rcm: [u8; 32],
+    r_in_before: u128,
+    r_out_before: u128,
+) -> SwapFromSeamParams {
     SwapFromSeamParams {
         pool_id: LAB_POOL_ID,
         asset_in,
         asset_out,
-        r_in_before: LAB_R_IN,
-        r_out_before: LAB_R_OUT,
+        r_in_before,
+        r_out_before,
         gamma: LAB_GAMMA,
         gamma_den: LAB_GAMMA_DEN,
         min_out: 1,
@@ -241,11 +263,30 @@ pub fn assert_mint_handoff_continuous(
 /// Continuous path: `MintEvidenceV0` openings → SEAM sketch → `SwapActionV0` (no synthetic NoteIn).
 /// Fail-closed on missing openings, empty proof, pool ν == bridge ν.
 /// Post-build: [`assert_mint_handoff_continuous`] (MintEvidence ↔ spend openings glue).
+///
+/// Uses magic lab reserves (`LAB_R_IN`/`LAB_R_OUT`). For omni bridged-LP, use
+/// [`build_swap_spend_handoff_from_mint_with_reserves`].
 pub fn build_swap_spend_handoff_from_mint(
     mint: &MintEvidenceV0,
     proof_mode: ProofModeLabel,
 ) -> Result<SwapSpendHandoffV0, SwapHandoffError> {
+    build_swap_spend_handoff_from_mint_with_reserves(mint, proof_mode, LAB_R_IN, LAB_R_OUT)
+}
+
+/// Build settle handoff against an **existing** pool whose public reserves are
+/// `r_in_before` / `r_out_before` (typically LP-seeded BTC/ZEC values).
+pub fn build_swap_spend_handoff_from_mint_with_reserves(
+    mint: &MintEvidenceV0,
+    proof_mode: ProofModeLabel,
+    r_in_before: u128,
+    r_out_before: u128,
+) -> Result<SwapSpendHandoffV0, SwapHandoffError> {
     mint.require_settle_openings()?;
+    if r_in_before == 0 || r_out_before == 0 {
+        return Err(SwapHandoffError::Other(
+            "pool reserves zero — seed LP liquidity first".into(),
+        ));
+    }
     let mut sketch = seam_sketch_from_mint_evidence(mint, 0)?;
     let asset_in = sketch.asset_id;
     let asset_out = lab_asset_out_zec();
@@ -259,9 +300,10 @@ pub fn build_swap_spend_handoff_from_mint(
     registry.register(asset_in);
     registry.register(asset_out);
 
-    // Cap delta_in so lab virtual reserves stay healthy; residual → change note.
+    // Cap delta_in so virtual reserves stay healthy; residual → change note.
+    // Omni pools have large R; still cap tiny lab user mints relative to full value.
     let full_value = mint.value_u64 as u128;
-    let delta_in = full_value.min(10_000);
+    let delta_in = full_value.min(10_000).min(r_in_before / 10).max(1).min(full_value);
     if delta_in == 0 {
         return Err(SwapHandoffError::Other("delta_in=0".into()));
     }
@@ -273,8 +315,15 @@ pub fn build_swap_spend_handoff_from_mint(
         r[1] = 0x0B;
         r
     };
-    let mut params =
-        lab_swap_from_seam_params(asset_in, asset_out, Some(delta_in), out_owner, out_rcm);
+    let mut params = lab_swap_from_seam_params_with_reserves(
+        asset_in,
+        asset_out,
+        Some(delta_in),
+        out_owner,
+        out_rcm,
+        r_in_before,
+        r_out_before,
+    );
 
     if full_value > delta_in {
         let mut change_rcm = [0u8; 32];
@@ -348,6 +397,16 @@ pub fn build_swap_spend_handoff_from_mint(
 /// Expected host quote for lab reserves (preflight / multitest assert).
 pub fn lab_quote_delta_out(delta_in: u128) -> Result<u128, SwapActionError> {
     quote_exact_in(LAB_R_IN, LAB_R_OUT, delta_in, LAB_GAMMA, LAB_GAMMA_DEN)
+        .map_err(|_| SwapActionError::ErrBadAmount)
+}
+
+/// Quote against explicit pool reserves (omni LP-seeded pool).
+pub fn quote_delta_out_with_reserves(
+    r_in: u128,
+    r_out: u128,
+    delta_in: u128,
+) -> Result<u128, SwapActionError> {
+    quote_exact_in(r_in, r_out, delta_in, LAB_GAMMA, LAB_GAMMA_DEN)
         .map_err(|_| SwapActionError::ErrBadAmount)
 }
 

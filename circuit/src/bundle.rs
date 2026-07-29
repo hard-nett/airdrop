@@ -4,10 +4,10 @@ use alloc::vec::Vec;
 
 pub mod commitments;
 
-//  #[cfg(feature = "circuit")]
+// BatchValidator restored in batch.rs; re-export when full bundle module is live.
+#[cfg(feature = "circuit")]
+#[allow(dead_code)]
 mod batch;
-//  #[cfg(feature = "circuit")]
-// pub use batch::BatchValidator;
 
 use core::fmt;
 

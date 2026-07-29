@@ -24,13 +24,22 @@
 //! | `CORRIDOR_ICT_MNEMONIC` | abandon…about | Deployer/faucet mnemonic |
 //! | `CORRIDOR_MOCK_VERIFY` | `true` | Bridge + dex mock_verify on funded deploy |
 //! | `CORRIDOR_CHAIN_SETTLE` | off | Deploy dex + SettleSwap after mint (G3) |
-//! | `CORRIDOR_ZEC_EGRESS_D` | off | Option D: burn → lab pay after settle (requires settle) |
+//! | `CORRIDOR_ZEC_EGRESS_D` | off | Option D: burn → ZEC release after settle (requires settle) |
+//! | `CORRIDOR_ZEC_RELEASE` | profile-default | `threshold_escrow` (product) or `lab_inventory` (residual) |
+//! | `CORRIDOR_PROFILE` | (empty) | `omni_production_shaped` → product green bar + threshold default |
+//! | `CORRIDOR_ALLOW_LAB_INVENTORY_RESIDUAL` | off | Explicit residual only — product green FAILS without this |
 //! | `CORRIDOR_SKIP_SWAP_FILM` | off | Skip pure W0–W7 (does **not** skip chain settle/egress) |
 //! | `CORRIDOR_RUN_SWAP_FILM` | off | When settle on, also run pure film residual |
 //! | `CORRIDOR_MINT_EVIDENCE_PATH` | `/tmp/corridor-mint-evidence.json` | |
 //! | `CORRIDOR_SETTLE_RECEIPT_PATH` | `/tmp/corridor-settle-receipt.json` | |
 //! | `CORRIDOR_EGRESS_BURN_EVIDENCE_PATH` | `/tmp/corridor-egress-burn-evidence.json` | |
 //! | `CORRIDOR_ZEC_EGRESS_RECEIPT_PATH` | `/tmp/corridor-zec-egress-receipt.json` | |
+//! | `CORRIDOR_PROFILE` | (none) | `omni_production_shaped` forces bridged LP seed |
+//! | `CORRIDOR_POOL_SEED` | `magic_lab` | `bridged_lp` forbids CreatePool magic reserves alone |
+//! | `CORRIDOR_LP_SEED_RECEIPT_PATH` | `/tmp/corridor-lp-seed-receipt.json` | Phase 3 receipt |
+//! | `CORRIDOR_DUAL_HOME_PREP_PATH` | `$CORRIDOR_OMNI_RUN_DIR/dual-home-prep.json` | Multi-net dual-home artifact |
+//! | `CORRIDOR_OMNI_RUN_DIR` | (none) | Omni receipt pack root (GUIDE §12) |
+//! | `CORRIDOR_OMNI_REQUIRE_PRODUCT_GREEN` | off | Fail closed if dual-home/LP underfunded |
 //! | `KEEP_CHAIN` | off | Leave Docker containers running |
 //!
 //! ## Run
@@ -51,17 +60,29 @@ use ict_rs::spec::builtin_chain_config;
 use ict_rs_cw_orch::daemon_builder_from_chain;
 use tokio::runtime::Runtime;
 use zk_test_press::harness::{
-    self, apply_pure_egress_burn_labeled, assert_dest_binding_equal,
-    assert_mint_handoff_continuous, build_swap_spend_handoff_from_mint,
-    confirm_open_at_sealed_dest_with_cfg, corridor_allow_happy_fixture,
-    cw_egress_statement_from_opening, egress_burn_evidence_path, is_placeholder_owner_binding_hex,
-    lab_mock_egress_proof, lab_pay_zec_after_burn, mint_evidence_from_claim_fields,
-    mint_evidence_path, sealed_dest_for_option_d, settle_opening_from_handoff, settle_receipt_path,
-    try_claim_from_env, wallet_rpc_available, zec_egress_d_enabled, zec_egress_receipt_path,
+    self, allow_lab_inventory_residual, apply_pure_egress_burn_labeled, assert_dest_binding_equal,
+    assert_lab_degrade_labels, assert_mint_handoff_continuous, assert_product_release_mode,
+    bootstrap_omni_liquidity, build_swap_spend_handoff_from_mint_with_reserves,
+    confirm_open_at_sealed_dest_with_cfg, corridor_allow_happy_fixture, corridor_pool_seed_policy,
+    corridor_profile, cw_egress_statement_from_opening, dual_home_prep_path,
+    egress_burn_evidence_path, is_placeholder_owner_binding_hex, is_product_profile,
+    lab_mock_egress_proof, lab_pay_zec_after_burn, load_dual_home_prep, lp_mint_log_line,
+    lp_seed_receipt_path, mint_evidence_from_claim_fields, mint_evidence_path,
+    peek_last_threshold_auth_meta, product_celebrate_forbidden, refuse_magic_pool_if_bridged_policy,
+    reject_funder_only_as_product, require_bridged_lp_seed, resolve_pool_reserves,
+    sealed_dest_for_option_d, settle_opening_from_handoff, settle_receipt_path, try_claim_from_env,
+    wallet_rpc_available, zec_egress_d_enabled, zec_egress_receipt_path, zec_release_policy,
     BridgeL1World, BURN_SURFACE_CW_BRIDGE_EGRESS, BURN_SURFACE_PURE_RECORD_LAB,
-    CorridorLabMintPolicy, EgressBurnEvidenceJson, EgressBurnPublicJson, MintEvidenceV0,
-    ProofModeLabel, SettleReceiptV0, ZakuraLocalConfig, ZecEgressReceiptJson,
+    COMMITTEE_CRYPTO_LAB_T_OF_N, CorridorLabMintPolicy, EgressBurnEvidenceJson,
+    EgressBurnPublicJson, ESCROW_SIGN_PATH_P_LAB, MintEvidenceV0, MODE_THRESHOLD_ESCROW_RELEASE,
+    MODE_THRESHOLD_ESCROW_RELEASE_SIMULATED, OmniLiquidityBootstrap, ProofModeLabel,
+    SettleReceiptV0, ZakuraLocalConfig, ZecEgressReceiptJson, ZecReleasePolicy,
     PROOF_MODE_MOCK_VERIFY_LAB,
+};
+use zk_test_press::harness::swap_statement_cw::{LAB_R_IN, LAB_R_OUT};
+#[cfg(feature = "l0-seams")]
+use zk_test_press::harness::{
+    put_and_recover_after_mint, seam_note_from_mint_openings,
 };
 use zk_test_press::suites::private_bridge::PrivateBridgeSuite;
 use zk_test_press::suites::private_dex::PrivateDexSuite;
@@ -339,6 +360,12 @@ fn run_sync() -> Result<(), Box<dyn std::error::Error>> {
     println!("  mock_verify={}", mock_verify_flag());
     println!("  CORRIDOR_CHAIN_SETTLE={}", chain_settle_enabled());
     println!("  CORRIDOR_ZEC_EGRESS_D={}", zec_egress_d_gate());
+    println!(
+        "  CORRIDOR_PROFILE={} pool_seed={} bridged_lp_required={}",
+        corridor_profile(),
+        corridor_pool_seed_policy().as_str(),
+        require_bridged_lp_seed()
+    );
     if env_truthy("CORRIDOR_ALLOW_SETTLE_WITHOUT_MINT") {
         return Err(
             "FAIL closed: CORRIDOR_ALLOW_SETTLE_WITHOUT_MINT is forbidden on funded profile"
@@ -522,6 +549,84 @@ fn run_sync() -> Result<(), Box<dyn std::error::Error>> {
             evidence.cm_public_hex, evidence.value_u64, evidence.asset_id_hex
         );
 
+        // RECOVERY-4: post-mint put_note + recover when client openings present
+        #[cfg(feature = "l0-seams")]
+        {
+            if let (Some(rcm_hex), Some(owner_hex)) =
+                (evidence.rcm_hex.as_ref(), evidence.owner_binding_hex.as_ref())
+            {
+                match (
+                    hex::decode(evidence.cm_public_hex.trim()),
+                    hex::decode(rcm_hex.trim()),
+                    hex::decode(owner_hex.trim()),
+                    hex::decode(evidence.asset_id_hex.trim()),
+                    hex::decode(evidence.bridge_nullifier_hex.trim()),
+                ) {
+                    (Ok(cm), Ok(rcm), Ok(owner), Ok(asset), Ok(nu))
+                        if cm.len() == 32
+                            && rcm.len() == 32
+                            && owner.len() == 32
+                            && asset.len() == 32
+                            && nu.len() == 32 =>
+                    {
+                        let mut cm32 = [0u8; 32];
+                        let mut rcm32 = [0u8; 32];
+                        let mut own32 = [0u8; 32];
+                        let mut asset32 = [0u8; 32];
+                        let mut nu32 = [0u8; 32];
+                        cm32.copy_from_slice(&cm);
+                        rcm32.copy_from_slice(&rcm);
+                        own32.copy_from_slice(&owner);
+                        asset32.copy_from_slice(&asset);
+                        nu32.copy_from_slice(&nu);
+                        let seam = seam_note_from_mint_openings(
+                            &cm32,
+                            &rcm32,
+                            &own32,
+                            evidence.value_u64,
+                            &asset32,
+                            &nu32,
+                        );
+                        let note_dir = std::env::temp_dir().join(format!(
+                            "corridor-ict-note-{}",
+                            SystemTime::now()
+                                .duration_since(UNIX_EPOCH)
+                                .map(|d| d.as_nanos())
+                                .unwrap_or(0)
+                        ));
+                        let receipt = put_and_recover_after_mint(
+                            &seam,
+                            &contract.to_string(),
+                            [0xC0; 32],
+                            &note_dir,
+                        )
+                        .map_err(|e| format!("FAIL closed: post-mint note put/recover: {e}"))?;
+                        let film = if std::env::var("NOTES_BASE").map(|s| !s.is_empty()).unwrap_or(false)
+                        {
+                            "NOTES_BASE+PIR"
+                        } else {
+                            "local+direct"
+                        };
+                        println!(
+                            "  note_persist put+film_recover OK film={film} addr={} path={}",
+                            receipt.addr, receipt.store_path
+                        );
+                        // Local temp only — do not rm when using remote NOTES_BASE.
+                        if std::env::var("NOTES_BASE").map(|s| s.is_empty()).unwrap_or(true) {
+                            let _ = std::fs::remove_dir_all(&note_dir);
+                        }
+                    }
+                    _ => {
+                        println!(
+                            "  note_persist residual: openings hex width invalid — skip put/recover"
+                        );
+                    }
+                }
+            } else {
+                println!("  note_persist residual: rcm/owner openings missing on evidence");
+            }
+        }
+
         let mut private_dex_contract: Option<String> = None;
         let mut settle_receipt: Option<SettleReceiptV0> = None;
         let mut settle_handoff: Option<zk_test_press::harness::SwapSpendHandoffV0> = None;
@@ -536,11 +641,90 @@ fn run_sync() -> Result<(), Box<dyn std::error::Error>> {
                 )
             })?;
 
-            let handoff =
-                build_swap_spend_handoff_from_mint(&evidence, ProofModeLabel::MockVerifyLab)
-                    .map_err(|e| {
-                        format!("FAIL closed: build SwapSpendHandoffV0 from mint openings: {e}")
-                    })?;
+            // Phases 1–3: dual-home + LP bridge mints + seed pool from bridged notes
+            // (GUIDE omni). Under bridged_lp / omni profile, refuse magic CreatePool alone.
+            let omni_boot: Option<OmniLiquidityBootstrap> = if require_bridged_lp_seed() {
+                println!("\n--- [4.5/8] omni LP bootstrap (Phases 1–3, bridged_lp) ---");
+                let dual_path = dual_home_prep_path();
+                let multi_net_dh = load_dual_home_prep(&dual_path)
+                    .ok()
+                    .map(|m| {
+                        println!(
+                            "  dual-home prep {} btc_funded={} escrow_prefunded={} multi_net={}",
+                            dual_path.display(),
+                            m.btc_funded,
+                            m.escrow_prefunded,
+                            m.multi_net
+                        );
+                        m.is_product_dual_home_green()
+                    })
+                    .unwrap_or(false);
+                if !multi_net_dh {
+                    println!(
+                        "  dual-home multi-net residual (path={}); LP seed uses prep/fixture amounts",
+                        dual_path.display()
+                    );
+                }
+                let boot = bootstrap_omni_liquidity().map_err(|e| {
+                    format!("FAIL closed: bootstrap_omni_liquidity: {e}")
+                })?;
+                boot.assert_product_green().map_err(|e| {
+                    format!("FAIL closed: lp seed product green: {e}")
+                })?;
+                println!("  {}", lp_mint_log_line("btc", &boot.lp_btc_mint));
+                println!("  {}", lp_mint_log_line("zec", &boot.lp_zec_mint));
+                println!(
+                    "  liability outstanding_zec={} escrow_balance={} (I1)",
+                    boot.liability.outstanding_zec_claims, boot.prep.escrow_balance_zats
+                );
+                println!(
+                    "  lp_seed.source={} r_btc={} r_zec={} (match LP notes) multi_net_dual_home={}",
+                    boot.receipt.source, boot.r_btc, boot.r_zec, multi_net_dh
+                );
+                let lp_path = lp_seed_receipt_path();
+                boot.write_json_labeled(&lp_path, multi_net_dh)
+                    .map_err(|e| format!("write LpSeedReceipt: {e}"))?;
+                println!("  LpSeedReceipt → {}", lp_path.display());
+                if let Ok(run_dir) = std::env::var("CORRIDOR_OMNI_RUN_DIR") {
+                    let run = PathBuf::from(run_dir);
+                    boot.write_omni_run_pack(&run, multi_net_dh)
+                        .map_err(|e| format!("write omni LP run pack: {e}"))?;
+                    println!("  omni LP pack → {}/0{{3,4,5}}-*.json", run.display());
+                }
+                Some(boot)
+            } else {
+                println!(
+                    "  pool_seed={} (legacy magic lab CreatePool — not omni product green)",
+                    corridor_pool_seed_policy().as_str()
+                );
+                None
+            };
+
+            let (r_in, r_out, _seed_rec) = resolve_pool_reserves(omni_boot.as_ref())
+                .map_err(|e| format!("FAIL closed: resolve_pool_reserves: {e}"))?;
+            refuse_magic_pool_if_bridged_policy(r_in, r_out, omni_boot.as_ref())
+                .map_err(|e| format!("FAIL closed: pool seed policy: {e}"))?;
+            // Explicit product refuse: magic LAB_R constants without bridged receipt
+            if require_bridged_lp_seed()
+                && omni_boot.is_none()
+                && r_in == LAB_R_IN
+                && r_out == LAB_R_OUT
+            {
+                return Err(
+                    "FAIL closed: CORRIDOR_POOL_SEED=bridged_lp forbids magic CreatePool alone"
+                        .into(),
+                );
+            }
+
+            let handoff = build_swap_spend_handoff_from_mint_with_reserves(
+                &evidence,
+                ProofModeLabel::MockVerifyLab,
+                r_in,
+                r_out,
+            )
+            .map_err(|e| {
+                format!("FAIL closed: build SwapSpendHandoffV0 from mint openings: {e}")
+            })?;
             // Evidence glue (MintEvidenceV0 → settle spend openings); also enforced inside builder.
             assert_mint_handoff_continuous(&evidence, &handoff).map_err(|e| {
                 format!("FAIL closed: mint↔settle openings continuity: {e}")
@@ -553,10 +737,12 @@ fn run_sync() -> Result<(), Box<dyn std::error::Error>> {
                 println!("  dest seal continuous mint→settle {}", &dest[..16.min(dest.len())]);
             }
             println!(
-                "  handoff pool_id={} delta_in={} delta_out={} nullifiers={} proof_mode={}",
+                "  handoff pool_id={} delta_in={} delta_out={} r_in_before={} r_out_before={} nullifiers={} proof_mode={}",
                 handoff.statement.pool_id,
                 handoff.statement.delta_r_in,
                 handoff.statement.delta_r_out,
+                handoff.statement.r_in_before,
+                handoff.statement.r_out_before,
                 handoff.pool_nullifiers_hex.len(),
                 handoff.proof_mode.as_str()
             );
@@ -575,9 +761,30 @@ fn run_sync() -> Result<(), Box<dyn std::error::Error>> {
             println!("  private_dex={dex_addr} mock_verify={}", mock_verify_flag());
             private_dex_contract = Some(dex_addr.clone());
 
-            dex.create_lab_pool_for_handoff(&handoff)
-                .map_err(|e| format!("FAIL closed: CreatePool: {e}"))?;
-            println!("  CreatePool pool_id={} ✓", handoff.statement.pool_id);
+            // CreatePool AFTER lp seed: R must equal bridged LP values (not invent).
+            if let Some(ref boot) = omni_boot {
+                refuse_magic_pool_if_bridged_policy(boot.r_btc, boot.r_zec, Some(boot))
+                    .map_err(|e| format!("FAIL closed: CreatePool seed gate: {e}"))?;
+                dex.create_pool_from_lp_seed(&handoff, boot.r_btc, boot.r_zec)
+                    .map_err(|e| format!("FAIL closed: CreatePool from bridged LP seed: {e}"))?;
+                println!(
+                    "  CreatePool pool_id={} r_btc={} r_zec={} source=bridged_notes ✓",
+                    handoff.statement.pool_id, boot.r_btc, boot.r_zec
+                );
+            } else {
+                if require_bridged_lp_seed() {
+                    return Err(
+                        "FAIL closed: CORRIDOR_POOL_SEED=bridged_lp requires bootstrap before CreatePool"
+                            .into(),
+                    );
+                }
+                dex.create_lab_pool_for_handoff(&handoff)
+                    .map_err(|e| format!("FAIL closed: CreatePool: {e}"))?;
+                println!(
+                    "  CreatePool pool_id={} (magic lab R) ✓",
+                    handoff.statement.pool_id
+                );
+            }
 
             let quote = dex
                 .query_quote(
@@ -756,9 +963,12 @@ fn run_sync() -> Result<(), Box<dyn std::error::Error>> {
             println!("  burn_surface={burn_surface}");
 
             println!(
-                "  lab_pay: wallet_rpc_available={} rpc={}",
+                "  lab_pay: wallet_rpc_available={} rpc={} profile={:?} release={:?} residual_flag={}",
                 wallet_rpc_available(&zcfg),
-                zcfg.rpc_url
+                zcfg.rpc_url,
+                corridor_profile(),
+                zec_release_policy(),
+                allow_lab_inventory_residual()
             );
             let zec = lab_pay_zec_after_burn(&pure_evidence, &sealed).map_err(|e| {
                 format!("FAIL closed: lab_pay_zec_after_burn (requires burn evidence): {e}")
@@ -767,6 +977,43 @@ fn run_sync() -> Result<(), Box<dyn std::error::Error>> {
                 "  lab_pay result mode={} zec_txid={:?}",
                 zec.mode, zec.zec_txid
             );
+            // Phase 7 product bar: refuse funder-only / inventory as product green.
+            if is_product_profile() {
+                assert_product_release_mode(&zec.mode).map_err(|e| {
+                    format!("FAIL closed: reject_funder_only_as_product / product green: {e}")
+                })?;
+                if reject_funder_only_as_product(&zec.mode) {
+                    return Err(format!(
+                        "FAIL closed: product profile cannot green on funder-only mode={}",
+                        zec.mode
+                    )
+                    .into());
+                }
+                match zec_release_policy() {
+                    ZecReleasePolicy::ThresholdEscrow => {
+                        if zec.mode != MODE_THRESHOLD_ESCROW_RELEASE
+                            && zec.mode != MODE_THRESHOLD_ESCROW_RELEASE_SIMULATED
+                        {
+                            return Err(format!(
+                                "FAIL closed: CORRIDOR_ZEC_RELEASE=threshold_escrow but mode={}",
+                                zec.mode
+                            )
+                            .into());
+                        }
+                        println!(
+                            "  product threshold release OK committee_crypto={COMMITTEE_CRYPTO_LAB_T_OF_N} \
+                             escrow_sign_path={ESCROW_SIGN_PATH_P_LAB} (not FROST)"
+                        );
+                    }
+                    ZecReleasePolicy::LabInventory => {
+                        // Only reachable with residual flag (assert_product_release_mode).
+                        println!(
+                            "  LAB INVENTORY RESIDUAL (not product architecture power): mode={}",
+                            zec.mode
+                        );
+                    }
+                }
+            }
 
             // Open/confirm at sealed dest (validateaddress / balance when possible).
             match confirm_open_at_sealed_dest_with_cfg(&sealed, &zcfg) {
@@ -820,6 +1067,7 @@ fn run_sync() -> Result<(), Box<dyn std::error::Error>> {
                 .write_json(&evidence_path)
                 .map_err(|e| format!("write EgressBurnEvidenceV0: {e}"))?;
 
+            let auth_meta = peek_last_threshold_auth_meta();
             let zec_json = ZecEgressReceiptJson {
                 schema: "ZecEgressReceiptV0".into(),
                 profile: "ict_local_funded".into(),
@@ -837,6 +1085,10 @@ fn run_sync() -> Result<(), Box<dyn std::error::Error>> {
                 burn_nullifier_hex: zec.burn_nullifier_hex.clone(),
                 burn_evidence_path: Some(evidence_path.display().to_string()),
                 sealed_source: Some(sealed.source.as_wire_str().into()),
+                auth_source: auth_meta.as_ref().map(|m| m.auth_source.clone()),
+                committee_crypto: auth_meta.as_ref().map(|m| m.committee_crypto.clone()),
+                custody_label: auth_meta.as_ref().map(|m| m.custody_label.clone()),
+                frost: Some(false),
             };
             zec_json
                 .write_json(&zec_path)
@@ -856,6 +1108,15 @@ fn run_sync() -> Result<(), Box<dyn std::error::Error>> {
                 zec_json.amount_zat,
                 zec_json.dest_display
             );
+            // RECOVERY-5: labeled modes must not be misread as product success
+            assert_lab_degrade_labels(&burn_surface, &zec.mode)
+                .map_err(|e| format!("FAIL closed: lab degrade labels: {e}"))?;
+            if product_celebrate_forbidden(&burn_surface, &zec.mode) {
+                println!(
+                    "  LAB DEGRADE (not product celebrate): burn_surface={burn_surface} pay_mode={}",
+                    zec.mode
+                );
+            }
             let _ = BURN_SURFACE_PURE_RECORD_LAB; // used when CW residual
             if evidence_json.status != "complete" || zec_json.status != "complete" {
                 return Err("FAIL closed: Option D dual receipts not complete".into());

@@ -17,7 +17,7 @@ use halo2_gadgets::{
         primitives::{self as poseidon, ConstantLength},
         Hash as PoseidonHash, PoseidonSpongeInstructions, Pow5Chip as PoseidonChip,
     },
-    sinsemilla::{chip::SinsemillaChip, merkle::chip::MerkleChip},
+    sinsemilla::chip::SinsemillaChip,
 };
 use halo2_proofs::{
     circuit::{AssignedCell, Chip, Layouter, Value},
@@ -60,18 +60,6 @@ impl super::Config {
         &self,
     ) -> SinsemillaChip<OrchardHashDomains, OrchardCommitDomains, OrchardFixedBases> {
         SinsemillaChip::construct(self.sinsemilla_config_2.clone())
-    }
-
-    pub(super) fn merkle_chip_1(
-        &self,
-    ) -> MerkleChip<OrchardHashDomains, OrchardCommitDomains, OrchardFixedBases> {
-        MerkleChip::construct(self.merkle_config_1.clone())
-    }
-
-    pub(super) fn merkle_chip_2(
-        &self,
-    ) -> MerkleChip<OrchardHashDomains, OrchardCommitDomains, OrchardFixedBases> {
-        MerkleChip::construct(self.merkle_config_2.clone())
     }
 
     pub(super) fn poseidon_chip(&self) -> PoseidonChip<pallas::Base, 3, 2> {
@@ -213,5 +201,7 @@ pub(in crate::circuit) fn derive_nullifier<
 }
 
 // pub(in crate::circuit) use crate::circuit::commit_ivk::gadgets::commit_ivk;
+// Legacy Sinsemilla leaf (recovery). New paths use distro_poseidon_gadget.
+#[allow(unused_imports)]
 pub(in crate::circuit) use crate::circuit::headstash_merkle_tree::derive_leaf;
 pub(in crate::circuit) use crate::circuit::note_commit::gadgets::note_commit;

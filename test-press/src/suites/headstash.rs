@@ -25,6 +25,7 @@ use zk_headstash::suite::HeadstashCircuitSuite;
 use cosmwasm_std::{Addr, Binary};
 use cw_headstash::tokenfactory::{HeadstashTokenObject, TokenStrategy};
 use cw_headstash::wavs::{WavsAuthMetadata, WavsProofOfOwnership};
+pub use zk_headstash::suite::suite::HeadstashTestDataGenerator as _;
 
 /// ZK headstash deployment suite: cw-headstash contract + manifold factory.
 ///
@@ -119,6 +120,8 @@ impl HeadstashDeployData {
             owner: Some(admin.to_string()),
             headstash_init: cw_headstash::msg::InstantiateMsg {
                 genesis_root: Binary::from(genesis_root.to_vec()),
+                distro_hash_domain: Default::default(),
+                genesis_label: None,
                 token_strategy: TokenStrategy::ExistingFungible(HeadstashTokenObject {
                     proof: Binary::default(),
                     raw: "uterp".into(),

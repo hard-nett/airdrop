@@ -8,6 +8,7 @@
 //! This matches standard Halo2 patterns where the circuit struct holds witness data for proving, but key generation uses placeholders.
 //!
 
+use cosmwasm_std::Checksum;
 use group::ff::{Field, PrimeField};
 use halo2_proofs::{
     circuit::{AssignedCell, Chip, Layouter, Region, SimpleFloorPlanner, Value},
@@ -15,13 +16,12 @@ use halo2_proofs::{
     poly::Rotation,
     transcript::{Blake2bRead, Blake2bWrite},
 };
-use pasta_curves::vesta;
+use pasta_curves::{pallas, vesta};
 use rand::RngCore;
 
 use std::{
-    eprintln,
     fs::File,
-    io::{self, BufWriter, Write},
+    io::{BufWriter, Write},
     marker::PhantomData,
     path::PathBuf,
     string::String,
@@ -322,7 +322,6 @@ impl<F: PrimeField> Circuit<F> for NoRickCircuit<F> {
     }
 
     fn configure(meta: &mut ConstraintSystem<F>) -> Self::Config {
-        eprintln!("📋 NoRickCircuit::configure called - THIS SHOULD ALWAYS RUN");
         let advice = [meta.advice_column(), meta.advice_column()];
         let instance = meta.instance_column();
         let constant = meta.fixed_column();
@@ -429,7 +428,7 @@ impl NoRickInstance {
     /// serialize instances into set of circuit field bytes with lenth `I`,specifically for cosmwasm-std api
     pub fn to_cosmwasm_instance(&self) -> Vec<u8> {
         let instances = self.to_halo2_instance();
-        let mut bytes = Vec::with_capacity(1 * 32);
+        let mut bytes = Vec::with_capacity(instances.len() * 32);
         for instance_row in instances.iter() {
             for scalar in instance_row.iter() {
                 // to_repr() returns a 32-byte little-endian representation
@@ -440,7 +439,7 @@ impl NoRickInstance {
     }
 }
 
-/// The proving key for the Orchard Action circuit.
+/// The proving key for the NoRick actions.
 #[derive(Debug)]
 pub struct ProvingKey {
     params: halo2_proofs::poly::commitment::Params<vesta::Affine>,
@@ -459,20 +458,81 @@ impl ProvingKey {
     pub fn build() -> Self {
         let params = halo2_proofs::poly::commitment::Params::new(10);
         let circuit: NoRickCircuit<pasta_curves::Fp> = Default::default();
-
         let vk = plonk::keygen_vk(&params, &circuit).unwrap();
         let pk = plonk::keygen_pk(&params, vk, &circuit).unwrap();
-
-        ProvingKey { params, pk }
+        Self::new(pk, params)
     }
 
-    /// Builds pk & vk, writes to file
-    pub fn build_and_write(path: PathBuf) -> io::Result<()> {
-        let mut writer = BufWriter::new(File::create(path)?);
-        let pk = Self::build();
-        pk.params.write(&mut writer)?;
-        pk.pk.get_vk().write(&mut writer)?;
-        writer.flush()
+    /// build and write the provingkey and verifying key, as defined by the terp-ADR that specifies how we serialize our proving keys for on-chain compatibility.
+    /// path - the path to the artifacts directory.
+    pub fn build_and_write(vkpath: PathBuf) -> cw_orch::anyhow::Result<Self> {
+        let mut vkw = BufWriter::new(File::create(&vkpath)?);
+        let pk: ProvingKey = Self::build();
+        let vk = pk.pk.get_vk();
+        let k = pk.params.k();
+
+        let mut buf1: Vec<u8> = Vec::new();
+        let mut buf2 = Vec::new();
+        let mut buf3 = Vec::new();
+
+        pk.params.write(&mut buf1)?;
+        vk.cs().write(&mut buf2)?;
+        vk.write(&mut buf3)?;
+
+        let param_len = buf1.len();
+        let cs_len = buf2.len();
+        let vk_len = buf3.len();
+
+        let param_checksum = &Checksum::generate(&buf1).to_hex();
+        let cs_checksum = &Checksum::generate(&buf2).to_hex();
+        let vk_checksum = &Checksum::generate(&buf3).to_hex();
+
+        println!(
+            "cw::vm::BUILD::param::(len::{},checksum::{})",
+            param_len, param_checksum
+        );
+        println!(
+            "cw::vm::BUILD::cs::(len::{},checksum::{})",
+            cs_len, cs_checksum
+        );
+        println!(
+            "cw::vm::BUILD::vk::(len::{},checksum::{})",
+            vk_len, vk_checksum
+        );
+
+        let mut output =
+            Vec::with_capacity(param_len + cs_len + vk_len + halo2_proofs::COSMWASM_FOOTER_LENGTH);
+
+        output.extend_from_slice(&buf1);
+        output.extend_from_slice(&buf2);
+        output.extend_from_slice(&buf3);
+
+        // Separate checksums for the two independently-stored components
+        let param_hash: [u8; 32] = Checksum::generate(&buf1).as_slice().try_into()?;
+        let vk_hash: [u8; 32] = {
+            let mut vk_body = Vec::with_capacity(cs_len + vk_len);
+            vk_body.extend_from_slice(&buf2);
+            vk_body.extend_from_slice(&buf3);
+            Checksum::generate(&vk_body).as_slice().try_into()?
+        };
+
+        let footer = zk_cosmwasm::CircuitFooter::new(
+            zk_cosmwasm::CircuitType::Plonkish,
+            zk_cosmwasm::curves::CurveType::Pasta,
+            k.try_into().expect("transposing k typeof u32 into u8"), // k — matches Params::new(10) in build()
+            1, // i — number of public input scalars (1 instance column × 1 row)
+            param_len as u32,
+            cs_len as u32,
+            vk_len as u32,
+            param_hash,
+            vk_hash,
+        );
+
+        output.extend_from_slice(&footer.to_bytes());
+        vkw.write_all(&output)?;
+        vkw.flush()?;
+
+        Ok(pk)
     }
 
     /// retrieve a clone of the params
@@ -481,22 +541,23 @@ impl ProvingKey {
     }
 }
 
-/// The verifying key for the Orchard Action circuit.
+/// The verifying key for the norick circuit
 #[derive(Debug)]
 pub struct VerifyingKey {
-    /// params
     pub params: halo2_proofs::poly::commitment::Params<vesta::Affine>,
-    /// vk
     pub vk: plonk::VerifyingKey<vesta::Affine>,
 }
 
-impl VerifyingKey {
-    /// Builds the verifying key.
-    pub fn new(vk: plonk::VerifyingKey<pasta_curves::EqAffine>) -> Self {
-        let params = halo2_proofs::poly::commitment::Params::new(10);
-        VerifyingKey { params, vk }
+impl From<&ProvingKey> for VerifyingKey {
+    fn from(pk: &ProvingKey) -> Self {
+        Self {
+            params: pk.params(),
+            vk: pk.pk.get_vk().clone(),
+        }
     }
+}
 
+impl VerifyingKey {
     /// Builds the verifying key.
     pub fn build() -> Self {
         let params = halo2_proofs::poly::commitment::Params::new(10);
@@ -507,7 +568,7 @@ impl VerifyingKey {
 }
 
 /// A proof of the validity of an Orchard [`Bundle`].
-///
+///  
 /// [`Bundle`]: crate::bundle::Bundle
 #[derive(Clone)]
 pub struct Proof(Vec<u8>);

@@ -3,10 +3,14 @@ use std::{
     fs::File,
     io::{self, BufWriter, Write},
     path::PathBuf,
+    string::ToString,
 };
 
 use alloc::vec::Vec;
 
+use cosmwasm_std::Checksum;
+#[cfg(feature = "interface")]
+use cw_orch::anyhow::{self, anyhow};
 // Re-export types needed for test circuits
 pub use gadget::assign_free_advice;
 pub use gadget::secp256k1_chip::{
@@ -27,6 +31,7 @@ use halo2_proofs::{
 
 use pasta_curves::{pallas, vesta};
 use rand::RngCore;
+use tracing::info;
 
 use self::{
     commit_ivk::{CommitIvkChip, CommitIvkConfig},
@@ -58,15 +63,16 @@ use halo2_gadgets::{
     poseidon::{primitives as poseidon, Pow5Chip as PoseidonChip, Pow5Config as PoseidonConfig},
     sinsemilla::{
         chip::{SinsemillaChip, SinsemillaConfig},
-        merkle::{
-            chip::{MerkleChip, MerkleConfig},
-            MerklePath,
-        },
+        merkle::chip::{MerkleChip, MerkleConfig},
     },
-    utilities::lookup_range_check::{LookupRangeCheck, LookupRangeCheckConfig},
+    utilities::{
+        cond_swap::{CondSwapChip, CondSwapConfig},
+        lookup_range_check::{LookupRangeCheck, LookupRangeCheckConfig},
+    },
 };
 
 mod commit_ivk;
+pub mod distro_poseidon_gadget;
 pub mod gadget;
 pub mod headstash_merkle_tree;
 mod note_commit;
@@ -75,8 +81,8 @@ mod note_commit_bit_tests;
 
 pub use crate::Proof;
 
-/// Size of the Headstash circuit.
-const K: u32 = 18;
+/// Size of the Headstash circuit (shared with Part T harness).
+pub(crate) const K: u32 = 18;
 
 // Absolute offsets for public inputs.
 const ANCHOR: usize = 0;
@@ -100,13 +106,21 @@ pub struct Config {
     ecc_config: EccConfig<OrchardFixedBases>,
     secp256k1: Secp256k1Config,
     poseidon_config: PoseidonConfig<pallas::Base, 3, 2>,
+    /// Conditional swap for Poseidon-v1 distro Merkle path ordering.
+    cond_swap_config: CondSwapConfig,
+    /// Kept configured so CS/VK layout stays stable; distro path uses Poseidon, not these chips.
+    /// Removing MerkleChip::configure changes fixed/advice allocation and breaks note_commit.
+    #[allow(dead_code)]
     merkle_config_1: MerkleConfig<OrchardHashDomains, OrchardCommitDomains, OrchardFixedBases>,
+    #[allow(dead_code)]
     merkle_config_2: MerkleConfig<OrchardHashDomains, OrchardCommitDomains, OrchardFixedBases>,
+    /// Sinsemilla configs for **private note commit**.
     sinsemilla_config_1:
         SinsemillaConfig<OrchardHashDomains, OrchardCommitDomains, OrchardFixedBases>,
     sinsemilla_config_2:
         SinsemillaConfig<OrchardHashDomains, OrchardCommitDomains, OrchardFixedBases>,
     commit_ivk_config: CommitIvkConfig,
+    /// Legacy Sinsemilla leaf canonicity config (unused by Poseidon distro path).
     leaf_hash_config: LeafHashConfig,
     old_note_commit_config: NoteCommitConfig,
     new_note_commit_config: NoteCommitConfig,
@@ -182,6 +196,9 @@ impl Circuit {
         let recp = spend.note.recipient();
         let nd = spend.note.nd();
 
+        // Headstash nullifier key is derived from eligibility sk + rho (not Orchard fvk.nk).
+        let nk = spend.note.nk(rho_old);
+
         Circuit {
             path: Value::known(spend.merkle_path.auth_path()),
             pos: Value::known(spend.merkle_path.position()),
@@ -190,7 +207,7 @@ impl Circuit {
             psi_old: Value::known(psi_old),
             rcm_old: Value::known(rcm_old),
             cm_old: Value::known(spend.note.commitment()),
-            nk: Value::known(*spend.fvk.nk()),
+            nk: Value::known(nk),
             esk: Value::known(Secp256k1Fq::from_bytes(&esk.secret_bytes()).expect("valid Fq")),
             epkx: Value::known(Secp256k1Fp::from_bytes(&epkx).expect("valid Fp")),
             epky: Value::known(Secp256k1Fp::from_bytes(&epky).expect("valid Fp")),
@@ -336,10 +353,9 @@ impl plonk::Circuit<pallas::Base> for Circuit {
         ];
         let secp256k1 = Secp256k1Config::configure(meta, secp_advices, range_check.clone());
 
-        // Configuration for a Sinsemilla hash instantiation and a
-        // Merkle hash instantiation using this Sinsemilla instance.
-        // Since the Sinsemilla config uses only 5 advice columns,
-        // we can fit two instances side-by-side.
+        // Sinsemilla + MerkleChip configuration (Orchard-shaped layout).
+        // Distro inclusion synthesize uses Poseidon+CondSwap only; MerkleChip is not
+        // called but remains configured to preserve CS column allocation for note_commit.
         let (sinsemilla_config_1, merkle_config_1) = {
             let sinsemilla_config_1 = SinsemillaChip::configure(
                 meta,
@@ -347,18 +363,12 @@ impl plonk::Circuit<pallas::Base> for Circuit {
                 advices[6],
                 lagrange_coeffs[0],
                 lookup,
-                range_check,
+                range_check.clone(),
                 false,
             );
             let merkle_config_1 = MerkleChip::configure(meta, sinsemilla_config_1.clone());
-
             (sinsemilla_config_1, merkle_config_1)
         };
-
-        // Configuration for a Sinsemilla hash instantiation and a
-        // Merkle hash instantiation using this Sinsemilla instance.
-        // Since the Sinsemilla config uses only 5 advice columns,
-        // we can fit two instances side-by-side.
         let (sinsemilla_config_2, merkle_config_2) = {
             let sinsemilla_config_2 = SinsemillaChip::configure(
                 meta,
@@ -370,7 +380,6 @@ impl plonk::Circuit<pallas::Base> for Circuit {
                 false,
             );
             let merkle_config_2 = MerkleChip::configure(meta, sinsemilla_config_2.clone());
-
             (sinsemilla_config_2, merkle_config_2)
         };
 
@@ -379,8 +388,12 @@ impl plonk::Circuit<pallas::Base> for Circuit {
         let commit_ivk_config = CommitIvkChip::configure(meta, advices);
 
         // Configuration to handle decomposition and canonicity checking
-        // for leaf hash.
+        // for leaf hash (Sinsemilla-legacy; distro path uses Poseidon-v1).
         let leaf_hash_config = LeafHashChip::configure(meta, advices);
+
+        // CondSwap for Poseidon-v1 distro Merkle path (node/sibling ordering).
+        let cond_swap_config =
+            CondSwapChip::configure(meta, advices[0..5].try_into().unwrap());
 
         // Configuration to handle decomposition and canonicity checking
         // for NoteCommit_old.
@@ -400,6 +413,7 @@ impl plonk::Circuit<pallas::Base> for Circuit {
             ecc_config,
             secp256k1,
             poseidon_config,
+            cond_swap_config,
             merkle_config_1,
             merkle_config_2,
             sinsemilla_config_1,
@@ -433,7 +447,7 @@ impl plonk::Circuit<pallas::Base> for Circuit {
         )?;
 
         // Witness private inputs that are used across multiple checks.
-        let (nd, v, fdi, recp, psi_old, rho_old, cm_old, nk) = {
+        let (nd, v, fdi, recp, psi_old, rho_old, nk) = {
             // Witness nd.
             let nd = assign_free_advice(
                 layouter.namespace(|| "witness nd"),
@@ -475,65 +489,49 @@ impl plonk::Circuit<pallas::Base> for Circuit {
                 self.rho_old.map(|rho| rho.into_inner()),
             )?;
 
-            // Witness cm_old
-            let cm_old = Point::new(
-                ecc_chip.clone(),
-                layouter.namespace(|| "cm_old"),
-                self.cm_old.as_ref().map(|cm| cm.inner().to_affine()),
-            )?;
-
-            // Witness nk.
+            // Witness nk (Headstash: derived from esk+rho off-circuit; witnessed here).
             let nk = assign_free_advice(
                 layouter.namespace(|| "witness nk"),
                 config.advices[0],
                 self.nk.map(|nk| nk.inner()),
             )?;
 
-            (nd, v, fdi, recp, psi_old, rho_old, cm_old, nk)
+            (nd, v, fdi, recp, psi_old, rho_old, nk)
         };
 
-        // Genesis Sinsemilla Merkle tree: Inclusion proof for participant eligibility
-        // This tree proves that the participant (identified by epk, fdi, v, nd) is
-        // included in the genesis distribution with their allocated balance.
+        // NOTE (Part I / H12): public HS_ND / HS_V / RECP instance equality deferred.
+        let _ = recp.clone();
 
-        // Derive the leaf hash from participant inputs
-        let leaf_hash_chip = config.leaf_hash_chip();
-        let genesis_leaf = gadget::derive_leaf(
-            layouter.namespace(|| "derive genesis leaf"),
-            &config.sinsemilla_chip_1(),
-            &ecc_chip,
-            &leaf_hash_chip,
-            epk_crt,
-            fdi.clone(),
-            v.clone(),
-            nd.clone(),
+        // --- Note commit + nullifier FIRST (Sinsemilla/ECC), before Poseidon distro path.
+        // Running 32 Poseidon CRH layers first was associated with normalize/Fixed
+        // permutation failures in the composite circuit; keep Orchard-shaped order.
+        let rcm_old = ScalarFixed::new(
+            ecc_chip.clone(),
+            layouter.namespace(|| "rcm_old"),
+            self.rcm_old.as_ref().map(|rcm_old| rcm_old.inner()),
         )?;
 
-        // Verify inclusion in genesis merkle tree via merkle path
-        let genesis_root = {
-            let path = self
-                .path
-                .map(|typed_path| typed_path.map(|node| node.inner()));
-            let merkle_inputs = MerklePath::construct(
-                [config.merkle_chip_1(), config.merkle_chip_2()],
-                OrchardHashDomains::Leaf,
-                self.pos,
-                path,
-            );
-            // Calculate root using the genesis leaf and merkle path
-            merkle_inputs.calculate_root(
-                layouter.namespace(|| "Genesis merkle path verification"),
-                genesis_leaf.extract_p().inner().clone(),
-            )?
-        };
+        let cm_old = gadget::note_commit(
+            layouter.namespace(|| "derive note commitment"),
+            config.sinsemilla_chip_1(),
+            config.ecc_chip(),
+            config.note_commit_chip_old(),
+            nd.clone(),
+            v.clone(),
+            fdi.clone(),
+            recp,
+            esk_crt.native.clone(),
+            rho_old.clone(),
+            psi_old.clone(),
+            rcm_old,
+        )?;
 
-        // Constrain the calculated genesis root to the public input anchor
-        layouter.constrain_instance(genesis_root.cell(), config.primary, ANCHOR)?;
+        let cmx = cm_old.extract_p();
+        layouter.constrain_instance(cmx.inner().cell(), config.primary, CMX)?;
 
-        // Nullifier integrity (https://p.z.cash/ZKS:action-nullifier-integrity).
         let _nf_old = {
             let nf_old = gadget::derive_nullifier(
-                layouter.namespace(|| "nf_old = DeriveNullifier_nk(rho_old, psi_old, cm_old)"),
+                layouter.namespace(|| "nf_old = DeriveNullifier_nk(rho_old, psi_old, cm)"),
                 config.poseidon_chip(),
                 config.add_chip(),
                 ecc_chip.clone(),
@@ -542,46 +540,45 @@ impl plonk::Circuit<pallas::Base> for Circuit {
                 &cm_old,
                 nk.clone(),
             )?;
-
-            // Constrain provided nullifer with derived nullifier
             layouter.constrain_instance(nf_old.inner().cell(), config.primary, NF_OLD)?;
-
             nf_old
         };
 
-        // Old note commitment integrity (https://p.z.cash/ZKS:action-cm-old-integrity?partial).
-        {
-            let rcm_old = ScalarFixed::new(
-                ecc_chip.clone(),
-                layouter.namespace(|| "rcm_old"),
-                self.rcm_old.as_ref().map(|rcm_old| rcm_old.inner()),
-            )?;
+        // --- Genesis Poseidon-v1 inclusion (public distro tree) ---
+        let v_base = assign_free_advice(
+            layouter.namespace(|| "witness v as Base for distro leaf"),
+            config.advices[0],
+            self.v.map(|nv| pallas::Base::from(nv.inner())),
+        )?;
+        layouter.assign_region(
+            || "constrain v == v_base",
+            |mut region| region.constrain_equal(v.cell(), v_base.cell()),
+        )?;
 
-            // // g★_d || pk★_d || i2lebsp_{64}(v) || i2lebsp_{255}(rho) || i2lebsp_{255}(psi)
-            let derived_cm_old = gadget::note_commit(
-                layouter.namespace(|| {
-                    "g★_d || pk★_d || i2lebsp_{64}(v) || i2lebsp_{255}(rho) || i2lebsp_{255}(psi)"
-                }),
-                config.sinsemilla_chip_1(),
-                config.ecc_chip(),
-                config.note_commit_chip_old(),
-                nd,
-                v,
-                fdi,
-                recp,
-                esk_crt.native,
-                rho_old.clone(),
-                psi_old.clone(),
-                rcm_old,
-            )?;
+        let genesis_leaf = distro_poseidon_gadget::derive_leaf_poseidon(
+            layouter.namespace(|| "derive genesis leaf Poseidon-v1"),
+            &config.poseidon_config,
+            config.advices[0],
+            epk_crt.0.native.clone(),
+            epk_crt.1.native.clone(),
+            nd,
+            v_base,
+            fdi,
+        )?;
 
-            // Constrain derived cm_old to equal witnessed cm_old
-            derived_cm_old.constrain_equal(layouter.namespace(|| "cm_old equality"), &cm_old)?;
-
-            let cmx = cm_old.extract_p();
-            // Constrain cmx to equal public input
-            layouter.constrain_instance(cmx.inner().cell(), config.primary, CMX)?;
-        }
+        let path_vals = self
+            .path
+            .map(|typed_path| typed_path.map(|node| node.inner()));
+        let genesis_root = distro_poseidon_gadget::calculate_distro_root_poseidon(
+            layouter.namespace(|| "Genesis Poseidon-v1 merkle path"),
+            &config.poseidon_config,
+            CondSwapChip::construct(config.cond_swap_config.clone()),
+            config.advices[0],
+            genesis_leaf,
+            self.pos,
+            path_vals,
+        )?;
+        layouter.constrain_instance(genesis_root.cell(), config.primary, ANCHOR)?;
 
         Ok(())
     }
@@ -596,64 +593,22 @@ pub struct VerifyingKey {
     pub vk: plonk::VerifyingKey<vesta::Affine>,
 }
 
-impl VerifyingKey {
-    /// Builds the verifying key.
-    pub fn new(vk: plonk::VerifyingKey<pasta_curves::EqAffine>) -> Self {
-        let params = halo2_proofs::poly::commitment::Params::new(K);
-        VerifyingKey { params, vk }
+impl From<&ProvingKey> for VerifyingKey {
+    fn from(pk: &ProvingKey) -> Self {
+        Self {
+            params: pk.params(),
+            vk: pk.pk.get_vk().clone(),
+        }
     }
+}
 
+impl VerifyingKey {
     /// Builds the verifying key.
     pub fn build() -> Self {
         let params = halo2_proofs::poly::commitment::Params::new(K);
         let circuit: Circuit = Default::default();
         let vk = plonk::keygen_vk(&params, &circuit).unwrap();
         VerifyingKey { params, vk }
-    }
-
-    /// Generate a v2 [] (CS-inclusive) for this VK.
-    ///
-    /// The footer encodes constraint-system dimensions needed by the on-chain VM
-    /// to deserialize and verify proofs without the original Rust circuit type.
-    pub fn generate_footer(&self) -> zk_cosmwasm::CircuitFooter {
-        use halo2_proofs::plonk::Circuit as Halo2Circuit;
-
-        // Configure a throwaway CS to extract structural counts.
-        let mut cs = plonk::ConstraintSystem::<pallas::Base>::default();
-        let _ = <Circuit as Halo2Circuit<pallas::Base>>::configure(&mut cs);
-
-        // Serialize params, vk, and cs to measure byte lengths.
-        let mut params_buf = Vec::new();
-        self.params
-            .write(&mut params_buf)
-            .expect("params serialization");
-        let mut vk_buf = Vec::new();
-        self.vk.write(&mut vk_buf).expect("vk serialization");
-        let mut cs_buf = Vec::new();
-        cs.write(&mut cs_buf).expect("cs serialization");
-
-        // Parse num_gates from CS header: bytes [10..12] are u16 LE gate count.
-        let num_gates = if cs_buf.len() >= 12 {
-            u16::from_le_bytes([cs_buf[10], cs_buf[11]]) as u32
-        } else {
-            0
-        };
-
-        zk_cosmwasm::CircuitFooter::new(
-            zk_cosmwasm::CircuitType::Plonkish,
-            6, // instance_count: anchor, nd, v, recp, nf, cmx
-            cs.get_num_fixed_columns(),
-            cs.get_num_advice(),
-            cs.get_num_instance_columns(),
-            cs.degree() as u8,
-            params_buf.len() as u32,
-            vk_buf.len() as u32,
-            cs_buf.len() as u32,
-            cs.get_num_selectors(),
-            num_gates,
-            true, // has_lookups (circuit uses lookup arguments)
-            0,    // crc32 placeholder
-        )
     }
 }
 
@@ -665,25 +620,82 @@ pub struct ProvingKey {
 }
 
 impl ProvingKey {
-    /// Builds the proving key.
-    pub fn build() -> Self {
-        let params = halo2_proofs::poly::commitment::Params::new(K);
-        let circuit: Circuit = Default::default();
-        let vk = plonk::keygen_vk(&params, &circuit).unwrap();
-        let pk = plonk::keygen_pk(&params, vk, &circuit).unwrap();
-
+    /// Builds existing proving key
+    pub fn new(
+        pk: plonk::ProvingKey<vesta::Affine>,
+        params: halo2_proofs::poly::commitment::Params<vesta::Affine>,
+    ) -> Self {
         ProvingKey { params, pk }
     }
 
-    /// Builds pk & vk, writes to file
-    pub fn build_and_write(path: PathBuf) -> io::Result<()> {
-        let mut writer = BufWriter::new(File::create(path)?);
-        let pk = Self::build();
-        pk.params.write(&mut writer)?;
-        pk.pk.get_vk().write(&mut writer)?;
-        writer.flush()
+    pub fn build() -> Self {
+        let params = halo2_proofs::poly::commitment::Params::new(K);
+        let circuit: Circuit = Default::default();
+        let vk = plonk::keygen_vk(&params, &circuit).expect("keygen_vk");
+        let pk = plonk::keygen_pk(&params, vk, &circuit).expect("keygen_pk");
+        Self::new(pk, params)
     }
 
+    /// build and write the provingkey and verifying key, as defined by the terp-ADR that specifies how we serialize our proving keys for on-chain compatibility.
+    /// path - the path to the artifacts directory.
+    #[cfg(feature = "interface")]
+    pub fn build_and_write(vkpath: PathBuf) -> cw_orch::anyhow::Result<Self> {
+        let path = File::create(&vkpath).map_err(|e| cw_orch::anyhow::anyhow!(e))?;
+        let mut vkw = BufWriter::new(path);
+
+        let mut cs = plonk::ConstraintSystem::<pallas::Base>::default();
+        let _ = <Circuit as halo2_proofs::plonk::Circuit<pallas::Base>>::configure(&mut cs);
+        let pk = Self::build();
+
+        let mut buf = Vec::new();
+        pk.params().write(&mut buf).expect("params serialization");
+        let paramlen = buf.len();
+        cs.write(&mut buf)?;
+        let cslen = buf.len() - paramlen;
+        pk.vk().vk.write(&mut buf)?;
+        let vklen = buf.len() - cslen - paramlen;
+
+        // Separate checksums for the two independently-stored components.
+        // The body layout is: [params][cs][vk] — param bytes are buf[0..paramlen],
+        // vk+cs bytes are buf[paramlen..paramlen+cslen+vklen].
+        let param_bytes = &buf[..paramlen];
+        let vk_body_bytes = &buf[paramlen..paramlen + cslen + vklen];
+        let param_hash: [u8; 32] = {
+            let mut h = [0u8; 32];
+            h.copy_from_slice(Checksum::generate(param_bytes).as_slice());
+            h
+        };
+        let vk_hash: [u8; 32] = {
+            let mut h = [0u8; 32];
+            h.copy_from_slice(Checksum::generate(vk_body_bytes).as_slice());
+            h
+        };
+
+        buf.extend_from_slice(
+            &zk_cosmwasm::CircuitFooter::new(
+                zk_cosmwasm::CircuitType::Plonkish,
+                zk_cosmwasm::curves::CurveType::Pasta,
+                K as u8,
+                6,   // i — number of public input scalars (6 instance fields)
+                paramlen as u32,
+                cslen as u32,
+                vklen as u32,
+                param_hash,
+                vk_hash,
+            )
+            .to_bytes(),
+        );
+
+        vkw.write_all(&buf)?;
+        vkw.flush()?;
+
+        Ok(pk)
+    }
+
+    /// retrieve a clone of the vk
+    pub fn vk(&self) -> VerifyingKey {
+        VerifyingKey::from(self)
+    }
     /// retrieve a clone of the params
     pub fn params(&self) -> halo2_proofs::poly::commitment::Params<vesta::Affine> {
         self.params.clone()
@@ -868,7 +880,6 @@ impl Proof {
 mod tests {
     use alloc::vec::Vec;
     use core::iter;
-    use cw_orch::mock::Mock;
 
     use ff::{PrimeField, PrimeFieldBits};
     use group::Curve;
@@ -883,7 +894,6 @@ mod tests {
         constants::sinsemilla::LEAF_PERSONALIZATION,
         note::{ExtractedNoteCommitment, Note},
         spec::to_native_out_of_circuit,
-        suite::suite::MerkleTestDataBuilder,
         tree::MerklePath,
     };
 
@@ -1166,6 +1176,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "interface")]
     fn test_genesis_merkle_tree_with_generated_data() {
         /// Integration test using MerkleTestDataBuilder to generate realistic merkle trees.
         /// This simulates claiming a note by:
@@ -1174,6 +1185,8 @@ mod tests {
         /// 3. Generating an authentication path
         /// 4. Running the full circuit with the generated path
         use crate::suite::HeadstashCircuitSuite;
+        use crate::suite::suite::MerkleTestDataBuilder;
+        use cw_orch::mock::Mock;
         use ff::PrimeField;
 
         let suite = HeadstashCircuitSuite::new(Mock::new("sender"));
@@ -1288,9 +1301,12 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "interface")]
     fn test_genesis_merkle_tree_various_sizes() {
         /// Test genesis merkle tree generation with various tree sizes
         use crate::suite::HeadstashCircuitSuite;
+        use crate::suite::suite::MerkleTestDataBuilder;
+        use cw_orch::mock::Mock;
 
         let suite = HeadstashCircuitSuite::new(Mock::new("sender"));
 

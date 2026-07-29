@@ -99,6 +99,16 @@ pub struct ZecEgressReceiptJson {
     pub burn_nullifier_hex: String,
     pub burn_evidence_path: Option<String>,
     pub sealed_source: Option<String>,
+    /// `hashmerchant_live` | `in_process_lab` when threshold path ran.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub auth_source: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub committee_crypto: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub custody_label: Option<String>,
+    /// Always false for lab multi-sig path (FROST not claimed).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub frost: Option<bool>,
 }
 
 #[derive(Clone, Debug, thiserror::Error)]
@@ -200,6 +210,7 @@ fn pure_zec_to_json(
     evidence_path: Option<&Path>,
     sealed_source: Option<&str>,
 ) -> ZecEgressReceiptJson {
+    let meta = super::lab_pay_zec::peek_last_threshold_auth_meta();
     ZecEgressReceiptJson {
         schema: "ZecEgressReceiptV0".into(),
         profile: profile.into(),
@@ -214,6 +225,10 @@ fn pure_zec_to_json(
         burn_nullifier_hex: r.burn_nullifier_hex.clone(),
         burn_evidence_path: evidence_path.map(|p| p.display().to_string()),
         sealed_source: sealed_source.map(|s| s.to_string()),
+        auth_source: meta.as_ref().map(|m| m.auth_source.clone()),
+        committee_crypto: meta.as_ref().map(|m| m.committee_crypto.clone()),
+        custody_label: meta.as_ref().map(|m| m.custody_label.clone()),
+        frost: Some(false),
     }
 }
 
@@ -631,6 +646,59 @@ pub fn run_option_d_after_settle(
     })
 }
 
+/// RECOVERY-5 / lab degrade SSOT: pure_record_lab + lab_inventory_pay_simulated
+/// are **labeled residual**, never product chain/ZEC consensus success.
+///
+/// Returns `Ok(())` when labels are honest. Errors if mislabeled as CW/product
+/// success aliases or empty.
+pub fn assert_lab_degrade_labels(burn_surface: &str, pay_mode: &str) -> Result<(), EgressDError> {
+    if burn_surface.trim().is_empty() || pay_mode.trim().is_empty() {
+        return Err(EgressDError::Msg(
+            "lab degrade labels empty — refuse silent product success".into(),
+        ));
+    }
+    // Forbidden product-success aliases (UI copy / status strings).
+    let forbidden = [
+        "chain_egress_complete",
+        "zec_sent",
+        "mainnet_complete",
+        "egress complete (chain)",
+        "ZEC sent",
+    ];
+    for f in forbidden {
+        if burn_surface.eq_ignore_ascii_case(f) || pay_mode.eq_ignore_ascii_case(f) {
+            return Err(EgressDError::Msg(format!(
+                "product success alias forbidden for lab residual: {f}"
+            )));
+        }
+    }
+    // SSOT label width checks: residual modes must keep their exact strings.
+    if burn_surface == BURN_SURFACE_PURE_RECORD_LAB {
+        debug_assert_ne!(BURN_SURFACE_PURE_RECORD_LAB, BURN_SURFACE_CW_BRIDGE_EGRESS);
+    }
+    if pay_mode == MODE_LAB_INVENTORY_PAY_SIMULATED {
+        debug_assert_ne!(MODE_LAB_INVENTORY_PAY_SIMULATED, MODE_LAB_INVENTORY_PAY);
+        if !pay_mode.contains("simulated") {
+            return Err(EgressDError::Msg(
+                "lab_inventory_pay_simulated must contain 'simulated'".into(),
+            ));
+        }
+    }
+    Ok(())
+}
+
+/// True when residual labels forbid product UI celebration (R3/R5).
+///
+/// Threshold product modes (`threshold_escrow_release[_simulated]`) are allowed
+/// to celebrate architecture (still honesty-labeled for mock proof / P-lab).
+/// Inventory funder modes always forbid product celebration.
+pub fn product_celebrate_forbidden(burn_surface: &str, pay_mode: &str) -> bool {
+    use private_dex_seams::reject_funder_only_as_product;
+    burn_surface == BURN_SURFACE_PURE_RECORD_LAB
+        || pay_mode == MODE_LAB_INVENTORY_PAY_SIMULATED
+        || reject_funder_only_as_product(pay_mode)
+}
+
 /// Refuse pay without burn evidence (product bar) — unit-test helper.
 pub fn refuse_pay_without_evidence(sealed: &SealedDestV0) -> Result<(), EgressDError> {
     let empty = PureEvidence {
@@ -740,6 +808,21 @@ mod tests {
 
     #[test]
     fn option_d_after_settle_happy_pure_labeled() {
+        // Pin residual inventory so ambient omni/product profile cannot flaky-fail.
+        use crate::harness::lab_pay_zec::{
+            ENV_CORRIDOR_ALLOW_LAB_INVENTORY_RESIDUAL, ENV_CORRIDOR_PROFILE, ENV_CORRIDOR_ZEC_RELEASE,
+        };
+        let prev_release = std::env::var(ENV_CORRIDOR_ZEC_RELEASE).ok();
+        let prev_profile = std::env::var(ENV_CORRIDOR_PROFILE).ok();
+        let prev_residual = std::env::var(ENV_CORRIDOR_ALLOW_LAB_INVENTORY_RESIDUAL).ok();
+        // # Safety: test-only process env pin; restored below.
+        unsafe {
+            std::env::set_var(ENV_CORRIDOR_ZEC_RELEASE, "lab_inventory");
+            std::env::set_var(ENV_CORRIDOR_PROFILE, "");
+            std::env::set_var(ENV_CORRIDOR_ALLOW_LAB_INVENTORY_RESIDUAL, "1");
+            std::env::set_var("CORRIDOR_LAB_ZEC_FORCE_SIMULATED", "1");
+        }
+
         let mint = fixture_mint();
         let handoff =
             build_swap_spend_handoff_from_mint(&mint, ProofModeLabel::MockVerifyLab).unwrap();
@@ -782,6 +865,12 @@ mod tests {
         assert_eq!(out.evidence.proof_mode, "mock_verify_lab");
         assert_eq!(out.zec_receipt.status, "complete");
         assert_eq!(out.zec_receipt.mode, MODE_LAB_INVENTORY_PAY_SIMULATED);
+        // RECOVERY-5: labels are residual, not product celebrate
+        assert_lab_degrade_labels(&out.burn_surface, &out.zec_receipt.mode).unwrap();
+        assert!(product_celebrate_forbidden(
+            &out.burn_surface,
+            &out.zec_receipt.mode
+        ));
         assert_eq!(
             out.zec_receipt.dest_owner_binding_hex,
             sealed.owner_binding_hex
@@ -803,9 +892,22 @@ mod tests {
         assert_eq!(z2.burn_nullifier_hex, out.zec_receipt.burn_nullifier_hex);
 
         let _ = fs::remove_dir_all(&dir);
+        // # Safety: restore process env after test pin.
         unsafe {
             std::env::remove_var("CORRIDOR_EGRESS_BURN_EVIDENCE_PATH");
             std::env::remove_var("CORRIDOR_ZEC_EGRESS_RECEIPT_PATH");
+            match prev_release {
+                Some(v) => std::env::set_var(ENV_CORRIDOR_ZEC_RELEASE, v),
+                None => std::env::remove_var(ENV_CORRIDOR_ZEC_RELEASE),
+            }
+            match prev_profile {
+                Some(v) => std::env::set_var(ENV_CORRIDOR_PROFILE, v),
+                None => std::env::remove_var(ENV_CORRIDOR_PROFILE),
+            }
+            match prev_residual {
+                Some(v) => std::env::set_var(ENV_CORRIDOR_ALLOW_LAB_INVENTORY_RESIDUAL, v),
+                None => std::env::remove_var(ENV_CORRIDOR_ALLOW_LAB_INVENTORY_RESIDUAL),
+            }
         }
     }
 
@@ -907,6 +1009,25 @@ mod tests {
     #[test]
     fn egress_nf_domain_label() {
         assert_eq!(EGRESS_NF_LABEL, b"egress-nf-v0");
+    }
+
+    #[test]
+    fn lab_degrade_labels_ssot() {
+        assert_lab_degrade_labels(
+            BURN_SURFACE_PURE_RECORD_LAB,
+            MODE_LAB_INVENTORY_PAY_SIMULATED,
+        )
+        .unwrap();
+        assert!(product_celebrate_forbidden(
+            BURN_SURFACE_PURE_RECORD_LAB,
+            MODE_LAB_INVENTORY_PAY_SIMULATED
+        ));
+        assert!(!product_celebrate_forbidden(
+            BURN_SURFACE_CW_BRIDGE_EGRESS,
+            MODE_LAB_INVENTORY_PAY
+        ));
+        assert!(assert_lab_degrade_labels("zec_sent", MODE_LAB_INVENTORY_PAY).is_err());
+        assert!(assert_lab_degrade_labels(BURN_SURFACE_PURE_RECORD_LAB, "").is_err());
     }
 
     #[test]

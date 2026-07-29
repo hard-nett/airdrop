@@ -267,8 +267,10 @@ pub fn mock_wavs_proof_with_operators(count: usize) -> WavsProofOfOwnership {
 
 pub fn mock_headstash_instantiate_msg() -> HeadstashInstantiateMsg {
     HeadstashInstantiateMsg {
-        genesis_root: Binary::from(vec![1, 2, 3, 4]), // Mock genesis root
+        genesis_root: Binary::from(vec![1u8; 32]), // Mock Poseidon-v1 genesis root
         token_strategy: mock_token_strategy_new(),
+        distro_hash_domain: Default::default(),
+        genesis_label: None,
         wavs: mock_wavs_proof(),
     }
 }

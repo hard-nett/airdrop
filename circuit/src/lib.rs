@@ -29,9 +29,17 @@ mod action;
 pub mod address;
 pub mod builder;
 mod constants;
+// Bundle module is partially ported; BatchValidator lives under bundle/batch for
+// internal use. Prefer `Proof::add_to_batch` for multi-proof tooling.
 // pub mod bundle;
 
-#[cfg(feature = "circuit")]
+// Full Halo2 Action circuit (host prove) — needs host-crypto (halo2-base + libsecp).
+#[cfg(all(feature = "circuit", feature = "host-crypto"))]
+pub mod circuit;
+
+// Guest CosmWasm: Instance-only surface (no multicore / C-sys graph).
+#[cfg(all(feature = "circuit", not(feature = "host-crypto")))]
+#[path = "circuit_guest.rs"]
 pub mod circuit;
 
 #[cfg(feature = "circuit")]
@@ -43,12 +51,20 @@ pub mod gen;
 pub mod primitives;
 mod spec;
 
+/// Poseidon-v1 public distribution / inclusion Merkle set (pure helpers).
+///
+/// See [`distro_poseidon`] and ADR `docs/plans/spectrum/ADR-POSEIDON-DISTRO-TREE.md`.
+/// Private note-commit remains Sinsemilla/Orchard for now.
+#[cfg(feature = "circuit")]
+pub mod distro_poseidon;
 
 #[cfg(feature = "interface")]
 pub mod suite;
 
 #[cfg(test)]
 mod test_vectors;
+#[cfg(all(test, feature = "circuit"))]
+mod orchard_delta_part_t;
 pub mod tree;
 pub mod value;
 pub mod zip32;

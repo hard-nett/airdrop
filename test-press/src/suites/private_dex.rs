@@ -78,6 +78,10 @@ impl<Chain: CwEnv> PrivateDexSuite<Chain> {
     }
 
     /// Create lab pool for handoff asset orientation (asset_a = in, asset_b = out).
+    ///
+    /// **Magic reserves** (`LAB_R_IN`/`LAB_R_OUT`) — structure demos only.
+    /// Omni product path: use [`Self::create_pool_from_lp_seed`] after
+    /// `bootstrap_omni_liquidity` (GUIDE Phases 1–3).
     pub fn create_lab_pool_for_handoff(
         &self,
         handoff: &SwapSpendHandoffV0,
@@ -87,6 +91,25 @@ impl<Chain: CwEnv> PrivateDexSuite<Chain> {
             handoff.statement.asset_out.clone(),
             LAB_R_IN,
             LAB_R_OUT,
+            LAB_GAMMA,
+            LAB_GAMMA_DEN,
+        )
+    }
+
+    /// Create pool with reserves from bridged LP seed receipt (Phase 3 lab CW equivalent).
+    ///
+    /// `r_a`/`r_b` **must** equal LP note values recorded in the receipt; do not invent R.
+    pub fn create_pool_from_lp_seed(
+        &self,
+        handoff: &SwapSpendHandoffV0,
+        r_btc: u128,
+        r_zec: u128,
+    ) -> Result<<Chain as TxHandler>::Response, CwOrchError> {
+        self.create_pool(
+            handoff.statement.asset_in.clone(),
+            handoff.statement.asset_out.clone(),
+            r_btc,
+            r_zec,
             LAB_GAMMA,
             LAB_GAMMA_DEN,
         )
@@ -253,5 +276,47 @@ mod tests {
             es.contains("proof") || es.contains("reject"),
             "expected proof reject, got {err}"
         );
+    }
+
+    #[test]
+    fn settle_after_omni_lp_seed_reserves() {
+        use crate::harness::omni_lp_seed::bootstrap_omni_liquidity;
+        use crate::harness::swap_statement_cw::build_swap_spend_handoff_from_mint_with_reserves;
+
+        let boot = bootstrap_omni_liquidity().expect("lp bootstrap");
+        boot.assert_product_green().unwrap();
+
+        let app = Mock::new("owner");
+        let mut suite = PrivateDexSuite::new(app.clone());
+        suite
+            .upload_and_instantiate_lab(true)
+            .expect("upload/instantiate");
+
+        let mint = fixture_mint();
+        let handoff = build_swap_spend_handoff_from_mint_with_reserves(
+            &mint,
+            ProofModeLabel::MockVerifyLab,
+            boot.r_btc,
+            boot.r_zec,
+        )
+        .unwrap();
+
+        suite
+            .create_pool_from_lp_seed(&handoff, boot.r_btc, boot.r_zec)
+            .expect("create pool from bridged LP");
+
+        let pool = suite.query_pool(handoff.statement.pool_id).unwrap();
+        assert_eq!(pool.r_a.u128(), boot.r_btc);
+        assert_eq!(pool.r_b.u128(), boot.r_zec);
+        assert_eq!(
+            handoff.statement.r_in_before.u128(),
+            boot.r_btc,
+            "statement binds LP-seeded R"
+        );
+
+        suite.settle_handoff(&handoff).expect("settle vs LP pool");
+        let (r_in, r_out) = suite.assert_settle_ok(&handoff).expect("assert");
+        assert_eq!(r_in, boot.r_btc + handoff.statement.delta_r_in.u128());
+        assert_eq!(r_out, boot.r_zec - handoff.statement.delta_r_out.u128());
     }
 }

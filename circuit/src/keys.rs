@@ -14,6 +14,7 @@ use group::{
 };
 use pasta_curves::pallas;
 use rand::RngCore;
+#[cfg(feature = "host-crypto")]
 use secp256k1::SecretKey;
 use subtle::{Choice, ConditionallySelectable, ConstantTimeEq, CtOption};
 use zcash_note_encryption::EphemeralKeyBytes;
@@ -919,49 +920,90 @@ impl SharedSecret {
     }
 }
 
-/// eligible secret key
+/// Eligible secret key.
+///
+/// Host (`host-crypto`): real libsecp `SecretKey`.  
+/// Guest wasm (no `host-crypto`): 32-byte material only — enough for `secret_bytes` /
+/// pallas reduction used by CosmWasm mint paths without linking secp256k1-sys.
 #[derive(Debug, Copy, Clone)]
+#[cfg(feature = "host-crypto")]
 pub struct EligibleSk(secp256k1::SecretKey);
+
+#[derive(Debug, Copy, Clone)]
+#[cfg(not(feature = "host-crypto"))]
+pub struct EligibleSk([u8; 32]);
 
 impl EligibleSk {
     /// Generates a random key that will be eligible for a headstash instance.
     pub fn random(rng: &mut impl RngCore) -> Self {
         let mut bytes = [0; 32];
         rng.fill_bytes(&mut bytes);
-        EligibleSk::from(secp256k1::SecretKey::from_byte_array(bytes).expect("dang"))
+        Self::from_bytes(bytes)
     }
 
     /// derive from an secp256k1 crate value
+    #[cfg(feature = "host-crypto")]
     pub fn from(sk: secp256k1::SecretKey) -> Self {
         Self(sk)
     }
+
     /// derive from bytes
     pub fn from_bytes(sk: [u8; 32]) -> Self {
-        Self(secp256k1::SecretKey::from_byte_array(sk).expect("dang"))
+        #[cfg(feature = "host-crypto")]
+        {
+            Self(secp256k1::SecretKey::from_byte_array(sk).expect("dang"))
+        }
+        #[cfg(not(feature = "host-crypto"))]
+        {
+            Self(sk)
+        }
     }
 
     /// derive from a hex string of raw 32-byte sk.
     pub fn from_hex(hex_str: &str) -> Self {
-        Self(
-            secp256k1::SecretKey::from_byte_array(
+        let raw: [u8; 32] = hex::decode(hex_str)
+            .ok()
+            .and_then(|b| b.try_into().ok())
+            .unwrap_or_else(|| {
+                // legacy path: treat input as raw 32-byte ascii (host tests)
                 hex_str
                     .as_bytes()
                     .try_into()
-                    .expect("slice conversion to [u8;32] should never fail"),
-            )
-            .expect("invalid secp256k1 secret key material"),
-        )
+                    .expect("slice conversion to [u8;32] should never fail")
+            });
+        Self::from_bytes(raw)
     }
 
     /// the public key paired with this secret key
     pub fn epk(&self) -> EligiblePk {
-        EligiblePk(self.0.public_key(&secp256k1::Secp256k1::new()))
+        #[cfg(feature = "host-crypto")]
+        {
+            EligiblePk(self.0.public_key(&secp256k1::Secp256k1::new()))
+        }
+        #[cfg(not(feature = "host-crypto"))]
+        {
+            // Guest: store compressed-style 33-byte placeholder from secret (not a real pk).
+            let mut out = [0u8; 33];
+            out[0] = 0x02;
+            out[1..].copy_from_slice(&self.0);
+            EligiblePk(out)
+        }
     }
-    /// the public key paired with this secret key
+
+    /// secret key bytes
     pub fn secret_bytes(&self) -> [u8; 32] {
-        self.0.secret_bytes()
+        #[cfg(feature = "host-crypto")]
+        {
+            self.0.secret_bytes()
+        }
+        #[cfg(not(feature = "host-crypto"))]
+        {
+            self.0
+        }
     }
-    /// the public key paired with this secret key
+
+    /// the secp256k1 crate secret key (host only)
+    #[cfg(feature = "host-crypto")]
     pub fn secret_key(&self) -> SecretKey {
         self.0
     }
@@ -972,29 +1014,57 @@ impl EligibleSk {
     }
 }
 
-/// Eligible secret key for headstashes
+/// Eligible public key for headstashes
 #[derive(Debug, Copy, Clone)]
+#[cfg(feature = "host-crypto")]
 pub struct EligiblePk(pub secp256k1::PublicKey);
+
+#[derive(Debug, Copy, Clone)]
+#[cfg(not(feature = "host-crypto"))]
+pub struct EligiblePk(pub [u8; 33]);
+
 impl EligiblePk {
     /// the (x,y) uncompressed coordinates
     pub fn xy(&self) -> ([u8; 32], [u8; 32]) {
-        let e_pk_bytes = self.0.serialize_uncompressed();
-        let e_pk_x_bytes: [u8; 32] = e_pk_bytes[1..33].try_into().unwrap();
-        let e_pk_y_bytes: [u8; 32] = e_pk_bytes[33..65].try_into().unwrap();
-        (e_pk_x_bytes, e_pk_y_bytes)
+        #[cfg(feature = "host-crypto")]
+        {
+            let e_pk_bytes = self.0.serialize_uncompressed();
+            let e_pk_x_bytes: [u8; 32] = e_pk_bytes[1..33].try_into().unwrap();
+            let e_pk_y_bytes: [u8; 32] = e_pk_bytes[33..65].try_into().unwrap();
+            (e_pk_x_bytes, e_pk_y_bytes)
+        }
+        #[cfg(not(feature = "host-crypto"))]
+        {
+            // Guest placeholder: x = payload, y = 0
+            let mut x = [0u8; 32];
+            x.copy_from_slice(&self.0[1..33]);
+            (x, [0u8; 32])
+        }
     }
 }
 impl From<&Vec<u8>> for EligiblePk {
     fn from(data: &Vec<u8>) -> Self {
-        Self(
-            secp256k1::PublicKey::from_byte_array_compressed(data.as_slice().try_into().unwrap())
+        #[cfg(feature = "host-crypto")]
+        {
+            Self(
+                secp256k1::PublicKey::from_byte_array_compressed(
+                    data.as_slice().try_into().unwrap(),
+                )
                 .expect("darn"),
-        )
+            )
+        }
+        #[cfg(not(feature = "host-crypto"))]
+        {
+            let mut out = [0u8; 33];
+            let n = core::cmp::min(data.len(), 33);
+            out[..n].copy_from_slice(&data[..n]);
+            Self(out)
+        }
     }
 }
 impl From<EligibleSk> for EligiblePk {
     fn from(sk: EligibleSk) -> Self {
-        Self(sk.0.public_key(&secp256k1::Secp256k1::new()))
+        sk.epk()
     }
 }
 

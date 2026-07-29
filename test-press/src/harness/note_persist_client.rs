@@ -78,6 +78,53 @@ impl NotesPersistConfig {
         self.include_ciphertext_sha256 = on;
         self
     }
+
+    /// Build from env for corridor / lab film (PIR-3).
+    ///
+    /// | Env | Role |
+    /// |-----|------|
+    /// | `NOTES_BASE` | When set → HTTP host; else local `data_dir` |
+    /// | `NOTES_HS_ID` | Default `corridor-post-mint` |
+    /// | `NOTES_BEARER_TOKEN` | Optional `Authorization: Bearer` (modular notes_auth `bearer`) |
+    /// | `NOTES_OWNER_KEY` | 64-hex 32B; default lab `[0xC0; 32]` |
+    ///
+    /// Auth stays **existing modular notes_auth** (bearer/secp/noop) — not light-client
+    /// or Nostr until those modules ship. Client only attaches headers; server verifies.
+    pub fn from_env_or_local(data_dir: PathBuf) -> Result<Self, L0Error> {
+        let hs_id = std::env::var("NOTES_HS_ID").unwrap_or_else(|_| "corridor-post-mint".into());
+        let owner_key = parse_owner_key_env().unwrap_or([0xC0; 32]);
+        let mut auth_headers = Vec::new();
+        if let Ok(tok) = std::env::var("NOTES_BEARER_TOKEN") {
+            if !tok.is_empty() {
+                auth_headers.push(("Authorization".into(), format!("Bearer {tok}")));
+            }
+        }
+        if let Ok(base) = std::env::var("NOTES_BASE") {
+            let base = base.trim().to_string();
+            if !base.is_empty() {
+                return Ok(Self::http(hs_id, owner_key, base, auth_headers));
+            }
+        }
+        Ok(Self {
+            hs_id,
+            owner_key,
+            notes_base: None,
+            data_dir: Some(data_dir),
+            auth_headers,
+            include_ciphertext_sha256: false,
+        })
+    }
+}
+
+fn parse_owner_key_env() -> Option<[u8; 32]> {
+    let s = std::env::var("NOTES_OWNER_KEY").ok()?;
+    let b = hex::decode(s.trim()).ok()?;
+    if b.len() != 32 {
+        return None;
+    }
+    let mut k = [0u8; 32];
+    k.copy_from_slice(&b);
+    Some(k)
 }
 
 /// Receipt from a successful client put (path for snap/PIR list).
@@ -273,6 +320,46 @@ pub fn recover_note(
     get_and_decrypt_note(cfg, addr)
 }
 
+/// Corridor film recovery: prefer **PIR** when `notes_base` is set (+ `note-http`);
+/// otherwise direct GET decrypt (offline / local store).
+///
+/// Product path for multi-device sync; direct recover remains default offline.
+#[cfg(feature = "l0-seams")]
+pub fn recover_note_film(
+    cfg: &NotesPersistConfig,
+    addr: &str,
+) -> Result<seam_note_out::SeamNoteOutV0, L0Error> {
+    if cfg.notes_base.is_some() {
+        #[cfg(feature = "note-http")]
+        {
+            return recover_note_via_pir(cfg, addr);
+        }
+        #[cfg(not(feature = "note-http"))]
+        {
+            return Err(L0Error(
+                "NOTES_BASE set but feature `note-http` disabled — enable for PIR film".into(),
+            ));
+        }
+    }
+    recover_note(cfg, addr)
+}
+
+/// Put after mint then film recover (PIR when HTTP, direct when local).
+#[cfg(feature = "l0-seams")]
+pub fn put_and_film_recover_after_mint(
+    note: &seam_note_out::SeamNoteOutV0,
+    cfg: &NotesPersistConfig,
+) -> Result<NotePersistReceipt, L0Error> {
+    let receipt = put_note_after_mint(note, cfg, None)?;
+    let recovered = recover_note_film(cfg, &receipt.addr)?;
+    if recovered.to_bytes() != note.to_bytes() {
+        return Err(L0Error(
+            "film recover: decrypt does not match SEAM cleartext".into(),
+        ));
+    }
+    Ok(receipt)
+}
+
 #[cfg(all(test, feature = "l0-seams"))]
 mod tests {
     use super::*;
@@ -304,6 +391,20 @@ mod tests {
             .join(format!("{}.json", receipt.addr))
             .is_file());
         let recovered = recover_note(&cfg, &receipt.addr).expect("recover");
+        assert_eq!(recovered.to_bytes(), note.to_bytes());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// PIR-3: film recover on local store uses direct path (no NOTES_BASE).
+    #[test]
+    fn film_recover_local_is_direct_path() {
+        let sketch = compose_bridge_mint_to_seam_bytes().expect("compose");
+        let note = SeamNoteOutV0::from_bytes(&sketch.to_seam_bytes()).expect("seam");
+        let dir = tmp();
+        let cfg = NotesPersistConfig::local_season("season-film", [0xC0; 32], dir.clone());
+        let receipt = put_and_film_recover_after_mint(&note, &cfg).expect("film local");
+        assert!(receipt.store_path.contains("season-film"));
+        let recovered = recover_note_film(&cfg, &receipt.addr).expect("film again");
         assert_eq!(recovered.to_bytes(), note.to_bytes());
         let _ = std::fs::remove_dir_all(&dir);
     }

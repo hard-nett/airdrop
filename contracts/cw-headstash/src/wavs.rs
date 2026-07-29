@@ -95,6 +95,63 @@ impl WavsOperatorSet {
     }
 }
 
+/// Generate a real BLS12-381 PoP set for multi-test / cw-orch Mock instantiate.
+///
+/// Host-side only (uses ark + MockApi hash-to-curve). Not for on-chain / wasm use.
+/// `total_operators` must be ≥ 1.
+///
+/// Available under `cfg(any(test, feature = "interface"))` so the wasm `cdylib`
+/// product build does not pull testing APIs.
+#[cfg(any(test, feature = "interface"))]
+pub fn generate_test_wavs_proof(total_operators: usize) -> WavsProofOfOwnership {
+    use ark_bls12_381::{Fr, G1Affine, G1Projective, G2Affine};
+    use ark_ec::AffineRepr;
+    use ark_ff::UniformRand;
+    use ark_serialize::{CanonicalDeserialize, CanonicalSerialize};
+    use cosmwasm_std::testing::MockApi;
+    use rand_core::OsRng;
+
+    assert!(total_operators >= 1, "total_operators must be >= 1");
+    let api = MockApi::default();
+    let mut poos = vec![];
+    let mut agg_pk_projective = G1Projective::default();
+
+    for _ in 0..total_operators {
+        let sk = Fr::rand(&mut OsRng);
+        let pk: G1Affine = (G1Affine::generator() * sk).into();
+        let mut pk_bytes = vec![];
+        pk.serialize_compressed(&mut pk_bytes).unwrap();
+
+        let pop_hash = api
+            .bls12_381_hash_to_g2(HashFunction::Sha256, &pk_bytes, &G2)
+            .expect("hash_to_g2");
+        let h_point = G2Affine::deserialize_compressed(&pop_hash[..]).unwrap();
+        let pop_sig: G2Affine = (h_point * sk).into();
+        let mut sig_bytes = vec![];
+        pop_sig.serialize_compressed(&mut sig_bytes).unwrap();
+
+        poos.push(WavsOpAuth {
+            key: hex::encode(&pk_bytes),
+            poo: hex::encode(&sig_bytes),
+        });
+        agg_pk_projective += pk;
+    }
+
+    let agg_pk: G1Affine = agg_pk_projective.into();
+    let mut agg_pk_bytes = vec![];
+    agg_pk.serialize_compressed(&mut agg_pk_bytes).unwrap();
+
+    WavsProofOfOwnership {
+        poos,
+        msg: WavsAuthMetadata {
+            aggregate_key: hex::encode(agg_pk_bytes),
+            threshold: (total_operators * 2 / 3) + 1,
+            total_operators,
+            nonce: 0,
+        },
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -63,7 +63,8 @@ demo-keys:
 # Inventory + E2E-id map: crates/terp-rs/docs/private-bridge/E2E-HARNESS-PLAN.md
 # L1 mock ZK: policy + mock proof bytes only; real prove = demo-h1 / nightly.
 
-spectrum_fixtures := justfile_directory() / "../../terp-rs/crates"
+# Sibling under crates/ (headstash → ../terp-rs). Not monorepo-root ../../terp-rs.
+spectrum_fixtures := justfile_directory() / "../terp-rs/crates"
 
 # Round-3: emit/validate Domain B BridgeMintClaimPublic golden fixture (mock LC).
 # Documents Tacit anvil roundtrip; optional --try-anvil if forge/anvil present.
@@ -151,7 +152,7 @@ e2e-l1:
 # SSOT: crates/terp-rs/docs/private-bridge/e2e/CORRIDOR-LAB-STATUS.md
 # Design freezes: crates/terp-rs/docs/private-bridge/DESIGN-DECISIONS-CORRIDOR-2026-07-20.md
 
-spectrum_e2e := justfile_directory() / "../../terp-rs/docs/private-bridge/e2e"
+spectrum_e2e := justfile_directory() / "../terp-rs/docs/private-bridge/e2e"
 
 # One-command host film: cashapp pure + harness + hash-market notify smoke.
 demo-corridor-lab:
@@ -275,6 +276,7 @@ demo-corridor-ict-egress-d-mint-only:
 # One-button stable local multi-net (P1): prepare wasm → Zakura up (best effort)
 # → full Option D egress-d → print receipts; fail-closed on dest mismatch / missing burn.
 # Soft-skip only Zakura *start*; burn + dual receipts still mandatory.
+# HONEST: structure demo (lab inventory / CreatePool-at-handoff residual may apply).
 demo-corridor-full-local:
         #!/usr/bin/env bash
         set -euo pipefail
@@ -284,6 +286,110 @@ demo-corridor-full-local:
           "$E2E/prepare-corridor-ict-wasm.sh" \
           "$E2E/zakura/zakura-local.sh" 2>/dev/null || true
         bash "$E2E/demo-corridor-full-local.sh"
+
+# ── Omni production-shaped (GUIDE-OMNI-E2E-PRODUCTION-SHAPED-2026-07-22) ────
+# Product power claim only when LP bridged seed + threshold_escrow release green.
+# Structure spine (egress-d) remains separate — do not collapse labels.
+# Soft residuals labeled until LP-SEED / THRESHOLD-RELEASE tracks land.
+
+preflight-corridor-omni:
+        #!/usr/bin/env bash
+        set -euo pipefail
+        E2E="{{spectrum_e2e}}"
+        chmod +x "$E2E/preflight-corridor-local.sh"
+        CORRIDOR_PROFILE=omni_production_shaped \
+          CORRIDOR_CHAIN_SETTLE=1 \
+          CORRIDOR_ZEC_EGRESS_D=1 \
+          CORRIDOR_ZEC_RELEASE=threshold_escrow \
+          CORRIDOR_POOL_SEED=bridged_lp \
+          CORRIDOR_REQUIRE_DEPOSIT_CLAIM=1 \
+          CORRIDOR_REJECT_PLACEHOLDER_DEST=1 \
+          CORRIDOR_REQUIRE_ZAKURA_RPC=1 \
+          CORRIDOR_MOCK_VERIFY=true \
+          bash "$E2E/preflight-corridor-local.sh"
+
+# Phases 1–3 only (dual-home + LP mints + pool seed). Soft residual if hook missing.
+bootstrap-corridor-omni-liquidity:
+        #!/usr/bin/env bash
+        set -euo pipefail
+        E2E="{{spectrum_e2e}}"
+        chmod +x "$E2E/bootstrap-corridor-omni-liquidity.sh" \
+          "$E2E/hooks/omni-dual-home-prep.sh" \
+          "$E2E/hooks/omni-lp-seed.sh" 2>/dev/null || true
+        CORRIDOR_PROFILE=omni_production_shaped \
+          CORRIDOR_POOL_SEED=bridged_lp \
+          bash "$E2E/bootstrap-corridor-omni-liquidity.sh"
+
+# Multi-cycle pure harness: multi-chain account curation + private-DEX/bridge routes + TF assets.
+demo-seam-multi-cycle:
+        #!/usr/bin/env bash
+        set -euo pipefail
+        cargo test -p zk-test-press --lib --features 'interface,l0-seams' -- \
+          account_curation seam_multi_cycle -- --nocapture
+
+# Negative-contrast suite: adversarial objects that must fail closed against product goals.
+demo-seam-negative-contrast:
+        #!/usr/bin/env bash
+        set -euo pipefail
+        cargo test -p zk-test-press --lib --features 'interface,l0-seams' -- \
+          seam_negative_contrast -- --nocapture
+
+# PIR notes L1 always (no live server). Includes multi-note client decrypt + modular bearer.
+# Docs: docs/research/PIR-NOTES-LOCAL-RUNBOOK.md
+demo-pir-notes-l1:
+        #!/usr/bin/env bash
+        set -euo pipefail
+        ROOT="$(cd "{{justfile_directory()}}/.." && pwd)"
+        cd "$ROOT/terp-rs/tools/hash-market"
+        cargo test -p hash-market --lib note_persist --features server -- --nocapture
+        cargo test -p hash-market --lib notes_auth --features server -- --nocapture
+        cargo test -p seam_note_out --lib -- --quiet
+
+# PIR-5: L1 always; live process smoke only when PIR_LIVE=1 (never required for CI green).
+# Ops auth template: tools/hash-market/config.ops-notes-bearer.toml
+demo-pir-notes-smoke:
+        #!/usr/bin/env bash
+        set -euo pipefail
+        ROOT="$(cd "{{justfile_directory()}}/.." && pwd)"
+        HM="$ROOT/terp-rs/tools/hash-market"
+        just --justfile "{{justfile_directory()}}/justfile" demo-pir-notes-l1
+        chmod +x "$HM/scripts/pir-notes-live-smoke.sh"
+        if [[ "${PIR_LIVE:-}" == "1" ]]; then
+          echo "== PIR_LIVE=1 process smoke =="
+          (cd "$HM" && PIR_LIVE=1 bash scripts/pir-notes-live-smoke.sh)
+        else
+          echo "SKIP live process smoke (set PIR_LIVE=1 for multi-note put→list→pir against real server)"
+        fi
+
+# Phases 0–7: FROST custody first → fund that escrow → LP seed → corridor → release.
+# Exit 0 on packaging with labeled residuals; product green only when criteria met.
+# CORRIDOR_OMNI_REQUIRE_PRODUCT_GREEN=1 to fail closed until true green.
+demo-corridor-omni-e2e:
+        #!/usr/bin/env bash
+        set -euo pipefail
+        E2E="{{spectrum_e2e}}"
+        chmod +x "$E2E/demo-corridor-omni-e2e.sh" \
+          "$E2E/bootstrap-corridor-omni-liquidity.sh" \
+          "$E2E/preflight-corridor-local.sh" \
+          "$E2E/corridor-ict-funded.sh" \
+          "$E2E/prepare-corridor-ict-wasm.sh" \
+          "$E2E/zakura/zakura-local.sh" \
+          "$E2E/hooks/omni-dual-home-prep.sh" \
+          "$E2E/hooks/omni-lp-seed.sh" \
+          "$E2E/hooks/omni-frost-boot.sh" \
+          "$E2E/hooks/omni-fund-frost-escrow.sh" 2>/dev/null || true
+        CORRIDOR_PROFILE=omni_production_shaped \
+          CORRIDOR_CHAIN_SETTLE=1 \
+          CORRIDOR_ZEC_EGRESS_D=1 \
+          CORRIDOR_ZEC_RELEASE=threshold_escrow \
+          CORRIDOR_POOL_SEED=bridged_lp \
+          CORRIDOR_CUSTODY_BACKEND=frost \
+          CORRIDOR_FROST=1 \
+          CORRIDOR_REQUIRE_DEPOSIT_CLAIM=1 \
+          CORRIDOR_REJECT_PLACEHOLDER_DEST=1 \
+          CORRIDOR_REQUIRE_ZAKURA_RPC=1 \
+          CORRIDOR_MOCK_VERIFY=true \
+          bash "$E2E/demo-corridor-omni-e2e.sh"
 
 # ── Zakura local (D6) — ZEC dest / RPC; does not break demo-corridor-lab ─────
 # SSOT: crates/terp-rs/docs/private-bridge/e2e/ZAKURA-LOCAL.md

@@ -198,8 +198,9 @@ pub fn default_golden_dest_binding_path() -> PathBuf {
     if let Ok(p) = env::var("ZAKURA_GOLDEN_DEST_BINDING") {
         return PathBuf::from(p);
     }
+    // CARGO_MANIFEST_DIR = crates/headstash/test-press → ../../terp-rs/...
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("../../../docs/plans/spectrum/e2e/zakura/golden-dest-binding.json")
+        .join("../../terp-rs/docs/private-bridge/e2e/zakura/golden-dest-binding.json")
 }
 
 pub fn load_golden_dest_binding(path: &Path) -> Result<GoldenDestBindingDoc, GoldenDestError> {

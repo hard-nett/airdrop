@@ -5,6 +5,7 @@
 //! and circuit key management.
 use alloc::boxed::Box;
 
+use cw_orch::environment::ZkCwEnv;
 #[cfg(feature = "multicore")]
 use rayon::prelude::*;
 
@@ -12,6 +13,9 @@ use crate::{
     address::RecpAddr,
     builder::SpendInfo,
     circuit::{Circuit, ProvingKey},
+    distro_poseidon::{
+        poseidon_distro_crh, poseidon_distro_leaf, DistroHashDomain, DISTRO_HASH_DOMAIN_POSEIDON_V1,
+    },
     keys::{EligibleSk, FullViewingKey, NullifierDerivingKey, SpendingKey},
     note::{ExtractedNoteCommitment, Note, RandomSeed, Rho},
     tree::MerklePath,
@@ -35,9 +39,6 @@ use std::{env, eprintln, fs, println};
 
 // TODO: use include to paths for publishing libraries
 const KEYS_DIR: &str = "artifacts";
-const PARAMS_FILE: &str = "params.bin";
-const VK_FILE: &str = "verifying_key.bin";
-const PK_FILE: &str = "proving_key.bin";
 
 /// BoxError
 pub type BoxError = Box<dyn Error + Send + Sync>;
@@ -61,14 +62,23 @@ pub struct TerpHeadstashConfig {
     // node params
 }
 
-#[cw_orch::circuit_interface(id = "headstash")]
+#[cw_orch::circuit_interface(id = "headstash", artifacts_dir = "artifacts")]
 #[derive(Debug, Default)]
 pub struct HeadstashCircuitSuite;
+
+impl<Chain: ZkCwEnv> HeadstashCircuitSuite<Chain> {
+    pub fn build_keys(&self) -> Result<crate::circuit::ProvingKey, BoxError> {
+        use cw_orch::prelude::CircuitUploadable;
+        let pk = crate::circuit::ProvingKey::build_and_write(Self::vk_path())?;
+        Ok(pk)
+    }
+}
 
 impl<Chain> HeadstashBitwiseInstance for HeadstashCircuitSuite<Chain> {}
 impl<Chain> HeadstashLaunchpadInstance for HeadstashCircuitSuite<Chain> {}
 impl<Chain> HeadstashSinsemillaTree for HeadstashCircuitSuite<Chain> {}
 impl<Chain> HeadstashIpfsInstance for HeadstashCircuitSuite<Chain> {}
+impl<Chain> HeadstashTestDataGenerator for HeadstashCircuitSuite<Chain> {}
 
 /// HeadstashBitwiseInstance
 pub trait HeadstashBitwiseInstance {
@@ -182,13 +192,23 @@ pub trait HeadstashSinsemillaTree: HeadstashBitwiseInstance {
         Ok(())
     }
 
-    /// gen_headstash_tree
+    /// Generate public inclusion tree (default: **Poseidon-v1**).
+    ///
+    /// Alias of [`gen_headstash_tree_poseidon_v1`]. Use
+    /// [`gen_headstash_tree_sinsemilla_legacy`] only for recovery fixtures.
     fn gen_headstash_tree(&self, output_path: PathBuf) -> Result<String, BoxError> {
+        self.gen_headstash_tree_poseidon_v1(output_path)
+    }
+
+    /// Sinsemilla-legacy public inclusion tree (recovery only).
+    fn gen_headstash_tree_sinsemilla_legacy(
+        &self,
+        output_path: PathBuf,
+    ) -> Result<String, BoxError> {
         let mut data: Value = serde_json::from_str(&fs::read_to_string(&self.get_input_path()?)?)?;
         let mut leaves = Vec::new();
         let balances = data.as_object_mut().ok_or("Input JSON must be an object")?;
 
-        // Sort addresses lexicographically
         let mut addresses: Vec<_> = balances.keys().cloned().collect();
         addresses.sort();
 
@@ -203,7 +223,6 @@ pub trait HeadstashSinsemillaTree: HeadstashBitwiseInstance {
                 None => continue,
             };
 
-            // Sort token allocations by `name` field
             alloc_array.sort_by_key(|t| t["name"].to_string());
 
             for token in alloc_array.iter_mut() {
@@ -212,11 +231,8 @@ pub trait HeadstashSinsemillaTree: HeadstashBitwiseInstance {
                     .and_then(|s| s.parse::<u64>().ok())
                     .unwrap();
 
-                // ---- parallel leaf generation ---------------------------------
-                // Parallel leaf generation (now also gives us an index)
                 let (lidxh, raw_leaves) =
-                    self.derive_leaf(addr.as_str(), &token["name"].to_string(), v)?;
-                // ---- attach leaves back to the JSON object (single‑thread) ----
+                    self.derive_leaf_sinsemilla_legacy(addr.as_str(), &token["name"].to_string(), v)?;
                 {
                     token
                         .as_object_mut()
@@ -225,7 +241,6 @@ pub trait HeadstashSinsemillaTree: HeadstashBitwiseInstance {
                         .or_insert_with(|| json!([]));
                 }
 
-                // Push each leaf together with its index:
                 for (fixed_amount, idx, leaf_hex) in lidxh {
                     token
                         .get_mut("leaves")
@@ -235,7 +250,6 @@ pub trait HeadstashSinsemillaTree: HeadstashBitwiseInstance {
                         .push(json!({ "amnt":fixed_amount,"index": idx, "leaf": leaf_hex }));
                 }
 
-                // ---- push raw leaves into the global vector -------------------
                 leaves.extend(raw_leaves);
             }
         }
@@ -245,19 +259,18 @@ pub trait HeadstashSinsemillaTree: HeadstashBitwiseInstance {
             return Ok(String::default());
         }
 
-        // Build Merkle root
-        let merkle_root = self.tree_root_from_leaves(leaves.clone())[0];
+        let merkle_root = self.tree_root_from_leaves_sinsemilla_legacy(leaves.clone())[0];
         let root_hex = format!("0x{}", hex::encode(merkle_root.to_repr()));
         let leaves_hex: Vec<String> = leaves
             .into_iter()
             .map(|leaf| format!("0x{}", hex::encode(leaf.to_repr())))
             .collect();
 
-        // Output Merkle result
         let merkle_output = json!({
             "root": root_hex,
             "leaves": leaves_hex,
-            "count": leaves_hex.len()
+            "count": leaves_hex.len(),
+            "distro_hash_domain": "sinsemilla-legacy",
         });
 
         self.print_tree(&mut data, merkle_output, &output_path)?;
@@ -265,8 +278,20 @@ pub trait HeadstashSinsemillaTree: HeadstashBitwiseInstance {
         Ok(root_hex)
     }
 
-    /// Helper that generates all leaves for a single token (parallelised)
+    /// Helper that generates all leaves for a single token (parallelised).
+    ///
+    /// Default: **Poseidon-v1**.
     fn derive_leaf(
+        &self,
+        addr: &str,
+        token_name: &str,
+        v: u64,
+    ) -> Result<(Vec<(u64, usize, String)>, Vec<Fp>), BoxError> {
+        self.derive_leaf_poseidon_v1(addr, token_name, v)
+    }
+
+    /// Sinsemilla-legacy leaf derivation (recovery only).
+    fn derive_leaf_sinsemilla_legacy(
         &self,
         addr: &str,
         token_name: &str,
@@ -308,7 +333,7 @@ pub trait HeadstashSinsemillaTree: HeadstashBitwiseInstance {
                 let nd_fp = Fp::from_repr(Self::derive_nd(token_name)).unwrap();
                 let v_fp = Fp::from(fixed_amount);
                 let fdi_fp = Fp::from(idx as u64);
-                let leaf = Self::leaf_hash(epk_x, epk_y, nd_fp, v_fp, fdi_fp)?;
+                let leaf = Self::leaf_hash_sinsemilla_legacy(epk_x, epk_y, nd_fp, v_fp, fdi_fp)?;
                 let leaf_hex = format!("0x{}", hex::encode(leaf.to_repr()));
                 leaf_hexes
                     .lock()
@@ -325,7 +350,7 @@ pub trait HeadstashSinsemillaTree: HeadstashBitwiseInstance {
             let nd_fp = Fp::from_repr(Self::derive_nd(token_name)).unwrap();
             let v_fp = Fp::from(fixed_amount);
             let fdi_fp = Fp::from(idx as u64);
-            let leaf = Self::leaf_hash(epk_x, epk_y, nd_fp, v_fp, fdi_fp)?;
+            let leaf = Self::leaf_hash_sinsemilla_legacy(epk_x, epk_y, nd_fp, v_fp, fdi_fp)?;
             let leaf_hex = format!("0x{}", hex::encode(leaf.to_repr()));
             leaf_hexes
                 .lock()
@@ -340,8 +365,16 @@ pub trait HeadstashSinsemillaTree: HeadstashBitwiseInstance {
         ))
     }
 
-    /// Build Merkle tree from list of leaves
+    /// Build Merkle tree from list of leaves (default: **Poseidon-v1**).
     fn tree_root_from_leaves(&self, leaves: Vec<pallas::Base>) -> Vec<pallas::Base> {
+        self.tree_root_from_leaves_poseidon_v1(leaves)
+    }
+
+    /// Sinsemilla-legacy Merkle fold (recovery only).
+    fn tree_root_from_leaves_sinsemilla_legacy(
+        &self,
+        leaves: Vec<pallas::Base>,
+    ) -> Vec<pallas::Base> {
         let mut c = leaves;
         let mut n: Vec<Fp> = Vec::new();
         let mut l = 0;
@@ -354,7 +387,22 @@ pub trait HeadstashSinsemillaTree: HeadstashBitwiseInstance {
             let lp = l;
             let p = c
                 .par_chunks(2)
-                .map(|c| Self::merkle_crh(lp, c[0], c[1]))
+                .map(|c| Self::merkle_crh_sinsemilla_legacy(lp, c[0], c[1]))
+                .collect::<Vec<pallas::Base>>();
+            n.extend(p);
+            c = n;
+            n = Vec::new();
+            l += 1;
+        }
+        #[cfg(not(feature = "multicore"))]
+        while c.len() > 1 {
+            if c.len() % 2 != 0 {
+                c.push(pallas::Base::ZERO);
+            }
+            let lp = l;
+            let p = c
+                .chunks(2)
+                .map(|c| Self::merkle_crh_sinsemilla_legacy(lp, c[0], c[1]))
                 .collect::<Vec<pallas::Base>>();
             n.extend(p);
             c = n;
@@ -368,29 +416,59 @@ pub trait HeadstashSinsemillaTree: HeadstashBitwiseInstance {
         }
     }
 
-    /// Calculate MerkleCRH: H(layer || left || right)
+    /// Merkle CRH (default: **Poseidon-v1**).
     fn merkle_crh(layer: u32, left: pallas::Base, right: pallas::Base) -> pallas::Base {
-        let domain = HashDomain::new(MERKLE_CRH_PERSONALIZATION);
-        // bit string: 10 + 250 + 250 = 510 bits
-        let mut message = Vec::with_capacity(510);
+        Self::merkle_crh_poseidon_v1(layer, left, right)
+    }
 
+    /// Poseidon-v1 Merkle CRH for the **public inclusion** distro tree.
+    ///
+    /// SSOT: [`poseidon_distro_crh`]. Domain tag `terp-hs-distro-crh-v1`.
+    fn merkle_crh_poseidon_v1(layer: u32, left: pallas::Base, right: pallas::Base) -> pallas::Base {
+        poseidon_distro_crh(layer, left, right)
+    }
+
+    /// Sinsemilla-legacy MerkleCRH (recovery only).
+    fn merkle_crh_sinsemilla_legacy(
+        layer: u32,
+        left: pallas::Base,
+        right: pallas::Base,
+    ) -> pallas::Base {
+        let domain = HashDomain::new(MERKLE_CRH_PERSONALIZATION);
+        let mut message = Vec::with_capacity(510);
         for i in 0..10 {
             message.push((layer >> i) & 1 == 1);
         }
-
         <Self as HeadstashBitwiseInstance>::extend_with_base_field_bits(&mut message, left);
         <Self as HeadstashBitwiseInstance>::extend_with_base_field_bits(&mut message, right);
-
-        // Hash and return x-coordinate
         let point = domain.hash_to_point(message.into_iter()).unwrap();
         point.to_affine().coordinates().unwrap().x().clone()
     }
 
-    /// Compute the leaf hash matching in-circuit `derive_leaf`.
+    /// Leaf hash (default: **Poseidon-v1**).
+    fn leaf_hash(epk_x: Fp, epk_y: Fp, nd: Fp, v: Fp, fdi: Fp) -> Result<pallas::Base, BoxError> {
+        Ok(Self::leaf_hash_poseidon_v1(epk_x, epk_y, nd, v, fdi))
+    }
+
+    /// Poseidon-v1 public inclusion **leaf** hash.
+    ///
+    /// Full field elements (including full `epk_y`, not Sinsemilla 1-bit packing).
+    /// SSOT: [`poseidon_distro_leaf`]. Domain tag `terp-hs-distro-leaf-v1`.
+    fn leaf_hash_poseidon_v1(epk_x: Fp, epk_y: Fp, nd: Fp, v: Fp, fdi: Fp) -> pallas::Base {
+        poseidon_distro_leaf(epk_x, epk_y, nd, v, fdi)
+    }
+
+    /// Sinsemilla-legacy leaf (recovery only).
     ///
     /// 640-bit Sinsemilla message layout:
     ///   epk_x[0..255) || epk_y[0..1) || nd[0..255) || v[0..64) || fdi[0..64) || 0_pad
-    fn leaf_hash(epk_x: Fp, epk_y: Fp, nd: Fp, v: Fp, fdi: Fp) -> Result<pallas::Base, BoxError> {
+    fn leaf_hash_sinsemilla_legacy(
+        epk_x: Fp,
+        epk_y: Fp,
+        nd: Fp,
+        v: Fp,
+        fdi: Fp,
+    ) -> Result<pallas::Base, BoxError> {
         use ff::PrimeFieldBits;
         let mut bits: Vec<bool> = Vec::with_capacity(640);
         bits.extend(epk_x.to_le_bits().iter().by_vals().take(255));
@@ -398,7 +476,7 @@ pub trait HeadstashSinsemillaTree: HeadstashBitwiseInstance {
         bits.extend(nd.to_le_bits().iter().by_vals().take(255));
         bits.extend(v.to_le_bits().iter().by_vals().take(64));
         bits.extend(fdi.to_le_bits().iter().by_vals().take(64));
-        bits.push(false); // 1-bit padding to reach 640
+        bits.push(false);
         assert_eq!(bits.len(), 640);
         Ok(HashDomain::new(LEAF_PERSONALIZATION)
             .hash_to_point(bits.into_iter())
@@ -408,6 +486,200 @@ pub trait HeadstashSinsemillaTree: HeadstashBitwiseInstance {
             .unwrap()
             .x()
             .clone())
+    }
+
+    /// Build Merkle root from leaves using **Poseidon-v1** CRH (ADR default domain).
+    ///
+    /// Padding sibling is `ZERO` (same convention as Sinsemilla suite path and
+    /// `distro_poseidon` docs). Layer `0` hashes leaves; increments toward root.
+    fn tree_root_from_leaves_poseidon_v1(&self, leaves: Vec<pallas::Base>) -> Vec<pallas::Base> {
+        let mut c = leaves;
+        let mut n: Vec<Fp> = Vec::new();
+        let mut l = 0u32;
+
+        #[cfg(feature = "multicore")]
+        while c.len() > 1 {
+            if c.len() % 2 != 0 {
+                c.push(pallas::Base::ZERO);
+            }
+            let lp = l;
+            let p = c
+                .par_chunks(2)
+                .map(|c| Self::merkle_crh_poseidon_v1(lp, c[0], c[1]))
+                .collect::<Vec<pallas::Base>>();
+            n.extend(p);
+            c = n;
+            n = Vec::new();
+            l += 1;
+        }
+        #[cfg(not(feature = "multicore"))]
+        while c.len() > 1 {
+            if c.len() % 2 != 0 {
+                c.push(pallas::Base::ZERO);
+            }
+            let lp = l;
+            let p = c
+                .chunks(2)
+                .map(|c| Self::merkle_crh_poseidon_v1(lp, c[0], c[1]))
+                .collect::<Vec<pallas::Base>>();
+            n.extend(p);
+            c = n;
+            n = Vec::new();
+            l += 1;
+        }
+        if c.is_empty() {
+            vec![pallas::Base::ZERO]
+        } else {
+            c
+        }
+    }
+
+    /// Derive leaves for one address/token under **Poseidon-v1** (new Headstashes).
+    fn derive_leaf_poseidon_v1(
+        &self,
+        addr: &str,
+        token_name: &str,
+        v: u64,
+    ) -> Result<(Vec<(u64, usize, String)>, Vec<Fp>), BoxError> {
+        let mut work_items: Vec<u64> = Vec::new();
+        let mut remainder = v;
+        for &fixed_amount in FIXED_AMOUNTS.iter() {
+            let count = remainder / fixed_amount;
+            if count == 0 {
+                remainder %= fixed_amount;
+                continue;
+            }
+            work_items.extend(std::iter::repeat(fixed_amount).take(count as usize));
+            remainder %= fixed_amount;
+        }
+        debug_assert_eq!(remainder, 0, "remainder not zero after denomination split");
+
+        let leaf_hexes = Mutex::new(Vec::<(u64, usize, String)>::new());
+        let raw_leaves = Mutex::new(Vec::<Fp>::new());
+
+        let addr_bytes: [u8; 32] = match addr.starts_with("0x") {
+            true => decode(addr.trim_start_matches("0x"))?.try_into().unwrap(),
+            false => general_purpose::STANDARD
+                .decode(addr)?
+                .try_into()
+                .unwrap(),
+        };
+
+        #[cfg(feature = "multicore")]
+        work_items.par_iter().enumerate().try_for_each(
+            |(idx, &fixed_amount)| -> Result<(), BoxError> {
+                let (epk_x, epk_y) = Self::derive_epk_natives(addr_bytes);
+                let nd_fp = Fp::from_repr(Self::derive_nd(token_name)).unwrap();
+                let v_fp = Fp::from(fixed_amount);
+                let fdi_fp = Fp::from(idx as u64);
+                let leaf = Self::leaf_hash_poseidon_v1(epk_x, epk_y, nd_fp, v_fp, fdi_fp);
+                let leaf_hex = format!("0x{}", hex::encode(leaf.to_repr()));
+                leaf_hexes
+                    .lock()
+                    .unwrap()
+                    .push((fixed_amount, idx, leaf_hex));
+                raw_leaves.lock().unwrap().push(leaf);
+                Ok(())
+            },
+        )?;
+
+        #[cfg(not(feature = "multicore"))]
+        for (idx, &fixed_amount) in work_items.iter().enumerate() {
+            let (epk_x, epk_y) = Self::derive_epk_natives(addr_bytes);
+            let nd_fp = Fp::from_repr(Self::derive_nd(token_name)).unwrap();
+            let v_fp = Fp::from(fixed_amount);
+            let fdi_fp = Fp::from(idx as u64);
+            let leaf = Self::leaf_hash_poseidon_v1(epk_x, epk_y, nd_fp, v_fp, fdi_fp);
+            let leaf_hex = format!("0x{}", hex::encode(leaf.to_repr()));
+            leaf_hexes
+                .lock()
+                .unwrap()
+                .push((fixed_amount, idx, leaf_hex));
+            raw_leaves.lock().unwrap().push(leaf);
+        }
+
+        Ok((
+            leaf_hexes.into_inner().unwrap(),
+            raw_leaves.into_inner().unwrap(),
+        ))
+    }
+
+    /// Generate a **Poseidon-v1** public inclusion tree (ADR default for new drops).
+    ///
+    /// Writes the same JSON shape as [`gen_headstash_tree`] but roots/leaves use
+    /// Poseidon-v1. Contract `distro_hash_domain` must be `poseidon-v1`.
+    fn gen_headstash_tree_poseidon_v1(&self, output_path: PathBuf) -> Result<String, BoxError> {
+        let mut data: Value = serde_json::from_str(&fs::read_to_string(&self.get_input_path()?)?)?;
+        let mut leaves = Vec::new();
+        let balances = data.as_object_mut().ok_or("Input JSON must be an object")?;
+
+        let mut addresses: Vec<_> = balances.keys().cloned().collect();
+        addresses.sort();
+
+        for addr in addresses {
+            let alloc_array = match balances.get_mut(addr.as_str()) {
+                Some(v) => v,
+                None => continue,
+            };
+
+            let alloc_array = match alloc_array.as_array_mut() {
+                Some(arr) => arr,
+                None => continue,
+            };
+
+            alloc_array.sort_by_key(|t| t["name"].to_string());
+
+            for token in alloc_array.iter_mut() {
+                let v: u64 = token["amount"]
+                    .as_str()
+                    .and_then(|s| s.parse::<u64>().ok())
+                    .unwrap();
+
+                let (lidxh, raw_leaves) =
+                    self.derive_leaf_poseidon_v1(addr.as_str(), &token["name"].to_string(), v)?;
+                {
+                    token
+                        .as_object_mut()
+                        .unwrap()
+                        .entry("leaves")
+                        .or_insert_with(|| json!([]));
+                }
+
+                for (fixed_amount, idx, leaf_hex) in lidxh {
+                    token
+                        .get_mut("leaves")
+                        .unwrap()
+                        .as_array_mut()
+                        .unwrap()
+                        .push(json!({ "amnt":fixed_amount,"index": idx, "leaf": leaf_hex }));
+                }
+
+                leaves.extend(raw_leaves);
+            }
+        }
+
+        if leaves.is_empty() {
+            println!("No leaves generated.");
+            return Ok(String::default());
+        }
+
+        let merkle_root = self.tree_root_from_leaves_poseidon_v1(leaves.clone())[0];
+        let root_hex = format!("0x{}", hex::encode(merkle_root.to_repr()));
+        let leaves_hex: Vec<String> = leaves
+            .into_iter()
+            .map(|leaf| format!("0x{}", hex::encode(leaf.to_repr())))
+            .collect();
+
+        let merkle_output = json!({
+            "root": root_hex,
+            "leaves": leaves_hex,
+            "count": leaves_hex.len(),
+            "distro_hash_domain": DISTRO_HASH_DOMAIN_POSEIDON_V1,
+        });
+
+        self.print_tree(&mut data, merkle_output, &output_path)?;
+
+        Ok(root_hex)
     }
 
     /// create_headstash_notes
@@ -621,7 +893,11 @@ impl MerkleAuthPath {
     }
 
     /// Convert MerkleAuthPath to circuit-compatible MerklePath.
-    /// Pads siblings to MERKLE_DEPTH_ORCHARD (32) with zeros.
+    ///
+    /// Pads siblings to [`MERKLE_DEPTH_ORCHARD`] (32) with `ZERO`. The on-chain /
+    /// circuit **anchor** for Poseidon-v1 must be computed with
+    /// [`to_circuit_path_and_root_poseidon_v1`] so the 32-layer path root matches
+    /// what `Circuit::synthesize` recomputes (not the shallow suite-only root).
     pub fn to_circuit_path(&self) -> MerklePath {
         use crate::constants::MERKLE_DEPTH_ORCHARD;
         use crate::tree::MerkleHashOrchard;
@@ -637,6 +913,92 @@ impl MerkleAuthPath {
         }
 
         MerklePath::from_parts(self.position(), auth_path_array)
+    }
+
+    /// Depth-32 Poseidon-v1 path + **circuit-consistent** root for a known leaf.
+    ///
+    /// Extends a variable-depth suite path with `ZERO` siblings to 32 layers and
+    /// recomputes the root via [`poseidon_distro_path_root`]. Publish this root as
+    /// `genesis_root` / claim `anchor` when using the Halo2 claim circuit.
+    pub fn to_circuit_path_and_root_poseidon_v1(
+        &self,
+        leaf: Fp,
+    ) -> (MerklePath, Anchor) {
+        use crate::constants::MERKLE_DEPTH_ORCHARD;
+        use crate::distro_poseidon::poseidon_distro_path_root;
+        use crate::tree::MerkleHashOrchard;
+
+        let path_fp: [Fp; MERKLE_DEPTH_ORCHARD] = self.to_auth_path_array();
+        let position = self.position();
+        let root_fp = poseidon_distro_path_root(leaf, position, &path_fp);
+        let auth_path = path_fp.map(|fp| {
+            MerkleHashOrchard::from_bytes(&fp.to_repr()).expect("canonical path node")
+        });
+        (
+            MerklePath::from_parts(position, auth_path),
+            Anchor::from(root_fp),
+        )
+    }
+}
+
+/// Partial / crafted claim note fields (pre-proof JSON + suite fixtures).
+///
+/// Holds the public-eligibility leaf inputs plus a recipient. Full proofs still
+/// need rho/rseed and a depth-32 path; this is the "crafted partial note" surface
+/// used by `create_headstash_notes` and suite-backed claim builders.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PartialClaimNote {
+    /// secp256k1 eligibility secret key bytes (also suite `raw_addr` / esk).
+    pub esk_bytes: [u8; 32],
+    /// Token denom string (e.g. `uterp`).
+    pub token: String,
+    /// Claim amount.
+    pub value: u64,
+    /// Fixed denomination index for this leaf.
+    pub fdi: u64,
+    /// Raw 32-byte recipient (canonical cosmos addr bytes or test pad).
+    pub recipient: [u8; 32],
+}
+
+impl PartialClaimNote {
+    /// Craft from suite leaf data (eligibility key = `raw_addr`).
+    pub fn from_test_leaf(data: &TestLeafData) -> Self {
+        Self {
+            esk_bytes: data.raw_addr,
+            token: data.raw_token.clone(),
+            value: data.raw_v,
+            fdi: data.raw_fdi,
+            recipient: data.raw_addr, // default: claim-to-self for fixtures
+        }
+    }
+
+    /// Build a fully formed [`Note`] (private commit path) with matching leaf inputs.
+    pub fn to_note(&self, rho: Rho, rseed: RandomSeed) -> Result<Note, BoxError> {
+        let esk = EligibleSk::from_bytes(self.esk_bytes);
+        let hv = HeadstashValue::from_raw(self.value, &self.token, self.fdi)?;
+        let recp = RecpAddr::new(self.recipient);
+        let note = Note::from_parts(hv, recp, esk, rho, rseed);
+        if bool::from(note.is_some()) {
+            Ok(note.unwrap())
+        } else {
+            Err("partial note: invalid note parts / commitment".into())
+        }
+    }
+
+    /// Poseidon-v1 distro leaf field for this partial note.
+    pub fn poseidon_leaf(&self) -> Fp {
+        // Use the same bitwise helpers as the suite leaf builder (associated fns).
+        struct Bits;
+        impl HeadstashBitwiseInstance for Bits {}
+        let (epk_x, epk_y) = Bits::derive_epk_natives(self.esk_bytes);
+        let nd = Fp::from_repr(Bits::derive_nd(&self.token)).unwrap();
+        poseidon_distro_leaf(
+            epk_x,
+            epk_y,
+            nd,
+            Fp::from(self.value),
+            Fp::from(self.fdi),
+        )
     }
 }
 
@@ -705,9 +1067,8 @@ pub trait MerkleTestDataBuilder: HeadstashSinsemillaTree {
 
         (0..count)
             .map(|i| {
-                // Generate random address
-                let mut raw_addr = [0u8; 32];
-                rng.fill_bytes(&mut raw_addr);
+                // Valid secp256k1 eligibility secret (also used as suite raw_addr / esk).
+                let raw_addr = EligibleSk::random(&mut rng).secret_bytes();
 
                 // Cycle through tokens and values
                 let raw_token = tokens[i % tokens.len()].to_string();
@@ -752,9 +1113,28 @@ pub trait MerkleTestDataBuilder: HeadstashSinsemillaTree {
         }
     }
 
-    /// Compute leaf hash from TestLeafData.
+    /// Compute leaf hash from TestLeafData (default: **Poseidon-v1**).
     fn compute_leaf_from_data(&self, data: &TestLeafData) -> Result<Fp, BoxError> {
-        Self::leaf_hash(
+        Ok(self.compute_leaf_from_data_poseidon_v1(data))
+    }
+
+    /// Sinsemilla-legacy leaf from TestLeafData (recovery only).
+    fn compute_leaf_from_data_sinsemilla_legacy(
+        &self,
+        data: &TestLeafData,
+    ) -> Result<Fp, BoxError> {
+        Self::leaf_hash_sinsemilla_legacy(
+            data.epk_x_native,
+            data.epk_y_native,
+            data.nd,
+            data.v,
+            data.fdi,
+        )
+    }
+
+    /// Compute **Poseidon-v1** public inclusion leaf from TestLeafData.
+    fn compute_leaf_from_data_poseidon_v1(&self, data: &TestLeafData) -> Fp {
+        <Self as HeadstashSinsemillaTree>::leaf_hash_poseidon_v1(
             data.epk_x_native,
             data.epk_y_native,
             data.nd,
@@ -770,8 +1150,13 @@ pub trait MerkleTestDataBuilder: HeadstashSinsemillaTree {
     /// - `levels[i]`: Parent nodes at level i
     /// - `levels[depth]`: Single root element
     ///
-    /// Uses the same `merkle_crh` function as the circuit for consistency.
+    /// Full Merkle tree (default: **Poseidon-v1**).
     fn generate_full_merkle_tree(&self, leaves: Vec<Fp>) -> FullMerkleTree {
+        self.generate_full_merkle_tree_poseidon_v1(leaves)
+    }
+
+    /// Sinsemilla-legacy full Merkle tree (recovery only).
+    fn generate_full_merkle_tree_sinsemilla_legacy(&self, leaves: Vec<Fp>) -> FullMerkleTree {
         if leaves.is_empty() {
             return FullMerkleTree {
                 levels: vec![vec![Fp::ZERO]],
@@ -780,8 +1165,6 @@ pub trait MerkleTestDataBuilder: HeadstashSinsemillaTree {
         }
 
         let mut levels: Vec<Vec<Fp>> = Vec::new();
-
-        // Level 0: leaves (pad to even count)
         let mut current_level = leaves;
         if current_level.len() % 2 != 0 {
             current_level.push(Fp::ZERO);
@@ -789,23 +1172,61 @@ pub trait MerkleTestDataBuilder: HeadstashSinsemillaTree {
         levels.push(current_level.clone());
 
         let mut layer = 0u32;
-
-        // Build tree levels until we reach the root
         while current_level.len() > 1 {
             let mut next_level = Vec::with_capacity((current_level.len() + 1) / 2);
-
             for chunk in current_level.chunks(2) {
                 let left = chunk[0];
                 let right = if chunk.len() > 1 { chunk[1] } else { Fp::ZERO };
-                let parent = <Self as HeadstashSinsemillaTree>::merkle_crh(layer, left, right);
+                let parent =
+                    <Self as HeadstashSinsemillaTree>::merkle_crh_sinsemilla_legacy(layer, left, right);
                 next_level.push(parent);
             }
-
-            // Pad next level to even if not root
             if next_level.len() > 1 && next_level.len() % 2 != 0 {
                 next_level.push(Fp::ZERO);
             }
+            levels.push(next_level.clone());
+            current_level = next_level;
+            layer += 1;
+        }
 
+        FullMerkleTree {
+            depth: levels.len() - 1,
+            levels,
+        }
+    }
+
+    /// Full Merkle tree under **Poseidon-v1** CRH (new public inclusion sets).
+    ///
+    /// Same level layout as [`generate_full_merkle_tree`]; hashes via
+    /// [`HeadstashSinsemillaTree::merkle_crh_poseidon_v1`].
+    fn generate_full_merkle_tree_poseidon_v1(&self, leaves: Vec<Fp>) -> FullMerkleTree {
+        if leaves.is_empty() {
+            return FullMerkleTree {
+                levels: vec![vec![Fp::ZERO]],
+                depth: 0,
+            };
+        }
+
+        let mut levels: Vec<Vec<Fp>> = Vec::new();
+        let mut current_level = leaves;
+        if current_level.len() % 2 != 0 {
+            current_level.push(Fp::ZERO);
+        }
+        levels.push(current_level.clone());
+
+        let mut layer = 0u32;
+        while current_level.len() > 1 {
+            let mut next_level = Vec::with_capacity((current_level.len() + 1) / 2);
+            for chunk in current_level.chunks(2) {
+                let left = chunk[0];
+                let right = if chunk.len() > 1 { chunk[1] } else { Fp::ZERO };
+                let parent =
+                    <Self as HeadstashSinsemillaTree>::merkle_crh_poseidon_v1(layer, left, right);
+                next_level.push(parent);
+            }
+            if next_level.len() > 1 && next_level.len() % 2 != 0 {
+                next_level.push(Fp::ZERO);
+            }
             levels.push(next_level.clone());
             current_level = next_level;
             layer += 1;
@@ -854,8 +1275,46 @@ pub trait MerkleTestDataBuilder: HeadstashSinsemillaTree {
         }
     }
 
-    /// Verify a merkle path by recomputing the root from leaf and path.
+    /// Verify a merkle path (default: **Poseidon-v1**).
     fn verify_merkle_path(&self, leaf: &Fp, path: &MerkleAuthPath, expected_root: &Fp) -> bool {
+        self.verify_merkle_path_poseidon_v1(leaf, path, expected_root)
+    }
+
+    /// Sinsemilla-legacy path verify (recovery only).
+    fn verify_merkle_path_sinsemilla_legacy(
+        &self,
+        leaf: &Fp,
+        path: &MerkleAuthPath,
+        expected_root: &Fp,
+    ) -> bool {
+        let mut current = *leaf;
+        for (level, (sibling, &is_right)) in path
+            .siblings
+            .iter()
+            .zip(path.position_bits.iter())
+            .enumerate()
+        {
+            let (left, right) = if is_right {
+                (*sibling, current)
+            } else {
+                (current, *sibling)
+            };
+            current = <Self as HeadstashSinsemillaTree>::merkle_crh_sinsemilla_legacy(
+                level as u32,
+                left,
+                right,
+            );
+        }
+        current == *expected_root
+    }
+
+    /// Verify a path against a **Poseidon-v1** distro tree root.
+    fn verify_merkle_path_poseidon_v1(
+        &self,
+        leaf: &Fp,
+        path: &MerkleAuthPath,
+        expected_root: &Fp,
+    ) -> bool {
         let mut current = *leaf;
 
         for (level, (sibling, &is_right)) in path
@@ -869,13 +1328,17 @@ pub trait MerkleTestDataBuilder: HeadstashSinsemillaTree {
             } else {
                 (current, *sibling)
             };
-            current = <Self as HeadstashSinsemillaTree>::merkle_crh(level as u32, left, right);
+            current = <Self as HeadstashSinsemillaTree>::merkle_crh_poseidon_v1(
+                level as u32,
+                left,
+                right,
+            );
         }
 
         current == *expected_root
     }
 
-    /// Generate a complete test case with tree, path, and all inputs.
+    /// Generate a complete test case (default: **Poseidon-v1**).
     ///
     /// Returns (leaves_data, tree, selected_leaf_index, auth_path, root)
     fn generate_inclusion_test_case(
@@ -883,18 +1346,26 @@ pub trait MerkleTestDataBuilder: HeadstashSinsemillaTree {
         num_leaves: usize,
         selected_index: usize,
     ) -> Result<(Vec<TestLeafData>, FullMerkleTree, usize, MerkleAuthPath, Fp), BoxError> {
-        let leaves_data = self.generate_test_leaves(num_leaves);
+        let (leaves_data, tree, idx, path, root) =
+            self.generate_inclusion_test_case_poseidon_v1(num_leaves, selected_index);
+        Ok((leaves_data, tree, idx, path, root))
+    }
 
+    /// Poseidon-v1 inclusion fixture (new Headstashes / `distro_hash_domain = poseidon-v1`).
+    fn generate_inclusion_test_case_poseidon_v1(
+        &self,
+        num_leaves: usize,
+        selected_index: usize,
+    ) -> (Vec<TestLeafData>, FullMerkleTree, usize, MerkleAuthPath, Fp) {
+        let leaves_data = self.generate_test_leaves(num_leaves);
         let leaf_hashes: Vec<Fp> = leaves_data
             .iter()
-            .map(|d| self.compute_leaf_from_data(d))
-            .collect::<Result<Vec<_>, _>>()?;
-
-        let tree = self.generate_full_merkle_tree(leaf_hashes);
+            .map(|d| self.compute_leaf_from_data_poseidon_v1(d))
+            .collect();
+        let tree = self.generate_full_merkle_tree_poseidon_v1(leaf_hashes);
         let path = self.compute_merkle_path(&tree, selected_index);
         let root = tree.root();
-
-        Ok((leaves_data, tree, selected_index, path, root))
+        (leaves_data, tree, selected_index, path, root)
     }
 
     /// Generate test data compatible with the circuit's expected format.
@@ -954,43 +1425,39 @@ pub trait HeadstashIpfsInstance: HeadstashBitwiseInstance {
     }
 }
 
-/// Trait for generating headstash circuit keys in binary format.
-/// Provides methods to build, write, and load circuit proving/verifying keys.
-pub trait CircuitKeysGenerator: HeadstashBitwiseInstance {
-    /// Circuit size parameter (K = 18 for headstash)
-    const HEADSTASH_K: u32 = 18;
+// /// Trait for generating headstash circuit keys in binary format.
+// /// Provides methods to build, write, and load circuit proving/verifying keys.
+// pub trait CircuitKeysGenerator {
+//     /// Circuit size parameter (K = 18 for headstash)
+//     const HEADSTASH_K: u32 = 18;
+//     /// Generate headstash circuit keys and write to directory.
+//     /// Creates: verifying_key.bin, proving_key.bin (which includes params)
+//     fn gen_circuit_keys(
+//         &self,
+//         base_path: &Path,
+//     ) -> Result<(crate::circuit::VerifyingKey, crate::circuit::ProvingKey), BoxError> {
+//         fs::create_dir_all(&base_path)?;
+//         let pk = crate::circuit::ProvingKey::build();
+//         info!("Writing keys to {:?}...", base_path);
+//         let vk_path = base_path.join(VK_FILE);
+//         let mut vk_file = std::fs::File::create(&vk_path)?;
+//         vk.params.write(&mut vk_file)?;
+//         vk.vk.write(&mut vk_file)?;
+//         println!("  Written: {:?}", vk_path);
+//         let pk_path = base_path.join(PK_FILE);
+//         crate::circuit::ProvingKey::build_and_write(pk_path.clone())?;
+//         println!("  Written: {:?}", pk_path);
 
-    /// Generate headstash circuit keys and write to directory.
-    /// Creates: verifying_key.bin, proving_key.bin (which includes params)
-    fn gen_headstash_circuit_keys(
-        &self,
-        base_path: &Path,
-    ) -> Result<(crate::circuit::VerifyingKey, crate::circuit::ProvingKey), BoxError> {
-        fs::create_dir_all(&base_path)?;
-        println!("[1/3] Building verifying key (K={})...", Self::HEADSTASH_K);
-        let vk = crate::circuit::VerifyingKey::build();
-        println!("[2/3] Building proving key...");
-        let pk = crate::circuit::ProvingKey::build();
-        println!("[3/3] Writing keys to {:?}...", base_path);
-        let vk_path = base_path.join(VK_FILE);
-        let mut vk_file = std::fs::File::create(&vk_path)?;
-        vk.params.write(&mut vk_file)?;
-        vk.vk.write(&mut vk_file)?;
-        println!("  Written: {:?}", vk_path);
-        let pk_path = base_path.join(PK_FILE);
-        crate::circuit::ProvingKey::build_and_write(pk_path.clone())?;
-        println!("  Written: {:?}", pk_path);
+//         Ok((vk, pk))
+//     }
 
-        Ok((vk, pk))
-    }
+//     /// Get the default keys directory path.
+//     fn keys_dir(&self) -> PathBuf {
+//         PathBuf::from(KEYS_DIR)
+//     }
+// }
 
-    /// Get the default keys directory path.
-    fn keys_dir(&self) -> PathBuf {
-        PathBuf::from(KEYS_DIR)
-    }
-}
-
-impl<Chain> CircuitKeysGenerator for HeadstashCircuitSuite<Chain> {}
+// impl<Chain> CircuitKeysGenerator for HeadstashCircuitSuite<Chain> {}
 
 /// Proof bundle containing proof and public inputs for a headstash claim.
 #[derive(Clone, Debug)]
@@ -1005,9 +1472,7 @@ pub struct HeadstashProofBundle {
 
 /// Trait for building headstash proofs from genesis distribution data.
 /// Optimized for 1-time-spend model (static merkle tree, single claim per note).
-pub trait HeadstashProofBuilder:
-    HeadstashBitwiseInstance + MerkleTestDataBuilder + CircuitKeysGenerator
-{
+pub trait HeadstashProofBuilder: HeadstashBitwiseInstance + MerkleTestDataBuilder {
     /// Build SpendInfo from note and authentication path.
     fn build_spend_info(
         &self,
@@ -1021,7 +1486,10 @@ pub trait HeadstashProofBuilder:
     }
 
     /// Create a headstash proof from test leaf data.
-    /// Uses from_action_context_unchecked for 1-time spend semantics.
+    ///
+    /// Uses the **same** eligibility key as the suite leaf (`raw_addr` → esk), a
+    /// depth-32 Poseidon-v1 path root as `anchor`, and
+    /// `from_action_context_unchecked` for 1-time spend semantics.
     fn create_genesis_proof_from_leaf(
         &self,
         pk: &crate::circuit::ProvingKey,
@@ -1030,43 +1498,34 @@ pub trait HeadstashProofBuilder:
     ) -> Result<HeadstashProofBundle, BoxError> {
         let mut rng = OsRng;
 
-        // Generate keys for this claim
         let sk = SpendingKey::random(&mut rng);
         let fvk = FullViewingKey::from(&sk);
-        let esk = EligibleSk::random(&mut rng);
 
-        // Create rho and rseed
+        // Eligibility key MUST match the distro leaf (suite stores sk in raw_addr).
+        let esk = EligibleSk::from_bytes(leaf_data.raw_addr);
+
         let rho = self.rho_from_secure_random();
         let rseed_bytes = self.rho_from_secure_random().to_bytes();
         let rseed = RandomSeed::from_bytes(rseed_bytes, &rho).expect("rseed issue");
 
-        // Build HeadstashValue from leaf data
+        let partial = PartialClaimNote::from_test_leaf(leaf_data);
+        let leaf = partial.poseidon_leaf();
+        let (merkle_path, anchor) = auth_path.to_circuit_path_and_root_poseidon_v1(leaf);
+
         let hv =
             HeadstashValue::from_raw(leaf_data.raw_v, &leaf_data.raw_token, leaf_data.raw_fdi)?;
-
-        // Create recipient and note
         let recp = RecpAddr::new(leaf_data.raw_addr);
         let note = Note::from_parts(hv, recp, esk, rho, rseed).expect("correct note parts");
 
-        // Build SpendInfo using the circuit path conversion
-        let merkle_path = auth_path.to_circuit_path();
-        let spend_info = SpendInfo::new(fvk, note.clone(), merkle_path.clone())
+        let spend_info = SpendInfo::new(fvk, note.clone(), merkle_path)
             .ok_or("SpendInfo creation failed")?;
 
-        // Compute anchor from merkle path and note commitment
-        let anchor = merkle_path.root(note.commitment().into());
-
-        // Build instance (public inputs)
         let nf = note.nullifier();
         let cmx = ExtractedNoteCommitment::from(note.commitment());
         let instance =
             crate::circuit::Instance::from_parts(anchor, hv.denom(), hv.amount(), recp, nf, cmx);
 
-        // Build circuit using unchecked (rho not deterministically derived in this context)
         let circuit = Circuit::from_action_context_unchecked(spend_info, note);
-
-        // Generate proof using native headstash circuit proof creation
-        // Note: Proof::create from crate::circuit expects native types, not zk_cosmwasm types
         let proof = Proof::create(pk, &[circuit], &[instance.clone()], &mut rng)?;
 
         Ok(HeadstashProofBundle {
@@ -1074,6 +1533,48 @@ pub trait HeadstashProofBuilder:
             instance,
             anchor,
         })
+    }
+
+    /// Suite-backed multi-leaf claim: circuit + instance ready for MockProver / prove.
+    ///
+    /// Builds a Poseidon-v1 tree of `num_leaves`, selects `selected_index`, pads the
+    /// auth path to depth 32, and constructs a note whose (epk, nd, v, fdi) match the
+    /// suite leaf so genesis inclusion and note commit stay consistent.
+    fn suite_backed_claim_pair(
+        &self,
+        num_leaves: usize,
+        selected_index: usize,
+    ) -> Result<(Circuit, crate::circuit::Instance, Anchor, PartialClaimNote), BoxError> {
+        let (leaves_data, _tree, idx, path, _shallow_root) =
+            self.generate_inclusion_test_case_poseidon_v1(num_leaves, selected_index);
+        let leaf_data = &leaves_data[idx];
+        let partial = PartialClaimNote::from_test_leaf(leaf_data);
+        let leaf = partial.poseidon_leaf();
+        let (merkle_path, anchor) = path.to_circuit_path_and_root_poseidon_v1(leaf);
+
+        let mut rng = OsRng;
+        let sk = SpendingKey::random(&mut rng);
+        let fvk = FullViewingKey::from(&sk);
+        let esk = EligibleSk::from_bytes(leaf_data.raw_addr);
+        let rho = self.rho_from_secure_random();
+        let rseed_bytes = self.rho_from_secure_random().to_bytes();
+        let rseed = RandomSeed::from_bytes(rseed_bytes, &rho).expect("rseed");
+
+        let hv =
+            HeadstashValue::from_raw(leaf_data.raw_v, &leaf_data.raw_token, leaf_data.raw_fdi)?;
+        let recp = RecpAddr::new(leaf_data.raw_addr);
+        let note = Note::from_parts(hv, recp, esk, rho, rseed).expect("note");
+
+        let spend_info =
+            SpendInfo::new(fvk, note.clone(), merkle_path).ok_or("SpendInfo failed")?;
+        let circuit = Circuit::from_action_context_unchecked(spend_info, note.clone());
+
+        let nf = note.nullifier();
+        let cmx = ExtractedNoteCommitment::from(note.commitment());
+        let instance =
+            crate::circuit::Instance::from_parts(anchor, hv.denom(), hv.amount(), recp, nf, cmx);
+
+        Ok((circuit, instance, anchor, partial))
     }
 
     // /// Verify a headstash proof.
@@ -1163,14 +1664,6 @@ pub trait HeadstashLaunchpadInstance: HeadstashBitwiseInstance + HeadstashIpfsIn
     }
     /// `gen_calculate_distribution`:  .
     fn gen_calculate_distribution(&self) {}
-
-    // /// `gen_headstash_circuit`: generate circuit [ProvingKey] & [VerifyingKey] with hex-encode, write to ./data/keys/.
-    // fn gen_headstash_circuit(&self) -> Result<(), BoxError> {
-    //     fs::create_dir_all("./data/keys")?;
-    //     let pk_path = Path::new("./data/keys").join(PK_FILE);
-    //     ProvingKey::build_and_write(pk_path)?;
-    //     Ok(())
-    // }
 }
 
 // ============================================================================
@@ -1216,109 +1709,110 @@ pub struct HeadstashAccountTestData {
 /// Trait for generating complete E2E test data for headstash circuits.
 /// Consolidates all test generation logic into the suite for reuse across projects.
 pub trait HeadstashTestDataGenerator:
-    HeadstashBitwiseInstance + MerkleTestDataBuilder + CircuitKeysGenerator + HeadstashProofBuilder
+    HeadstashBitwiseInstance + MerkleTestDataBuilder + HeadstashProofBuilder
 {
-    /// Generate a complete E2E test bundle with circuit keys, merkle tree, and proofs.
-    ///
-    /// This is the canonical method for generating headstash test data.
-    /// Returns all artifacts needed for E2E testing.
-    fn generate_e2e_test_bundle(
-        &self,
-        num_accounts: usize,
-    ) -> Result<HeadstashE2ETestBundle, BoxError> {
-        let mut rng = OsRng;
+    // /// Generate a complete E2E test bundle with circuit keys, merkle tree, and proofs.
+    // ///
+    // /// This is the canonical method for generating headstash test data.
+    // /// Returns all artifacts needed for E2E testing.
+    // fn generate_e2e_test_bundle(
+    //     &self,
+    //     num_accounts: usize,
+    // ) -> Result<HeadstashE2ETestBundle, BoxError> {
+    //     let mut rng = OsRng;
 
-        // Step 1: Build circuit keys
-        eprintln!("[1/4] Building circuit keys (K=17)...");
-        let vk = crate::circuit::VerifyingKey::build();
-        let pk = crate::circuit::ProvingKey::build();
-        eprintln!("  Circuit keys built");
+    //     // Step 1: Build circuit keys
+    //     eprintln!("[1/4] Building circuit keys (K=17)...");
+    //     let pk = self.build_keys()?;
+    //     let vk = pk.vk();
 
-        // Step 2: Generate test leaves
-        eprintln!("[2/4] Generating {} test leaves...", num_accounts);
-        let leaves = self.generate_test_leaves(num_accounts);
+    //     eprintln!("  Circuit keys built");
 
-        // Compute leaf hashes
-        let leaf_hashes: Vec<Fp> = leaves
-            .iter()
-            .map(|leaf| self.compute_leaf_from_data(leaf).expect("leaf hash"))
-            .collect();
+    //     // Step 2: Generate test leaves
+    //     eprintln!("[2/4] Generating {} test leaves...", num_accounts);
+    //     let leaves = self.generate_test_leaves(num_accounts);
 
-        // Step 3: Build merkle tree
-        eprintln!("[3/4] Building merkle tree...");
-        let tree = self.generate_full_merkle_tree(leaf_hashes.clone());
-        eprintln!("  Tree depth: {}", tree.depth);
+    //     // Compute leaf hashes
+    //     let leaf_hashes: Vec<Fp> = leaves
+    //         .iter()
+    //         .map(|leaf| self.compute_leaf_from_data(leaf).expect("leaf hash"))
+    //         .collect();
 
-        // Step 4: Generate proofs for each account
-        eprintln!("[4/4] Generating proofs for {} accounts...", num_accounts);
-        let mut accounts = Vec::with_capacity(num_accounts);
+    //     // Step 3: Build merkle tree
+    //     eprintln!("[3/4] Building merkle tree...");
+    //     let tree = self.generate_full_merkle_tree(leaf_hashes.clone());
+    //     eprintln!("  Tree depth: {}", tree.depth);
 
-        for i in 0..num_accounts {
-            eprintln!("  Account {}/{}...", i + 1, num_accounts);
-            let auth_path = self.compute_merkle_path(&tree, i);
-            let path_valid = self.verify_merkle_path(&leaf_hashes[i], &auth_path, &tree.root());
-            let merkle_path = auth_path.to_circuit_path();
-            let leaf = &leaves[i];
-            // Generate random keys
-            let mut sk_bytes = [0u8; 32];
-            rng.fill_bytes(&mut sk_bytes);
-            let sk = SpendingKey::from_bytes(sk_bytes).expect("valid spending key");
-            let fvk = FullViewingKey::from(&sk);
-            let esk = EligibleSk::random(&mut rng);
-            // Create rho and rseed
-            let rho = self.rho_from_secure_random();
-            let mut rseed_bytes = [0u8; 32];
-            rng.fill_bytes(&mut rseed_bytes);
-            let rseed = RandomSeed::from_bytes(rseed_bytes, &rho).expect("valid rseed");
+    //     // Step 4: Generate proofs for each account
+    //     eprintln!("[4/4] Generating proofs for {} accounts...", num_accounts);
+    //     let mut accounts = Vec::with_capacity(num_accounts);
 
-            // Build HeadstashValue
-            let hv = HeadstashValue::from_raw(leaf.raw_v, &leaf.raw_token, leaf.raw_fdi)?;
+    //     for i in 0..num_accounts {
+    //         eprintln!("  Account {}/{}...", i + 1, num_accounts);
+    //         let auth_path = self.compute_merkle_path(&tree, i);
+    //         let path_valid = self.verify_merkle_path(&leaf_hashes[i], &auth_path, &tree.root());
+    //         let merkle_path = auth_path.to_circuit_path();
+    //         let leaf = &leaves[i];
+    //         // Generate random keys
+    //         let mut sk_bytes = [0u8; 32];
+    //         rng.fill_bytes(&mut sk_bytes);
+    //         let sk = SpendingKey::from_bytes(sk_bytes).expect("valid spending key");
+    //         let fvk = FullViewingKey::from(&sk);
+    //         let esk = EligibleSk::random(&mut rng);
+    //         // Create rho and rseed
+    //         let rho = self.rho_from_secure_random();
+    //         let mut rseed_bytes = [0u8; 32];
+    //         rng.fill_bytes(&mut rseed_bytes);
+    //         let rseed = RandomSeed::from_bytes(rseed_bytes, &rho).expect("valid rseed");
 
-            // Create note
-            let recp = RecpAddr::new(leaf.raw_addr);
-            let note = Note::from_parts(hv, recp, esk.clone(), rho, rseed).expect("note creation");
+    //         // Build HeadstashValue
+    //         let hv = HeadstashValue::from_raw(leaf.raw_v, &leaf.raw_token, leaf.raw_fdi)?;
 
-            // Compute anchor and build instance
-            let anchor = merkle_path.root(note.commitment().into());
-            let nf = note.nullifier();
-            let cmx = ExtractedNoteCommitment::from(note.commitment());
-            let instance = crate::circuit::Instance::from_parts(
-                anchor,
-                hv.denom(),
-                hv.amount(),
-                recp,
-                nf,
-                cmx,
-            );
+    //         // Create note
+    //         let recp = RecpAddr::new(leaf.raw_addr);
+    //         let note = Note::from_parts(hv, recp, esk.clone(), rho, rseed).expect("note creation");
 
-            // Build circuit and generate proof
-            let spend_info = SpendInfo::new(fvk, note.clone(), merkle_path).expect("SpendInfo");
-            let circuit = Circuit::from_action_context_unchecked(spend_info, note);
-            let proof = Proof::create(&pk, &[circuit], &[instance.clone()], &mut rng)?;
+    //         // Compute anchor and build instance
+    //         let anchor = merkle_path.root(note.commitment().into());
+    //         let nf = note.nullifier();
+    //         let cmx = ExtractedNoteCommitment::from(note.commitment());
+    //         let instance = crate::circuit::Instance::from_parts(
+    //             anchor,
+    //             hv.denom(),
+    //             hv.amount(),
+    //             recp,
+    //             nf,
+    //             cmx,
+    //         );
 
-            // Verify proof
-            proof.verify(&vk, &[instance.clone()])?;
+    //         // Build circuit and generate proof
+    //         let spend_info = SpendInfo::new(fvk, note.clone(), merkle_path).expect("SpendInfo");
+    //         let circuit = Circuit::from_action_context_unchecked(spend_info, note);
+    //         let proof = Proof::create(&pk, &[circuit], &[instance.clone()], &mut rng)?;
 
-            accounts.push(HeadstashAccountTestData {
-                index: i,
-                sk_bytes,
-                esk,
-                proof,
-                instance,
-                auth_path,
-                anchor,
-                path_valid,
-            });
-        }
+    //         // Verify proof
+    //         proof.verify(&vk, &[instance.clone()])?;
 
-        Ok(HeadstashE2ETestBundle {
-            vk,
-            pk,
-            tree,
-            leaves,
-            accounts,
-        })
-    }
+    //         accounts.push(HeadstashAccountTestData {
+    //             index: i,
+    //             sk_bytes,
+    //             esk,
+    //             proof,
+    //             instance,
+    //             auth_path,
+    //             anchor,
+    //             path_valid,
+    //         });
+    //     }
+
+    //     Ok(HeadstashE2ETestBundle {
+    //         vk,
+    //         pk,
+    //         tree,
+    //         leaves,
+    //         accounts,
+    //     })
+    // }
 
     /// Write E2E test bundle to files in the specified directory.
     ///
@@ -1430,8 +1924,6 @@ pub trait HeadstashTestDataGenerator:
         })
     }
 }
-
-impl<Chain> HeadstashTestDataGenerator for HeadstashCircuitSuite<Chain> {}
 
 // TODO:
 // - notecommitment derivation accuracy
@@ -1697,6 +2189,100 @@ mod test {
     }
 
     #[test]
+    fn test_poseidon_v1_leaf_differs_from_sinsemilla_legacy() {
+        let suite = HeadstashCircuitSuite::new(Mock::new("sender"));
+        let data = suite.generate_leaf_data(&[7u8; 32], "uterp", 1_000_000, 0);
+        let sin = suite.compute_leaf_from_data_sinsemilla_legacy(&data).unwrap();
+        let pos = suite.compute_leaf_from_data_poseidon_v1(&data);
+        assert_ne!(sin, pos, "domains must not collide");
+        // Default compute path is Poseidon-v1.
+        assert_eq!(suite.compute_leaf_from_data(&data).unwrap(), pos);
+        assert_eq!(DistroHashDomain::default().as_str(), DISTRO_HASH_DOMAIN_POSEIDON_V1);
+    }
+
+    #[test]
+    fn test_poseidon_v1_merkle_path_verification() {
+        let suite = HeadstashCircuitSuite::new(Mock::new("sender"));
+        let (leaves_data, _tree, idx, path, root) =
+            suite.generate_inclusion_test_case_poseidon_v1(8, 3);
+
+        assert_eq!(leaves_data.len(), 8);
+        assert_eq!(idx, 3);
+
+        let leaf_hash = suite.compute_leaf_from_data_poseidon_v1(&leaves_data[3]);
+        assert!(
+            suite.verify_merkle_path_poseidon_v1(&leaf_hash, &path, &root),
+            "Poseidon-v1 path must recompute to registered root"
+        );
+        // Default verify path is Poseidon-v1 (same).
+        assert!(suite.verify_merkle_path(&leaf_hash, &path, &root));
+        // Sinsemilla-legacy verifier must not accept a Poseidon-v1 root.
+        assert!(!suite.verify_merkle_path_sinsemilla_legacy(&leaf_hash, &path, &root));
+    }
+
+    #[test]
+    fn test_poseidon_v1_two_leaf_matches_distro_module() {
+        let suite = HeadstashCircuitSuite::new(Mock::new("sender"));
+        let sk0 = EligibleSk::random(&mut OsRng).secret_bytes();
+        let sk1 = EligibleSk::random(&mut OsRng).secret_bytes();
+        let d0 = suite.generate_leaf_data(&sk0, "uterp", 1_000_000, 0);
+        let d1 = suite.generate_leaf_data(&sk1, "uterp", 5_000_000, 1);
+        let l0 = suite.compute_leaf_from_data_poseidon_v1(&d0);
+        let l1 = suite.compute_leaf_from_data_poseidon_v1(&d1);
+        let root_suite = suite.tree_root_from_leaves_poseidon_v1(vec![l0, l1])[0];
+        let root_ssot = poseidon_distro_crh(0, l0, l1);
+        assert_eq!(root_suite, root_ssot);
+    }
+
+    #[test]
+    fn test_partial_claim_note_and_depth32_root() {
+        let suite = HeadstashCircuitSuite::new(Mock::new("sender"));
+        let (leaves, _tree, idx, path, shallow) =
+            suite.generate_inclusion_test_case_poseidon_v1(8, 2);
+        let partial = PartialClaimNote::from_test_leaf(&leaves[idx]);
+        let leaf = partial.poseidon_leaf();
+        assert_eq!(leaf, suite.compute_leaf_from_data_poseidon_v1(&leaves[idx]));
+        let (_mp, anchor) = path.to_circuit_path_and_root_poseidon_v1(leaf);
+        // Depth-32 extended root differs from shallow suite root when depth < 32.
+        if path.siblings.len() < 32 {
+            assert_ne!(anchor.to_bytes(), shallow.to_repr());
+        }
+        // Path recompute is stable.
+        let (_mp2, anchor2) = path.to_circuit_path_and_root_poseidon_v1(leaf);
+        assert_eq!(anchor.to_bytes(), anchor2.to_bytes());
+    }
+
+    #[test]
+    fn test_suite_backed_claim_pair_constructs() {
+        let suite = HeadstashCircuitSuite::new(Mock::new("sender"));
+        let (circuit, instance, anchor, partial) =
+            suite.suite_backed_claim_pair(4, 1).expect("claim pair");
+        assert_eq!(instance.v.inner(), partial.value);
+        assert_eq!(instance.anchor.to_bytes(), anchor.to_bytes());
+        // Witnesses assigned (depth-32 auth path present as known values).
+        let mut saw_path = false;
+        circuit.path.map(|_| saw_path = true);
+        assert!(saw_path, "circuit path witness must be known");
+    }
+
+    #[test]
+    fn test_zkvm_circuit_public_layout() {
+        // Spec for CosmwasmCircuit / CircuitFooter public inputs (build_and_write).
+        use crate::circuit::{Instance, K};
+        assert_eq!(K, 18, "zkvm circuit K");
+        // Instance wire: 6 * 32 = 168 bytes (anchor, nd, v, recp, nf, cmx).
+        // Footer `i` field in ProvingKey::build_and_write is 6.
+        let (circuit, instance, _, _) = HeadstashCircuitSuite::new(Mock::new("sender"))
+            .suite_backed_claim_pair(2, 0)
+            .unwrap();
+        assert_eq!(instance.to_bytes().len(), 168);
+        let rows = instance.to_halo2_instance();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].len(), 9); // padded halo2 instance column width
+        let _ = circuit;
+    }
+
+    #[test]
     fn test_circuit_test_data_generation() {
         let suite = HeadstashCircuitSuite::new(Mock::new("sender"));
         let result = suite.generate_circuit_test_data(4, 1);
@@ -1718,7 +2304,9 @@ mod test {
     #[test]
     fn test_deterministic_leaf_generation() {
         let suite = HeadstashCircuitSuite::new(Mock::new("sender"));
-        let addr = [0u8; 32];
+        // Must be a valid secp256k1 scalar (not all-zero).
+        let mut addr = [7u8; 32];
+        addr[0] = 1;
         let token = "uterp";
         let value = 1_000_000u64;
         let fdi = 0u64;
@@ -1878,39 +2466,38 @@ mod test {
         }
     }
 
-    #[test]
-    #[ignore] // Expensive test - run with: cargo test test_headstash_e2e_proof_generation -- --ignored
-    fn test_headstash_e2e_proof_generation() -> Result<(), BoxError> {
-        let suite = HeadstashCircuitSuite::new(Mock::new("sender"));
+    // #[test]
+    // #[ignore] // Expensive test - run with: cargo test test_headstash_e2e_proof_generation -- --ignored
+    // fn test_headstash_e2e_proof_generation() -> Result<(), BoxError> {
+    //     let suite = HeadstashCircuitSuite::new(Mock::new("sender"));
 
-        // Step 1: Generate circuit keys
-        println!("Generating circuit keys...");
-        let (vk, pk) =
-            suite.gen_headstash_circuit_keys(&std::env::temp_dir().join("headstash_test_keys"))?;
+    //     // Step 1: Generate circuit keys
+    //     println!("Generating circuit keys...");
+    //     let pk = suite.build_keys()?;
 
-        // Step 2: Generate test merkle tree
-        let num_leaves = 4;
-        let test_leaves = suite.generate_test_leaves(num_leaves);
-        let leaf_hashes: Vec<_> = test_leaves
-            .iter()
-            .map(|l| suite.compute_leaf_from_data(l).unwrap())
-            .collect();
-        let tree = suite.generate_full_merkle_tree(leaf_hashes.clone());
+    //     // Step 2: Generate test merkle tree
+    //     let num_leaves = 4;
+    //     let test_leaves = suite.generate_test_leaves(num_leaves);
+    //     let leaf_hashes: Vec<_> = test_leaves
+    //         .iter()
+    //         .map(|l| suite.compute_leaf_from_data(l).unwrap())
+    //         .collect();
+    //     let tree = suite.generate_full_merkle_tree(leaf_hashes.clone());
 
-        // Step 3: Generate and verify proof for first leaf
-        let auth_path = suite.compute_merkle_path(&tree, 0);
+    //     // Step 3: Generate and verify proof for first leaf
+    //     let auth_path = suite.compute_merkle_path(&tree, 0);
 
-        // Verify merkle path is valid
-        assert!(suite.verify_merkle_path(&leaf_hashes[0], &auth_path, &tree.root()));
+    //     // Verify merkle path is valid
+    //     assert!(suite.verify_merkle_path(&leaf_hashes[0], &auth_path, &tree.root()));
 
-        // Create proof
-        let proof_bundle =
-            suite.create_genesis_proof_from_leaf(&pk, &test_leaves[0], &auth_path)?;
+    //     // Create proof
+    //     let proof_bundle =
+    //         suite.create_genesis_proof_from_leaf(&pk, &test_leaves[0], &auth_path)?;
 
-        // Verify proof
-        // suite.verify_genesis_proof(&vk, &proof_bundle)?;
+    //     // Verify proof
+    //     // suite.verify_genesis_proof(&vk, &proof_bundle)?;
 
-        println!("E2E proof generation and verification successful!");
-        Ok(())
-    }
+    //     println!("E2E proof generation and verification successful!");
+    //     Ok(())
+    // }
 }

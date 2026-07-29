@@ -326,14 +326,12 @@ pub fn i2lebsp<const NUM_BITS: usize>(int: u64) -> [bool; NUM_BITS] {
 }
 /// Convert esk (`EligibleSk`) into a `pallas::Base` scalar via modular reduction.
 /// This matches the .native value from the CrtInteger representation (value mod pallas_p).
+///
+/// Uses raw little-endian secret bytes (no `halo2-base` / axiom) so CosmWasm guest
+/// wasm32 builds stay free of multicore+C-sys graphs. Host circuit chips may use
+/// the CrtInteger path for exact Fq encoding when proving.
 pub(crate) fn esk_to_base(esk: &crate::keys::EligibleSk) -> pallas::Base {
-    // Convert secp256k1 Fq to pallas::Base via modular reduction.
-    // This matches the .native value from the CrtInteger representation.
-    let big = num_bigint::BigUint::from_bytes_le(
-        &halo2_base::halo2_proofs::halo2curves::secq256k1::Fp::from_repr(esk.secret_bytes())
-            .expect("valid Fq")
-            .to_repr(),
-    );
+    let big = num_bigint::BigUint::from_bytes_le(&esk.secret_bytes());
     biguint_to_fe_simple(&big)
 }
 

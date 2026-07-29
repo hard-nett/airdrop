@@ -78,6 +78,9 @@ pub enum CorridorError {
     OracleDisabledMint,
     BadAmount,
     InvalidIntent,
+    EmptyRecoveryBinding,
+    RecoveryNotDue,
+    RecoveryBindingMismatch,
     Bridge(String),
     Swap(String),
     Io(String),
@@ -107,6 +110,8 @@ pub struct DepositIntentV0 {
     pub btc_deposit_addr: String,
     pub btc_txid_or_intent_id: Hash32,
     pub dest_owner_binding: Hash32,
+    /// Optional 32B timeout-recovery binding (domain hash; no free-text addr).
+    pub recovery_owner_binding: Option<Hash32>,
     pub dest_display_hint: Option<String>,
     pub asset_in_id: Hash32,
     pub asset_out_id: Hash32,
@@ -129,6 +134,7 @@ pub struct DepositIntentFields {
     pub btc_deposit_addr: String,
     pub btc_txid_or_intent_id: Hash32,
     pub dest_owner_binding: Hash32,
+    pub recovery_owner_binding: Option<Hash32>,
     pub dest_display_hint: Option<String>,
     pub asset_in_id: Hash32,
     pub asset_out_id: Hash32,
@@ -147,6 +153,11 @@ impl DepositIntentV0 {
         }
         if is_zero_hash(&fields.dest_owner_binding) {
             return Err(CorridorError::EmptyDestBinding);
+        }
+        if let Some(r) = fields.recovery_owner_binding {
+            if is_zero_hash(&r) {
+                return Err(CorridorError::EmptyRecoveryBinding);
+            }
         }
         if fields.corridor_id.is_empty()
             || fields.source_chain_tag.is_empty()
@@ -167,6 +178,7 @@ impl DepositIntentV0 {
             btc_deposit_addr: fields.btc_deposit_addr,
             btc_txid_or_intent_id: fields.btc_txid_or_intent_id,
             dest_owner_binding: fields.dest_owner_binding,
+            recovery_owner_binding: fields.recovery_owner_binding,
             dest_display_hint: fields.dest_display_hint,
             asset_in_id: fields.asset_in_id,
             asset_out_id: fields.asset_out_id,
@@ -183,7 +195,7 @@ impl DepositIntentV0 {
     }
 
     pub fn canonical_bytes_without_domain_bind(&self) -> Vec<u8> {
-        let mut out = Vec::with_capacity(256);
+        let mut out = Vec::with_capacity(288);
         out.push(self.version);
         write_str(&mut out, &self.corridor_id);
         write_str(&mut out, &self.source_chain_tag);
@@ -191,6 +203,13 @@ impl DepositIntentV0 {
         write_str(&mut out, &self.btc_deposit_addr);
         out.extend_from_slice(&self.btc_txid_or_intent_id);
         out.extend_from_slice(&self.dest_owner_binding);
+        match &self.recovery_owner_binding {
+            Some(r) => {
+                out.push(1);
+                out.extend_from_slice(r);
+            }
+            None => out.push(0),
+        }
         match &self.dest_display_hint {
             Some(h) => {
                 out.push(1);
@@ -225,6 +244,11 @@ impl DepositIntentV0 {
         }
         if is_zero_hash(&self.dest_owner_binding) {
             return Err(CorridorError::EmptyDestBinding);
+        }
+        if let Some(r) = self.recovery_owner_binding {
+            if is_zero_hash(&r) {
+                return Err(CorridorError::EmptyRecoveryBinding);
+            }
         }
         if self.domain_bind != self.compute_domain_bind() {
             return Err(CorridorError::DomainBindMismatch);
@@ -270,6 +294,39 @@ impl Default for SwapCheckCtx {
             amount_in: 0,
             require_oracle: true,
         }
+    }
+}
+
+/// Fail-closed mint gate (I3): not expired + non-zero burn id after deposit bind.
+pub fn intent_allows_mint(intent: &DepositIntentV0, now: u64) -> Result<(), CorridorError> {
+    intent.validate()?;
+    if now >= intent.expiry {
+        return Err(CorridorError::IntentExpired);
+    }
+    if is_zero_hash(&intent.btc_txid_or_intent_id) {
+        return Err(CorridorError::EmptyBurnId);
+    }
+    Ok(())
+}
+
+/// Timeout recovery: only after expiry; only to dest or optional recovery_owner_binding.
+pub fn intent_allows_timeout_recovery(
+    intent: &DepositIntentV0,
+    actual_owner_binding: &Hash32,
+    now: u64,
+) -> Result<(), CorridorError> {
+    intent.validate()?;
+    if now < intent.expiry {
+        return Err(CorridorError::RecoveryNotDue);
+    }
+    if actual_owner_binding == &intent.dest_owner_binding {
+        return Ok(());
+    }
+    match intent.recovery_owner_binding {
+        Some(r) if !is_zero_hash(&r) && actual_owner_binding == &r => Ok(()),
+        Some(r) if is_zero_hash(&r) => Err(CorridorError::EmptyRecoveryBinding),
+        Some(_) => Err(CorridorError::RecoveryBindingMismatch),
+        None => Err(CorridorError::RecoveryBindingMismatch),
     }
 }
 
@@ -551,6 +608,8 @@ pub struct CorridorScenario {
     pub receipt_path: Option<PathBuf>,
     /// Whether to run optional note-persist L0 (W4) when `l0-seams` is on.
     pub persist_notes: bool,
+    /// Optional recovery_owner_binding sealed on intent (timeout path).
+    pub recovery_owner_binding: Option<Hash32>,
 }
 
 impl Default for CorridorScenario {
@@ -580,6 +639,7 @@ impl Default for CorridorScenario {
             suite_label: "cashapp-zec-e2e".into(),
             receipt_path: None,
             persist_notes: false,
+            recovery_owner_binding: None,
         }
     }
 }
@@ -643,6 +703,7 @@ pub fn run_cashapp_zec_corridor_w0_w7(
         btc_deposit_addr: addr,
         btc_txid_or_intent_id: [0u8; 32],
         dest_owner_binding: scenario.dest_owner_binding,
+        recovery_owner_binding: scenario.recovery_owner_binding,
         dest_display_hint: Some("u1zec…preauth".into()),
         asset_in_id: hash_tag("sim-BTC"),
         asset_out_id: hash_tag("sim-ZEC"),
@@ -671,16 +732,17 @@ pub fn run_cashapp_zec_corridor_w0_w7(
     let mut intent = intent;
     intent.bind_deposit_id(deposit.burn_id)?;
 
-    // ----- W3: BridgeMintNote (L0 pure authorize; owner_binding = intent dest) -----
+    // ----- W3: BridgeMintNote (fail-closed expiry + L0 pure authorize) -----
+    intent_allows_mint(&intent, scenario.now)?;
     let mint_owner = scenario
         .mint_owner_override
         .unwrap_or(intent.dest_owner_binding);
     let mint_note = bridge_mint_for_intent(&intent, mint_owner, scenario.amount_in)?;
 
-    // ----- W4: Optional note persist (L0 local store when feature + flag) -----
+    // ----- W4: Optional note persist put + recover (L0 local store when feature + flag) -----
     #[cfg(feature = "l0-seams")]
     if scenario.persist_notes {
-        let _ = try_persist_mint_note(&mint_note);
+        try_persist_mint_note(&mint_note)?;
     }
 
     // ----- W5: Private swap with oracle mid bound -----
@@ -1011,19 +1073,121 @@ fn run_oracle_bound_swap(
     ))
 }
 
+/// Product call site after mint: encrypt SEAM → put → film recover.
+///
+/// Used by W4 (`persist_notes`) and corridor_ict_funded post-mint wire.
+/// Local store by default; `NOTES_BASE` → HTTP + PIR recover (PIR-3).
 #[cfg(feature = "l0-seams")]
-fn try_persist_mint_note(note: &NoteOutSketch) -> Result<(), CorridorError> {
+pub fn try_persist_mint_note(note: &NoteOutSketch) -> Result<(), CorridorError> {
+    use super::note_persist_client::{
+        put_and_film_recover_after_mint, NotesPersistConfig,
+    };
     use seam_note_out::SeamNoteOutV0;
+    use std::time::{SystemTime, UNIX_EPOCH};
 
-    // W4 optional: decode SEAM layout from mint sketch (full put/get is L2 suite path).
     let bytes = note.to_seam_bytes();
     let seam =
         SeamNoteOutV0::from_bytes(&bytes).map_err(|e| CorridorError::Io(format!("{e:?}")))?;
     if seam.value != note.value {
         return Err(CorridorError::Io("seam value mismatch after mint".into()));
     }
-    let _addr = seam_note_out::note_addr_cm(&seam.cm_public);
+
+    let n = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
+    let dir = std::env::temp_dir().join(format!("corridor-note-persist-{n}"));
+    std::fs::create_dir_all(&dir).map_err(|e| CorridorError::Io(e.to_string()))?;
+    let cfg = NotesPersistConfig::from_env_or_local(dir.clone())
+        .map_err(|e| CorridorError::Io(e.0))?;
+    put_and_film_recover_after_mint(&seam, &cfg)
+        .map_err(|e| CorridorError::Io(format!("put_and_film_recover: {e}")))?;
+    // Only wipe local lab dir (never wipe remote notes host).
+    if cfg.notes_base.is_none() {
+        let _ = std::fs::remove_dir_all(&dir);
+    }
     Ok(())
+}
+
+/// Build SEAM cleartext from mint evidence openings (client-held rcm/cm) for put/recover.
+#[cfg(feature = "l0-seams")]
+pub fn seam_note_from_mint_openings(
+    cm_public: &Hash32,
+    rcm: &Hash32,
+    owner_binding: &Hash32,
+    value: u64,
+    asset_id: &Hash32,
+    bridge_nullifier: &Hash32,
+) -> seam_note_out::SeamNoteOutV0 {
+    use seam_note_out::{
+        CM_ABSTRACT_LEAF_V0, DOMAIN_TAG_NOTE_OUT, NF_BRIDGE_BURN, ORIGIN_BRIDGE_MINT,
+        SeamNoteOutV0, VERSION_V0,
+    };
+    SeamNoteOutV0 {
+        version: VERSION_V0,
+        domain_tag: DOMAIN_TAG_NOTE_OUT,
+        origin: ORIGIN_BRIDGE_MINT,
+        asset_id: *asset_id,
+        value,
+        owner_binding: *owner_binding,
+        cm_public: *cm_public,
+        cm_encoding: CM_ABSTRACT_LEAF_V0,
+        nullifier_lineage: *bridge_nullifier,
+        nullifier_domain: NF_BRIDGE_BURN,
+        provenance_anchor: [0u8; 32],
+        claim_id: [0u8; 32],
+        source_chain_tag_hash: [0u8; 32],
+        rcm: *rcm,
+        rcm_flag: 1,
+        memo: [0u8; 64],
+        memo_flag: 0,
+        pool_domain: [0u8; 32],
+    }
+}
+
+/// Put + recover SEAM after chain mint (ict / suite product path).
+///
+/// **PIR-3 film:** when `NOTES_BASE` is set, uses HTTP put + **PIR recover**
+/// (`recover_note_film`); otherwise local HeadstashStore-shaped dir + direct recover.
+/// Auth headers from `NOTES_BEARER_TOKEN` (modular notes_auth bearer default).
+#[cfg(feature = "l0-seams")]
+pub fn put_and_recover_after_mint(
+    note: &seam_note_out::SeamNoteOutV0,
+    hs_id: &str,
+    owner_key: [u8; 32],
+    data_dir: &Path,
+) -> Result<super::note_persist_client::NotePersistReceipt, CorridorError> {
+    use super::note_persist_client::{
+        put_and_film_recover_after_mint, NotesPersistConfig,
+    };
+
+    std::fs::create_dir_all(data_dir).map_err(|e| CorridorError::Io(e.to_string()))?;
+
+    // Prefer env NOTES_BASE for live notes host; else local season under data_dir.
+    let mut cfg = NotesPersistConfig::from_env_or_local(data_dir.to_path_buf())
+        .map_err(|e| CorridorError::Io(e.0))?;
+    // Caller-supplied hs_id / owner_key win over env defaults for ict contract id.
+    cfg.hs_id = hs_id.to_string();
+    cfg.owner_key = owner_key;
+    // Re-apply bearer if env present (from_env already did when NOTES_BASE set).
+    if cfg.auth_headers.is_empty() {
+        if let Ok(tok) = std::env::var("NOTES_BEARER_TOKEN") {
+            if !tok.is_empty() {
+                cfg.auth_headers
+                    .push(("Authorization".into(), format!("Bearer {tok}")));
+            }
+        }
+    }
+
+    let via = if cfg.notes_base.is_some() {
+        "http+pir"
+    } else {
+        "local+direct"
+    };
+    let receipt = put_and_film_recover_after_mint(note, &cfg).map_err(|e| {
+        CorridorError::Io(format!("put_and_film_recover ({via}): {e}"))
+    })?;
+    Ok(receipt)
 }
 
 pub fn write_receipt_json(path: &Path, receipt: &CorridorReceiptV0) -> Result<(), CorridorError> {
@@ -1159,6 +1323,71 @@ mod tests {
         }
     }
 
+    /// I3 — expired intent rejects at **mint** (before swap)
+    #[test]
+    fn cashapp_zec_i3_expired_mint_reject() {
+        let mut backend = CorridorAssetBackend::simulated();
+        let scenario = CorridorScenario {
+            now: 1_700_003_600, // == default expiry
+            expiry: 1_700_003_600,
+            ..CorridorScenario::default()
+        };
+        let err = run_cashapp_zec_corridor_w0_w7(&mut backend, &scenario).unwrap_err();
+        assert_eq!(err, CorridorError::IntentExpired);
+    }
+
+    /// RECOVERY-2 — recovery_owner_binding timeout policy on harness intent
+    #[test]
+    fn cashapp_zec_recovery_owner_binding_timeout() {
+        let recovery = hash_tag("recovery-harness");
+        let fields = DepositIntentFields {
+            version: 0,
+            corridor_id: CORRIDOR_ID_CASHAPP_BTC_ZEC_V0.into(),
+            source_chain_tag: "bitcoin".into(),
+            dest_chain_tag: "zcash".into(),
+            btc_deposit_addr: fresh_btc_deposit_addr("rec", 0),
+            btc_txid_or_intent_id: [0u8; 32],
+            dest_owner_binding: hash_tag("dest-owner-cashapp-zec-demo"),
+            recovery_owner_binding: Some(recovery),
+            dest_display_hint: None,
+            asset_in_id: hash_tag("sim-BTC"),
+            asset_out_id: hash_tag("sim-ZEC"),
+            min_out_value: 1,
+            max_slippage_bps: 100,
+            oracle_market_id: "BTC-ZEC".into(),
+            oracle_bound_policy: OracleBoundPolicy::MidGteFloor,
+            created_at: 10,
+            expiry: 100,
+        };
+        let intent = DepositIntentV0::new_preauth(fields).unwrap();
+        assert_eq!(
+            intent_allows_timeout_recovery(&intent, &recovery, 50).unwrap_err(),
+            CorridorError::RecoveryNotDue
+        );
+        intent_allows_timeout_recovery(&intent, &recovery, 100).unwrap();
+        intent_allows_timeout_recovery(&intent, &intent.dest_owner_binding, 100).unwrap();
+        assert_eq!(
+            intent_allows_timeout_recovery(&intent, &hash_tag("other"), 100).unwrap_err(),
+            CorridorError::RecoveryBindingMismatch
+        );
+    }
+
+    /// W4 — put_note + recover after mint when persist_notes
+    #[cfg(feature = "l0-seams")]
+    #[test]
+    fn cashapp_zec_w4_note_persist_put_recover() {
+        let mut backend = CorridorAssetBackend::simulated();
+        let scenario = CorridorScenario {
+            persist_notes: true,
+            ..CorridorScenario::default()
+        };
+        let out = run_cashapp_zec_corridor_w0_w7(&mut backend, &scenario)
+            .expect("W0–W7 with note persist");
+        assert_eq!(out.receipt.status, "complete");
+        // Direct put+recover on the mint sketch also OK
+        try_persist_mint_note(&out.mint_note).expect("put/recover mint note");
+    }
+
     /// LightClient MockAttestation deposit compiles + works; Live rejects.
     #[test]
     fn cashapp_zec_lc_mock_deposit_live_stub() {
@@ -1171,6 +1400,7 @@ mod tests {
             btc_deposit_addr: fresh_btc_deposit_addr("lc", 0),
             btc_txid_or_intent_id: [0u8; 32],
             dest_owner_binding: dest,
+            recovery_owner_binding: None,
             dest_display_hint: None,
             asset_in_id: hash_tag("sim-BTC"),
             asset_out_id: hash_tag("sim-ZEC"),
@@ -1234,6 +1464,7 @@ mod tests {
             btc_deposit_addr: "sim-btc-a".into(),
             btc_txid_or_intent_id: [0u8; 32],
             dest_owner_binding: hash_tag("d"),
+            recovery_owner_binding: None,
             dest_display_hint: None,
             asset_in_id: hash_tag("in"),
             asset_out_id: hash_tag("out"),
@@ -1247,5 +1478,32 @@ mod tests {
         let a = DepositIntentV0::new_preauth(fields.clone()).unwrap();
         let b = DepositIntentV0::new_preauth(fields).unwrap();
         assert_eq!(a.domain_bind, b.domain_bind);
+        // recovery field changes domain_bind
+        let mut with_rec = fields_like(&a);
+        with_rec.recovery_owner_binding = Some(hash_tag("rec"));
+        let c = DepositIntentV0::new_preauth(with_rec).unwrap();
+        assert_ne!(a.domain_bind, c.domain_bind);
+    }
+
+    fn fields_like(intent: &DepositIntentV0) -> DepositIntentFields {
+        DepositIntentFields {
+            version: intent.version,
+            corridor_id: intent.corridor_id.clone(),
+            source_chain_tag: intent.source_chain_tag.clone(),
+            dest_chain_tag: intent.dest_chain_tag.clone(),
+            btc_deposit_addr: intent.btc_deposit_addr.clone(),
+            btc_txid_or_intent_id: intent.btc_txid_or_intent_id,
+            dest_owner_binding: intent.dest_owner_binding,
+            recovery_owner_binding: intent.recovery_owner_binding,
+            dest_display_hint: intent.dest_display_hint.clone(),
+            asset_in_id: intent.asset_in_id,
+            asset_out_id: intent.asset_out_id,
+            min_out_value: intent.min_out_value,
+            max_slippage_bps: intent.max_slippage_bps,
+            oracle_market_id: intent.oracle_market_id.clone(),
+            oracle_bound_policy: intent.oracle_bound_policy,
+            created_at: intent.created_at,
+            expiry: intent.expiry,
+        }
     }
 }

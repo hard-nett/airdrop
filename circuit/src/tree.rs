@@ -23,10 +23,14 @@ use serde::ser::Serializer;
 use serde::{Deserialize, Serialize};
 use subtle::{Choice, ConditionallySelectable, CtOption};
 
-// The uncommitted leaf is defined as pallas::Base(2).
-// <https://zips.z.cash/protocol/protocol.pdf#thmuncommittedorchard>
+// Empty sibling / uncommitted leaf for the **public distro** tree.
+//
+// Poseidon-v1 (ADR-POSEIDON-DISTRO-TREE) uses `pallas::Base::ZERO` padding, not
+// Orchard's historical uncommitted leaf `2` (Sinsemilla note-commitment tree).
 lazy_static! {
-    static ref UNCOMMITTED_ORCHARD: pallas::Base = pallas::Base::from(2);
+    static ref UNCOMMITTED_DISTRO: pallas::Base = pallas::Base::ZERO;
+    /// Historical Orchard uncommitted leaf (Sinsemilla note tree only).
+    static ref UNCOMMITTED_ORCHARD_LEGACY: pallas::Base = pallas::Base::from(2);
     pub(crate) static ref EMPTY_ROOTS: Vec<MerkleHashOrchard> = {
         iter::empty()
             .chain(Some(MerkleHashOrchard::empty_leaf()))
@@ -136,24 +140,56 @@ impl MerklePath {
         }
     }
 
-    /// <https://zips.z.cash/protocol/protocol.pdf#orchardmerklecrh>
-    /// The layer with 2^n nodes is called "layer n":
-    ///      - leaves are at layer MERKLE_DEPTH_ORCHARD = 32;
-    ///      - the root is at layer 0.
-    /// `l` is MERKLE_DEPTH_ORCHARD - layer - 1.
-    ///      - when hashing two leaves, we produce a node on the layer above the leaves, i.e.
-    ///        layer = 31, l = 0
-    ///      - when hashing to the final root, we produce the anchor with layer = 0, l = 31.
+    /// Poseidon-v1 public inclusion root from a leaf field element.
+    ///
+    /// Path index `l = 0` is at the leaves (ADR / suite convention). Uses
+    /// [`crate::distro_poseidon::poseidon_distro_path_root`] when the `circuit`
+    /// feature is enabled.
+    #[cfg(feature = "circuit")]
+    pub fn root_from_leaf(&self, leaf: pallas::Base) -> Anchor {
+        use crate::distro_poseidon::poseidon_distro_path_root;
+        let path: [pallas::Base; MERKLE_DEPTH_ORCHARD] = self.auth_path.map(|h| h.0);
+        Anchor(poseidon_distro_path_root(leaf, self.position, &path))
+    }
+
+    /// Public inclusion root from a leaf commitment extract (x-coordinate).
+    ///
+    /// **Poseidon-v1** for the Headstash distro tree (replaces Sinsemilla MerkleCRH).
     pub fn root(&self, cmx: ExtractedNoteCommitment) -> Anchor {
+        #[cfg(feature = "circuit")]
+        {
+            self.root_from_leaf(cmx.inner())
+        }
+        #[cfg(not(feature = "circuit"))]
+        {
+            // Without halo2_gadgets, fall back to Sinsemilla-legacy combine.
+            self.auth_path
+                .iter()
+                .enumerate()
+                .fold(MerkleHashOrchard::from_cmx(&cmx), |node, (l, sibling)| {
+                    let l = l as u8;
+                    if self.position & (1 << l) == 0 {
+                        MerkleHashOrchard::combine(l.into(), &node, sibling)
+                    } else {
+                        MerkleHashOrchard::combine(l.into(), sibling, &node)
+                    }
+                })
+                .into()
+        }
+    }
+
+    /// Sinsemilla-legacy root (recovery only; not for new Headstashes).
+    #[cfg(feature = "circuit")]
+    pub fn root_sinsemilla_legacy(&self, cmx: ExtractedNoteCommitment) -> Anchor {
         self.auth_path
             .iter()
             .enumerate()
             .fold(MerkleHashOrchard::from_cmx(&cmx), |node, (l, sibling)| {
                 let l = l as u8;
                 if self.position & (1 << l) == 0 {
-                    MerkleHashOrchard::combine(l.into(), &node, sibling)
+                    MerkleHashOrchard::combine_sinsemilla_legacy(l.into(), &node, sibling)
                 } else {
-                    MerkleHashOrchard::combine(l.into(), sibling, &node)
+                    MerkleHashOrchard::combine_sinsemilla_legacy(l.into(), sibling, &node)
                 }
             })
             .into()
@@ -208,25 +244,10 @@ impl ConditionallySelectable for MerkleHashOrchard {
     }
 }
 
-impl Hashable for MerkleHashOrchard {
-    fn empty_leaf() -> Self {
-        MerkleHashOrchard(*UNCOMMITTED_ORCHARD)
-    }
-
-    /// Implements `MerkleCRH^Orchard` as defined in
-    /// <https://zips.z.cash/protocol/protocol.pdf#orchardmerklecrh>
-    ///
-    /// The layer with 2^n nodes is called "layer n":
-    ///      - leaves are at layer MERKLE_DEPTH_ORCHARD = 32;
-    ///      - the root is at layer 0.
-    /// `l` is MERKLE_DEPTH_ORCHARD - layer - 1.
-    ///      - when hashing two leaves, we produce a node on the layer above the leaves, i.e.
-    ///        layer = 31, l = 0
-    ///      - when hashing to the final root, we produce the anchor with layer = 0, l = 31.
-    fn combine(level: Level, left: &Self, right: &Self) -> Self {
-        // MerkleCRH Sinsemilla hash domain.
+impl MerkleHashOrchard {
+    /// Sinsemilla-legacy MerkleCRH (Orchard note tree / pre-Poseidon distro recovery).
+    pub fn combine_sinsemilla_legacy(level: Level, left: &Self, right: &Self) -> Self {
         let domain = HashDomain::new(MERKLE_CRH_PERSONALIZATION);
-
         MerkleHashOrchard(
             domain
                 .hash(
@@ -237,6 +258,30 @@ impl Hashable for MerkleHashOrchard {
                 )
                 .unwrap_or(pallas::Base::zero()),
         )
+    }
+}
+
+impl Hashable for MerkleHashOrchard {
+    /// Empty / padding leaf for **Poseidon-v1** public distro trees (`ZERO`).
+    fn empty_leaf() -> Self {
+        MerkleHashOrchard(*UNCOMMITTED_DISTRO)
+    }
+
+    /// Poseidon-v1 Merkle CRH for the Headstash public inclusion tree.
+    ///
+    /// `level` is treated as the suite/ADR layer counter: `0` when hashing leaves,
+    /// increasing toward the root (same as path index `l` in [`MerklePath::root`]).
+    fn combine(level: Level, left: &Self, right: &Self) -> Self {
+        #[cfg(feature = "circuit")]
+        {
+            use crate::distro_poseidon::poseidon_distro_crh;
+            let layer = u32::from(level);
+            MerkleHashOrchard(poseidon_distro_crh(layer, left.0, right.0))
+        }
+        #[cfg(not(feature = "circuit"))]
+        {
+            Self::combine_sinsemilla_legacy(level, left, right)
+        }
     }
 
     fn empty_root(level: Level) -> Self {

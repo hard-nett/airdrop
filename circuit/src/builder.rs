@@ -23,11 +23,11 @@ use crate::{
     // note_encryption::OrchardNoteEncryption,
     primitives::redpallas::{self, Binding, SpendAuth},
     tree::{Anchor, MerklePath},
-    value::{self, NoteValue, OverflowError, ValueCommitTrapdoor, ValueCommitment, ValueSum},
+    value::{self, NoteValue, ValueCommitTrapdoor, ValueSum},
     Proof,
 };
 
-// #[cfg(feature = "circuit")]
+#[cfg(feature = "host-crypto")]
 use {
     crate::{
         action::Action,
@@ -35,6 +35,9 @@ use {
     },
     nonempty::NonEmpty,
 };
+
+#[cfg(all(feature = "circuit", not(feature = "host-crypto")))]
+use crate::{action::Action, circuit::Instance};
 
 const MIN_ACTIONS: usize = 2;
 
@@ -455,7 +458,7 @@ impl ActionInfo {
     /// Defined in [Zcash Protocol Spec § 4.7.3: Sending Notes (Orchard)][orchardsend].
     ///
     /// [orchardsend]: https://zips.z.cash/protocol/nu5.pdf#orchardsend
-    // #[cfg(feature = "circuit")]
+    #[cfg(feature = "host-crypto")]
     fn build(self, mut rng: impl RngCore) -> (Action<SigningMetadata>, Circuit) {
         // let v_net = self.value_sum();
         let v = self.note_value();

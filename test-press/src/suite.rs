@@ -1,12 +1,13 @@
 //! main DeployData implementations for suites in test
 #[cfg(feature = "interface")]
 use crate::suites::headstash::HeadstashDeployData;
-use cw_no_rick::interface::NoRickDeployData;
+use cw_norick::interface::NoRickDeployData;
 #[cfg(feature = "multicore")]
 use rayon::prelude::*;
 
 use cosmwasm_std::Addr;
-use cw_orch::environment::{CwEnv, ZkCwEnv};
+
+pub trait DeployData {}
 
 #[derive(Debug, thiserror::Error)]
 pub enum ZkDeployError {
@@ -36,6 +37,7 @@ impl TestPressDeployData {
     }
 }
 // ── TestPressSuite ────────────────────────────────────────────────────────────
+use cw_orch::environment::ZkCwEnv;
 
 /// Composed suite of **all** test-press circuit suites.
 ///
@@ -89,12 +91,8 @@ impl<Chain: ZkCwEnv + cw_orch::prelude::CircuitUploadable> TestPressSuite<Chain>
 }
 
 #[cfg(feature = "interface")]
-impl<Chain> cw_orch::prelude::Deploy<Chain> for TestPressSuite<Chain>
-where
-    Chain: ZkCwEnv,
-    cw_orch::prelude::CwOrchError: From<cw_orch::core::CwEnvError>,
-{
-    type DeployData = TestPressDeployData;
+impl<Chain: ZkCwEnv> cw_orch::prelude::Deploy<Chain> for TestPressSuite<Chain> {
+    type DeployData = Option<TestPressDeployData>;
     type Error = ZkDeployError;
 
     fn deploy_on(chain: Chain, data: Self::DeployData) -> Result<Self, Self::Error> {

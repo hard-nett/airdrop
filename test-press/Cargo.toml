@@ -40,6 +40,18 @@ name = "corridor_ict_funded"
 path = "src/bin/corridor_ict_funded.rs"
 required-features = ["ict-daemon"]
 
+# No-Rick circuit + contract → Terp public testnet (120u-1) or CHAIN=local
+[[bin]]
+name = "deploy_norick_testnet"
+path = "src/bin/deploy_norick_testnet.rs"
+required-features = ["interface", "zk"]
+
+# Private DEX + tokenfactory seed denoms → testnet (lab mock_verify settle)
+[[bin]]
+name = "deploy_private_dex_testnet"
+path = "src/bin/deploy_private_dex_testnet.rs"
+required-features = ["interface"]
+
 [dependencies]
 async-trait = { workspace = true }
 base64  = { workspace = true }
@@ -48,6 +60,10 @@ blake3  = { workspace = true }
 bridge_auth_seams = { path = "../../terp-rs/crates/bridge_auth_seams" }
 compose_seams = { path = "../../terp-rs/crates/compose_seams" }
 private_dex_seams = { path = "../../terp-rs/crates/private_dex_seams" }
+# Lab t-of-n multi-sig (same digests as hash-market ThresholdCommitteeCustody)
+threshold_committee = { path = "../../terp-rs/crates/threshold_committee" }
+# ZF FROST lab (Object A) — preferred product custody
+frost_escrow = { path = "../../terp-rs/crates/frost_escrow" }
 # TODO(cashapp_zec_corridor): when fixtures/cashapp_zec_corridor lands in parent main,
 # add path dep and drop local DepositIntentV0 in harness/cashapp_zec_corridor.rs.
 # cashapp_zec_corridor = { path = "../../terp-rs/crates/cashapp_zec_corridor" }
@@ -61,6 +77,10 @@ cw-headstash-manifold = { workspace = true, optional = true, features = ["interf
 cw-private-dex = { workspace = true }
 cw-norick = { workspace = true, optional = true, features = ["interface"] }
 cw-orch  = { workspace = true, optional = true, features = ["daemon"] }
+# Tokenfactory seed for private-dex demo (MsgCreateDenom / MsgMint)
+osmosis-std = { path = "../../osmosis-rust/packages/osmosis-std" }
+prost = { workspace = true }
+prost-types = "0.14"
 env_logger = "0.11.10"
 #cw-orch-interchain  = { workspace = true, optional = true, features = ["daemon"] }
 ff   = { workspace = true }

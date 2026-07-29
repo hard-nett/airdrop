@@ -1,8 +1,10 @@
-//! generate the note leaf from its inputs and constrain it to root.
-//! Sinsemilla leaf hash with canonicity constraints for merkle tree inclusion proofs.
+//! **Sinsemilla-legacy** leaf hash with canonicity constraints.
 //!
-//! This module implements the leaf hash computation for the merkle tree, ensuring that
-//! the leaf data (epk, nd, v, fdi) is properly constrained and canonically encoded.
+//! # Migration
+//!
+//! New Headstash **public inclusion** paths use Poseidon-v1
+//! ([`crate::circuit::distro_poseidon_gadget`]). This module remains for recovery /
+//! historical tooling and for comparison tests. Do not wire new claim circuits here.
 
 use core::iter;
 

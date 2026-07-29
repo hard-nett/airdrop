@@ -27,7 +27,6 @@ use halo2_gadgets::{
         CommitDomain, Message, MessagePiece,
     },
     utilities::{
-        bool_check,
         lookup_range_check::{LookupRangeCheck, LookupRangeCheckConfig},
         FieldValue, RangeConstrained,
     },
@@ -178,16 +177,15 @@ impl DecomposeC {
             // c1 has been constrained to be 51 bits outside this gate.
             let c1 = meta.query_advice(col_r, Rotation::cur());
 
-            // c = c0 + (2^9) c1 + (2^51)
-            let decomposition_check = c - (c0 + c1.clone() * two_pow_9);
+            // Piece c is the bit-concatenation of c0 (9 bits = v[55..64)) and
+            // c1 (51 bits = fdi[0..51)): c = c0 + c1 * 2^9.
+            // c1 is a multi-bit limb (range-checked via MessagePiece packing),
+            // NOT a boolean — do not bool_check it (that broke suite leaves with fdi > 1).
+            let decomposition_check = c - (c0 + c1 * two_pow_9);
 
             Constraints::with_selector(
                 q_notecommit_c,
-                [
-                    ("bool_check c1", bool_check(c1)),
-                    // ("bool_check c_2", bool_check(c_2)),
-                    ("decomposition", decomposition_check),
-                ],
+                [("decomposition", decomposition_check)],
             )
         });
 
