@@ -122,6 +122,9 @@ impl EgressEnv {
                 "ubridge".into(),
             )),
             wavs: valid_wavs_proof_one(),
+        
+            circuit_id: None,
+            claim_mock_verify: None,
         };
 
         let headstash = app

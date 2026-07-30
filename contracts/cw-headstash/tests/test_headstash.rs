@@ -219,7 +219,10 @@ pub fn mock_headstash_instantiate_msg() -> HeadstashInstantiateMsg {
         genesis_label: None,
         wavs: mock_wavs_proof(),
     }
-}
+,
+            circuit_id: None,
+            claim_mock_verify: None,
+        }
 
 // Test headstash instantiation with new fungible token
 #[test]

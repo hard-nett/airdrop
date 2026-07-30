@@ -135,6 +135,8 @@ impl HeadstashDeployData {
                         nonce: 0,
                     },
                 },
+                circuit_id: None,
+                claim_mock_verify: Some(true), // lab Product A claim path without zk wasmvm
             },
         })
     }

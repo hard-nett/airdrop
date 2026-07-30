@@ -152,6 +152,68 @@ pub fn load_claim_fixture(path: &Path) -> Result<ClaimFixture, ClaimFixtureError
     Ok(fix)
 }
 
+/// Build a **suite-backed** Product A claim fixture (Poseidon root + instance layout).
+///
+/// Requires `interface` + host suite (random tree). Policy-valid; use real
+/// `Proof::create` / MockProver for soundness of the proof field.
+#[cfg(feature = "interface")]
+pub fn build_suite_backed_claim_fixture(
+    num_leaves: usize,
+    selected_index: usize,
+) -> Result<ClaimFixture, ClaimFixtureError> {
+    use cw_orch::prelude::Mock;
+    use ff::PrimeField;
+    use zk_headstash::suite::suite::HeadstashProofBuilder;
+    use zk_headstash::suite::HeadstashCircuitSuite;
+
+    let suite = HeadstashCircuitSuite::new(Mock::new("sender"));
+    let (_circuit, instance, anchor, partial) = suite
+        .suite_backed_claim_pair(num_leaves, selected_index)
+        .map_err(|e| ClaimFixtureError::Schema(format!("suite_backed_claim_pair: {e}")))?;
+
+    // Wire layout: anchor(32) | nd(32) | v(8) | nf(32) | recp(32) | cmx(32) = 168
+    let inst_bytes = instance.to_bytes();
+    if inst_bytes.len() != CLAIM_INSTANCE_BYTES_LEN {
+        return Err(ClaimFixtureError::Schema(format!(
+            "instance to_bytes len {}",
+            inst_bytes.len()
+        )));
+    }
+    let root_hex = format!("0x{}", hex::encode(anchor.to_bytes()));
+    let path_hex: Vec<String> = (0..32).map(|i| format!("0x{:064x}", i)).collect();
+
+    Ok(ClaimFixture {
+        distro_hash_domain: "poseidon-v1".into(),
+        root: root_hex.clone(),
+        root_id: 0,
+        leaf_index: selected_index as u64,
+        depth: 32,
+        path: path_hex,
+        partial_note: ClaimFixturePartialNote {
+            esk_hex: format!("0x{}", hex::encode(partial.esk_bytes)),
+            token: partial.token,
+            value: partial.value,
+            fdi: partial.fdi,
+            recipient: format!("0x{}", hex::encode(partial.recipient)),
+        },
+        instance: ClaimFixtureInstance {
+            anchor: root_hex,
+            nd: format!("0x{}", hex::encode(&inst_bytes[32..64])),
+            v: u64::from_le_bytes(inst_bytes[64..72].try_into().unwrap()),
+            nf: format!("0x{}", hex::encode(&inst_bytes[72..104])),
+            recp: format!("0x{}", hex::encode(&inst_bytes[104..136])),
+            cmx: format!("0x{}", hex::encode(&inst_bytes[136..168])),
+        },
+        instance_bytes_len: CLAIM_INSTANCE_BYTES_LEN,
+        circuit: ClaimFixtureCircuit {
+            k: 18,
+            public_inputs: 6,
+        },
+        instance_bytes_hex: Some(format!("0x{}", hex::encode(inst_bytes))),
+        mock_proof_hex: Some("0x01".into()), // placeholder; lab claim_mock_verify
+    })
+}
+
 /// Build a **synthetic** policy fixture for tests (not cryptographically proven).
 ///
 /// Poseidon root + instance layout only — sufficient for nullifier/root policy
@@ -245,5 +307,17 @@ mod tests {
         back.validate_policy().unwrap();
         assert_eq!(back.leaf_index, 2);
         assert_eq!(back.instance.v, 42);
+    }
+
+    #[cfg(feature = "interface")]
+    #[test]
+    fn suite_backed_fixture_validates_product_a() {
+        let f = build_suite_backed_claim_fixture(4, 1).expect("suite fixture");
+        f.validate_policy().expect("policy");
+        assert_eq!(f.distro_hash_domain, "poseidon-v1");
+        assert_eq!(f.depth, 32);
+        assert_eq!(f.circuit.k, 18);
+        assert_eq!(f.instance_bytes_len, 168);
+        assert_eq!(f.leaf_index, 1);
     }
 }

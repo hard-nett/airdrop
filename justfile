@@ -69,6 +69,14 @@ demo-product-a:
         cargo test -p zk-headstash --lib --features "circuit,std,interface" -- \
                 note_poseidon distro_poseidon note::commitment suite:: tree:: \
                 orchard_delta_part_t::h2_ orchard_delta_part_t::claim_surface
+        cargo test -p cw-headstash --lib -- instantiate_tests distro::
+        cargo test -p zk-test-press --lib harness::claim_fixture --features interface
+
+# Expected Product A usage doc + contract policy + offline keys path (see PRODUCT-A-CW-ORCH-ICTRS-USAGE.md)
+demo-product-a-usage: demo-product-a
+        @echo "Next: just demo-keys  # long K=18 store-circuit blob"
+        @echo "ICTRS: cargo run -p ict-rs --example headstash --features docker  # needs wasm+image"
+        @echo "Doc: docs/circuit/PRODUCT-A-CW-ORCH-ICTRS-USAGE.md"
 
 # ── E2E harness L0 (pure seams + suite re-exports; no Docker / no H1 prove) ──
 # Inventory + E2E-id map: crates/terp-rs/docs/private-bridge/E2E-HARNESS-PLAN.md

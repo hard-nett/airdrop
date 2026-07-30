@@ -281,7 +281,8 @@ impl SpendInfo {
         if self.note.value() == NoteValue::zero() {
             true
         } else {
-            #[cfg(feature = "circuit")]
+            // Host prove path: Product A distro leaf (needs secp BE→native helpers).
+            #[cfg(all(feature = "circuit", feature = "host-crypto"))]
             {
                 use crate::circuit::gadget::secp256k1_chip::secp_coord_be_to_pallas_base;
                 use crate::distro_poseidon::poseidon_distro_leaf;
@@ -297,7 +298,8 @@ impl SpendInfo {
                 let path_root = self.merkle_path.root_from_leaf(leaf);
                 &path_root == anchor
             }
-            #[cfg(not(feature = "circuit"))]
+            // Guest / no host-crypto: fall back to path over extracted cmx (legacy shape).
+            #[cfg(not(all(feature = "circuit", feature = "host-crypto")))]
             {
                 let cm = self.note.commitment();
                 let path_root = self.merkle_path.root(cm.into());

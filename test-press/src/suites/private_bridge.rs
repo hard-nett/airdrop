@@ -302,6 +302,8 @@ impl<Chain: ZkCwEnv> PrivateBridgeSuite<Chain> {
                 denom.into(),
             )),
             wavs: generate_test_wavs_proof(1),
+            circuit_id: None,
+            claim_mock_verify: None,
         }
     }
 

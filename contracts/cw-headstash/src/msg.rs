@@ -6,6 +6,7 @@ use crate::egress::EgressBurnStatement;
 #[cw_serde]
 pub struct InstantiateMsg {
     /// Headstash genesis merkle tree root (32 bytes). Registered as `root_id = 0`.
+    /// Product A: depth-32 Poseidon-v1 path root (not shallow suite root).
     pub genesis_root: Binary,
     /// Public inclusion hash domain. Defaults to `poseidon-v1` for new Headstashes.
     /// Use `sinsemilla-legacy` only for recovery of pre-Poseidon trees.
@@ -18,6 +19,13 @@ pub struct InstantiateMsg {
     pub token_strategy: TokenStrategy,
     /// Aggregated list of keys
     pub wavs: WavsProofOfOwnership,
+    /// Stored circuit id after zkvm `store-circuit` / `upload_circuit` (default 0 until set).
+    #[serde(default)]
+    pub circuit_id: Option<u64>,
+    /// **Lab only:** when true, `ProcessHeadstash` accepts non-empty mock proofs without
+    /// `proof_instance_verify`. Production must leave false and use `zk-api` + real cid.
+    #[serde(default)]
+    pub claim_mock_verify: Option<bool>,
 }
 
 #[cfg_attr(feature = "interface", derive(cw_orch::ExecuteFns))]
@@ -26,6 +34,14 @@ pub enum ExecuteMsg {
     /// Verify claims and distribute. Each claim binds to a registered `root_id`.
     ProcessHeadstash {
         claims: Vec<HeadstashNote>,
+    },
+    /// Owner: bind wasmvm store-circuit id used by `proof_instance_verify`.
+    SetCircuitId {
+        circuit_id: u64,
+    },
+    /// Owner: toggle lab claim mock-verify (never enable on production).
+    SetClaimMockVerify {
+        claim_mock_verify: bool,
     },
     /// Register an **additive** eligibility root (Poseidon-v1 only for new drops).
     /// Owner-only. Assigns the next `root_id` and stores root + domain.

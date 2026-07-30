@@ -14,7 +14,7 @@ use zk_headstash::value::{NoteDenom, NoteValue};
 
 #[cosmwasm_schema::cw_serde]
 pub struct HeadstashCfg {
-    // cid: circuit-id of stored circuit in vm
+    // cid: circuit-id of stored circuit in vm (Product A claim Halo2 / Pasta K=18)
     pub cid: u64,
     // gr: genesis tree root (also stored under eligibility root_id = 0)
     pub gr: Binary,
@@ -25,6 +25,9 @@ pub struct HeadstashCfg {
     pub ts: Vec<TokenStrategy>,
     // w: wavs operator set
     pub w: WavsOperatorSet,
+    /// Lab: mock claim proof verify (skip host proof_instance_verify). Default false.
+    #[serde(default)]
+    pub claim_mock_verify: bool,
 }
 
 #[cosmwasm_schema::cw_serde]
@@ -144,29 +147,44 @@ pub fn process_headstash(
             return Err(StdError::msg("incorrect token denom"));
         }
 
-        // verify headstash proof (requires cosmwasm-std `zk` + chain wasmvm export).
-        // Guest builds omit that import so BridgeMintNote deploys on stock wasmd;
-        // claim path is fail-closed unless built with zk host support.
-        #[cfg(feature = "zk-api")]
-        {
-            let ok = deps
-                .api
-                .proof_instance_verify(
-                    cfg.cid.into(),
-                    &claim.p,
-                    &<HeadstashInstances as Into<Instance>>::into(claim.i.clone()).to_bytes(),
-                )
-                .map_err(|e| StdError::msg(e.to_string()))?;
-            if !ok {
-                return Err(StdError::msg("invalid headstash proof"));
+        // Product A claim proof:
+        // - lab: `claim_mock_verify` + non-empty proof bytes (policy still enforced above)
+        // - production: `zk-api` + wasmvm `proof_instance_verify` against cfg.cid
+        if cfg.claim_mock_verify {
+            if claim.p.is_empty() {
+                return Err(StdError::msg(
+                    "claim_mock_verify: proof bytes must be non-empty",
+                ));
             }
-        }
-        #[cfg(not(feature = "zk-api"))]
-        {
-            let _ = (&cfg.cid, &claim.p, &claim.i);
-            return Err(StdError::msg(
-                "headstash claim proof verify requires zk-api feature + zk wasmvm (use BridgeMintNote for corridor)",
-            ));
+            // Lab path: root/nullifier/domain/denom already checked.
+        } else {
+            #[cfg(feature = "zk-api")]
+            {
+                if cfg.cid == 0 {
+                    return Err(StdError::msg(
+                        "circuit_id is 0: SetCircuitId after store-circuit before real verify",
+                    ));
+                }
+                let ok = deps
+                    .api
+                    .proof_instance_verify(
+                        cfg.cid.into(),
+                        &claim.p,
+                        &<HeadstashInstances as Into<Instance>>::into(claim.i.clone()).to_bytes(),
+                    )
+                    .map_err(|e| StdError::msg(e.to_string()))?;
+                if !ok {
+                    return Err(StdError::msg("invalid headstash proof"));
+                }
+            }
+            #[cfg(not(feature = "zk-api"))]
+            {
+                let _ = (&cfg.cid, &claim.p, &claim.i);
+                return Err(StdError::msg(
+                    "headstash claim proof verify requires zk-api feature + zk wasmvm, \
+                     or claim_mock_verify=true for lab (use BridgeMintNote for corridor mint)",
+                ));
+            }
         }
 
         // verify recp integrity
@@ -265,6 +283,38 @@ pub fn register_eligibility_root(
         .add_attribute("root_id", entry.root_id.to_string())
         .add_attribute("distro_hash_domain", entry.domain.as_str())
         .add_attribute("root", entry.root.to_string()))
+}
+
+/// Owner binds wasmvm store-circuit id for Product A claim verify.
+pub fn set_circuit_id(
+    deps: DepsMut,
+    info: MessageInfo,
+    circuit_id: u64,
+) -> Result<Response, StdError> {
+    cw_ownable::assert_owner(deps.storage, &info.sender)?;
+    HEADSTASH_CFG.update(deps.storage, |mut cfg| -> Result<_, StdError> {
+        cfg.cid = circuit_id;
+        Ok(cfg)
+    })?;
+    Ok(Response::new()
+        .add_attribute("action", "set_circuit_id")
+        .add_attribute("circuit_id", circuit_id.to_string()))
+}
+
+/// Owner toggles lab claim mock-verify (production must stay false).
+pub fn set_claim_mock_verify(
+    deps: DepsMut,
+    info: MessageInfo,
+    claim_mock_verify: bool,
+) -> Result<Response, StdError> {
+    cw_ownable::assert_owner(deps.storage, &info.sender)?;
+    HEADSTASH_CFG.update(deps.storage, |mut cfg| -> Result<_, StdError> {
+        cfg.claim_mock_verify = claim_mock_verify;
+        Ok(cfg)
+    })?;
+    Ok(Response::new()
+        .add_attribute("action", "set_claim_mock_verify")
+        .add_attribute("claim_mock_verify", claim_mock_verify.to_string()))
 }
 
 pub fn query_nullifiers(
