@@ -3,7 +3,7 @@
 //! Replaces Sinsemilla leaf + MerkleCRH for genesis eligibility (ADR-POSEIDON-DISTRO-TREE).
 //! Pure off-circuit SSOT: [`crate::distro_poseidon`].
 //!
-//! Private note commitment remains on the Orchard/Sinsemilla path.
+//! Private note commitment: [`crate::circuit::note_poseidon_gadget`] (Poseidon-v1).
 
 use group::ff::Field;
 use halo2_gadgets::{

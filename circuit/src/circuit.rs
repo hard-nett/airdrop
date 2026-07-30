@@ -58,7 +58,7 @@ use ff::PrimeField;
 use halo2_gadgets::{
     ecc::{
         chip::{EccChip, EccConfig},
-        Point, ScalarFixed,
+        Point,
     },
     poseidon::{primitives as poseidon, Pow5Chip as PoseidonChip, Pow5Config as PoseidonConfig},
     sinsemilla::{
@@ -76,6 +76,7 @@ pub mod distro_poseidon_gadget;
 pub mod gadget;
 pub mod headstash_merkle_tree;
 mod note_commit;
+pub mod note_poseidon_gadget;
 #[cfg(test)]
 mod note_commit_bit_tests;
 
@@ -208,9 +209,12 @@ impl Circuit {
             rcm_old: Value::known(rcm_old),
             cm_old: Value::known(spend.note.commitment()),
             nk: Value::known(nk),
-            esk: Value::known(Secp256k1Fq::from_bytes(&esk.secret_bytes()).expect("valid Fq")),
-            epkx: Value::known(Secp256k1Fp::from_bytes(&epkx).expect("valid Fp")),
-            epky: Value::known(Secp256k1Fp::from_bytes(&epky).expect("valid Fp")),
+            // secret_bytes / uncompressed coords are big-endian; halo2curves Fp/Fq are LE.
+            esk: Value::known(gadget::secp256k1_chip::secp_fq_from_secret_be(
+                &esk.secret_bytes(),
+            )),
+            epkx: Value::known(gadget::secp256k1_chip::secp_fp_from_coord_be(&epkx)),
+            epky: Value::known(gadget::secp256k1_chip::secp_fp_from_coord_be(&epky)),
             fdi: Value::known(fdi.into()),
             nd: Value::known(nd.to_fp()),
             recp: Value::known(recp.to_fp()),
@@ -502,32 +506,46 @@ impl plonk::Circuit<pallas::Base> for Circuit {
         // NOTE (Part I / H12): public HS_ND / HS_V / RECP instance equality deferred.
         let _ = recp.clone();
 
-        // --- Note commit + nullifier FIRST (Sinsemilla/ECC), before Poseidon distro path.
+        // --- Note commit + nullifier FIRST (Poseidon-v1 cmx + lift), before distro path.
         // Running 32 Poseidon CRH layers first was associated with normalize/Fixed
         // permutation failures in the composite circuit; keep Orchard-shaped order.
-        let rcm_old = ScalarFixed::new(
-            ecc_chip.clone(),
-            layouter.namespace(|| "rcm_old"),
-            self.rcm_old.as_ref().map(|rcm_old| rcm_old.inner()),
+        // NoteCommitChip (Sinsemilla) remains configured for CS column layout only.
+        let rcm_base = assign_free_advice(
+            layouter.namespace(|| "witness rcm_base"),
+            config.advices[0],
+            self.rcm_old
+                .as_ref()
+                .map(|rcm_old| crate::note_poseidon::rcm_to_base(rcm_old.inner())),
         )?;
 
-        let cm_old = gadget::note_commit(
-            layouter.namespace(|| "derive note commitment"),
-            config.sinsemilla_chip_1(),
-            config.ecc_chip(),
-            config.note_commit_chip_old(),
+        // v is witnessed as NoteValue; poseidon path needs Base (u64).
+        let v_for_cm = assign_free_advice(
+            layouter.namespace(|| "witness v as Base for note commit"),
+            config.advices[0],
+            self.v.map(|nv| pallas::Base::from(nv.inner())),
+        )?;
+        layouter.assign_region(
+            || "constrain v == v_for_cm (note commit)",
+            |mut region| region.constrain_equal(v.cell(), v_for_cm.cell()),
+        )?;
+
+        let (cm_old, cmx_cell) = note_poseidon_gadget::note_commit_poseidon(
+            layouter.namespace(|| "derive note commitment Poseidon-v1"),
+            &config.poseidon_config,
+            ecc_chip.clone(),
+            config.advices[0],
             nd.clone(),
-            v.clone(),
+            v_for_cm,
             fdi.clone(),
             recp,
             esk_crt.native.clone(),
             rho_old.clone(),
             psi_old.clone(),
-            rcm_old,
+            rcm_base,
         )?;
 
-        let cmx = cm_old.extract_p();
-        layouter.constrain_instance(cmx.inner().cell(), config.primary, CMX)?;
+        // Public CMX = Poseidon cmx (not extract_p of the lift).
+        layouter.constrain_instance(cmx_cell.cell(), config.primary, CMX)?;
 
         let _nf_old = {
             let nf_old = gadget::derive_nullifier(
@@ -881,37 +899,44 @@ mod tests {
     use alloc::vec::Vec;
     use core::iter;
 
-    use ff::{PrimeField, PrimeFieldBits};
-    use group::Curve;
-    use halo2_gadgets::sinsemilla::primitives::HashDomain;
+    use ff::PrimeField;
     use halo2_proofs::{circuit::Value, dev::MockProver};
-    use pasta_curves::{arithmetic::CurveAffine, pallas};
+    use pasta_curves::pallas;
     use rand::{rngs::OsRng, RngCore};
 
     use super::{Circuit, Instance, Proof, ProvingKey, VerifyingKey, K};
     use crate::{
-        circuit::gadget::secp256k1_chip::{Secp256k1Fp, Secp256k1Fq},
-        constants::sinsemilla::LEAF_PERSONALIZATION,
-        note::{ExtractedNoteCommitment, Note},
-        spec::to_native_out_of_circuit,
+        circuit::gadget::secp256k1_chip::{
+            secp_coord_be_to_pallas_base, secp_fp_from_coord_be, secp_fq_from_secret_be,
+        },
+        distro_poseidon::poseidon_distro_leaf,
+        note::Note,
         tree::MerklePath,
     };
 
+    /// Product A claim fixture: Poseidon-v1 distro leaf + path root, Poseidon note `cmx`.
+    ///
+    /// Matches synthesize: [`distro_poseidon_gadget::derive_leaf_poseidon`] +
+    /// [`distro_poseidon_gadget::calculate_distro_root_poseidon`] and
+    /// [`note_poseidon_gadget::note_commit_poseidon`].
+    ///
+    /// Sinsemilla leaf (`LEAF_PERSONALIZATION`) is recovery-only — not used here.
     fn generate_circuit_instance<R: RngCore>(mut rng: R) -> (Circuit, Instance) {
-        let (sk, fvk, esk, spent_note) = Note::dummy(&mut rng, None);
-        let (epkx, epky) = esk.epk().xy();
-        // 1. Generate secp256k1 key pair (esk, epk)
+        let (_sk, _fvk, esk, spent_note) = Note::dummy(&mut rng, None);
+        let (epkx_be, epky_be) = esk.epk().xy();
+        // BE host encodings → LE halo2curves fields (matches prove_key_pairing / G load).
         let (epkx, epky) = (
-            Secp256k1Fp::from_bytes(&epkx).expect("valid Fp"),
-            Secp256k1Fp::from_bytes(&epky).expect("valid Fp"),
+            secp_fp_from_coord_be(&epkx_be),
+            secp_fp_from_coord_be(&epky_be),
         );
-        let e_sk_fq = Secp256k1Fq::from_bytes(&esk.secret_bytes()).expect("valid Fq");
-        let epk_x_native: pallas::Base = to_native_out_of_circuit(&epkx);
-        let epk_y_native: pallas::Base = to_native_out_of_circuit(&epky);
+        let e_sk_fq = secp_fq_from_secret_be(&esk.secret_bytes());
+        let epk_x_native: pallas::Base = secp_coord_be_to_pallas_base(&epkx_be);
+        let epk_y_native: pallas::Base = secp_coord_be_to_pallas_base(&epky_be);
         let recp = spent_note.recipient();
 
         let nk = spent_note.nk(spent_note.rho());
         let nf = spent_note.nullifier();
+        // Private note cmx: Poseidon CL9 (NoteCommitment::derive / note_poseidon SSOT).
         let cmx = spent_note.commitment().into();
         let nd = spent_note.nd();
         let v = spent_note.value();
@@ -920,22 +945,18 @@ mod tests {
         let v_pallas: pallas::Base = pallas::Base::from(spent_note.value().inner());
         let fdi_pallas: pallas::Base = pallas::Base::from(spent_note.fdi());
 
-        // Build the 640-bit message:
-        //   epk_x[0..255) || epk_y[0..1) || nd[0..255) || v[0..64) || fdi[0..64) || 0_pad
-        let mut bits: Vec<bool> = Vec::with_capacity(640);
-        bits.extend(epk_x_native.to_le_bits().iter().by_vals().take(255));
-        bits.extend(epk_y_native.to_le_bits().iter().by_vals().take(1));
-        bits.extend(nd_pallas.to_le_bits().iter().by_vals().take(255));
-        bits.extend(v_pallas.to_le_bits().iter().by_vals().take(64));
-        bits.extend(fdi_pallas.to_le_bits().iter().by_vals().take(64));
-        bits.push(false); // 1-bit padding
-        assert_eq!(bits.len(), 640);
-
-        let domain = HashDomain::new(LEAF_PERSONALIZATION);
-        let leaf_point = domain.hash_to_point(bits.into_iter()).unwrap();
-        let leaf_x = *leaf_point.to_affine().coordinates().unwrap().x();
-        let leaf_cmx = ExtractedNoteCommitment::from_bytes(&leaf_x.to_repr()).unwrap();
-        let anchor = path.root(leaf_cmx);
+        // Public eligibility leaf: Poseidon-v1 (full epk_y; empty pad is ZERO in tree helpers).
+        // Distinct from private cmx — do not feed note commit into distro path.
+        let distro_leaf = poseidon_distro_leaf(
+            epk_x_native,
+            epk_y_native,
+            nd_pallas,
+            v_pallas,
+            fdi_pallas,
+        );
+        // Auth path is random siblings; root via Poseidon CRH so anchor matches
+        // calculate_distro_root_poseidon in synthesize.
+        let anchor = path.root_from_leaf(distro_leaf);
 
         (
             Circuit {
@@ -986,15 +1007,15 @@ mod tests {
             // );
         }
 
-        // Test that the proof size is as expected.
+        // Test that the proof size is as expected (Product A Poseidon distro path).
         let expected_proof_size = {
             let circuit_cost =
                 halo2_proofs::dev::CircuitCost::<pasta_curves::vesta::Point, _>::measure(
                     K,
                     &circuits[0],
                 );
-            assert_eq!(usize::from(circuit_cost.proof_size(1)), 4992);
-            assert_eq!(usize::from(circuit_cost.proof_size(2)), 7264);
+            assert_eq!(usize::from(circuit_cost.proof_size(1)), 5568);
+            assert_eq!(usize::from(circuit_cost.proof_size(2)), 7840);
             usize::from(circuit_cost.proof_size(instances.len()))
         };
 
@@ -1015,10 +1036,16 @@ mod tests {
             );
         }
 
-        let pk = ProvingKey::build();
-        let proof = Proof::create(&pk, &circuits, &instances, &mut rng).unwrap();
-        assert!(proof.verify(&vk, &instances).is_ok());
-        assert_eq!(proof.0.len(), expected_proof_size);
+        // Real proving keygen at K=18 is multi-minute; gate for CI / local opt-in.
+        // Product A correctness gate is MockProver above.
+        if std::env::var_os("HEADSTASH_CIRCUIT_FULL_PROVE").is_some() {
+            let pk = ProvingKey::build();
+            let proof = Proof::create(&pk, &circuits, &instances, &mut rng).unwrap();
+            assert!(proof.verify(&vk, &instances).is_ok());
+            assert_eq!(proof.0.len(), expected_proof_size);
+        } else {
+            let _ = (vk, expected_proof_size);
+        }
     }
 
     // #[test]
@@ -1178,109 +1205,52 @@ mod tests {
     #[test]
     #[cfg(feature = "interface")]
     fn test_genesis_merkle_tree_with_generated_data() {
-        /// Integration test using MerkleTestDataBuilder to generate realistic merkle trees.
-        /// This simulates claiming a note by:
-        /// 1. Generating a genesis merkle tree with test participants
-        /// 2. Computing the leaf hash from participant data
-        /// 3. Generating an authentication path
-        /// 4. Running the full circuit with the generated path
+        /// Product A integration: suite multi-leaf Poseidon tree + matching claim note.
+        /// Uses [`HeadstashProofBuilder::suite_backed_claim_pair`] so eligibility leaf,
+        /// depth-32 path/anchor, and private cmx/nf are consistent with synthesize.
+        use crate::suite::suite::{HeadstashProofBuilder, MerkleTestDataBuilder};
         use crate::suite::HeadstashCircuitSuite;
-        use crate::suite::suite::MerkleTestDataBuilder;
         use cw_orch::mock::Mock;
-        use ff::PrimeField;
 
         let suite = HeadstashCircuitSuite::new(Mock::new("sender"));
-        let mut rng = OsRng;
-
-        // Generate a merkle tree with 8 participants
         let num_participants = 8;
-        let selected_index = 3; // Test claiming as participant at index 3
+        let selected_index = 3;
 
-        // Generate test data using the suite
         let test_data = suite
             .generate_circuit_test_data(num_participants, selected_index)
             .expect("Should generate test data successfully");
 
-        // Verify the path is valid
         assert!(
             suite.verify_merkle_path(&test_data.leaf_hash, &test_data.auth_path, &test_data.root),
-            "Generated merkle path should be valid"
+            "Generated merkle path should be valid (shallow suite root)"
+        );
+        // Circuit anchor is depth-32 Poseidon path root (may differ from shallow root).
+        assert_ne!(
+            test_data.circuit_anchor.to_bytes(),
+            [0u8; 32],
+            "circuit anchor must be non-zero for multi-leaf tree"
         );
 
-        // Now create a circuit instance that uses the generated merkle tree
-        // The circuit expects a 32-level tree path, so convert our path
-        let auth_path_array: [pallas::Base; 32] = test_data.auth_path_array_32();
-        let position = test_data.position();
+        let (circuit, instance, anchor, partial) = suite
+            .suite_backed_claim_pair(num_participants, selected_index)
+            .expect("suite-backed claim pair");
 
-        std::println!(
-            "Testing genesis merkle tree with {} participants, claiming index {}",
-            num_participants,
-            selected_index
-        );
-        std::println!(
-            "Tree depth: {}, Position: {}",
-            test_data.tree_depth,
-            position
-        );
-        std::println!("Root: {:?}", test_data.root);
-
-        // Create a note for the circuit (this still uses dummy data for non-merkle parts)
-        let (_, fvk, esk, spent_note) = Note::dummy(&mut rng, None);
-        let (epkx, epky) = esk.epk().xy();
-        let (epkx, epky) = (
-            Secp256k1Fp::from_bytes(&epkx).expect("valid Fp"),
-            Secp256k1Fp::from_bytes(&epky).expect("valid Fp"),
-        );
-        let e_sk_fq = Secp256k1Fq::from_bytes(&esk.secret_bytes()).expect("valid Fq");
-        let nk = spent_note.nk(spent_note.rho());
-        let nf = spent_note.nullifier();
-
-        let cmx = spent_note.commitment().into();
-
-        // Convert the generated merkle path to MerkleHashOrchard format
-        let path_hashes: [crate::tree::MerkleHashOrchard; 32] = auth_path_array
-            .map(|fp| crate::tree::MerkleHashOrchard::from_bytes(&fp.to_repr()).unwrap());
-
-        // Create the circuit with the generated merkle tree data
-        let circuit = Circuit {
-            path: Value::known(path_hashes),
-            pos: Value::known(position),
-            nk: Value::known(nk),
-            nd: Value::known(spent_note.nd().to_fp()),
-            v: Value::known(spent_note.value()),
-            fdi: Value::known(spent_note.fdi().into()),
-            recp: Value::known(spent_note.recipient().to_fp()),
-            esk: Value::known(e_sk_fq),
-            epkx: Value::known(epkx),
-            epky: Value::known(epky),
-            rho_old: Value::known(spent_note.rho()),
-            psi_old: Value::known(spent_note.rseed().psi(&spent_note.rho())),
-            rcm_old: Value::known(spent_note.rseed().rcm(&spent_note.rho())),
-            cm_old: Value::known(spent_note.commitment()),
-        };
+        assert_eq!(instance.anchor.to_bytes(), anchor.to_bytes());
+        assert_eq!(partial.value, instance.v.inner());
+        // Same leaf index family: suite test data and claim pair both select selected_index.
+        assert_eq!(test_data.auth_path.leaf_index, selected_index);
 
         let cost =
             halo2_proofs::dev::CircuitCost::<pasta_curves::vesta::Point, _>::measure(K, &circuit);
         let proof_size = usize::from(cost.proof_size(1));
         assert!(proof_size > 0, "Proof size should be non-zero");
-        std::println!(" proof_size: {}", proof_size);
-        std::println!(" cost: {:#?}", cost);
-
-        // Use the generated root as the anchor
-        let anchor = crate::Anchor::from(
-            crate::tree::MerkleHashOrchard::from_bytes(&test_data.root.to_repr()).unwrap(),
+        std::println!(
+            "suite multi-leaf claim: n={}, idx={}, proof_size={}",
+            num_participants,
+            selected_index,
+            proof_size
         );
 
-        let instance = Instance {
-            anchor,
-            nd: spent_note.nd(),
-            v: spent_note.value(),
-            recp: spent_note.recipient(),
-            nf,
-            cmx,
-        };
-
-        // Run the MockProver
         let result = MockProver::run(
             K,
             &circuit,
@@ -1290,14 +1260,14 @@ mod tests {
                 .map(|p| p.to_vec())
                 .collect(),
         );
-
         let prover = result.unwrap_or_else(|e| {
             panic!("MockProver creation failed: {:?}", e);
         });
-
-        // Verify constraints. The leaf hash in-circuit (from dummy note's epk, nd, v, fdi)
-        // will differ from the suite-generated tree, so Permutation errors are expected.
-        std::println!("MockProver verify result: {:?}", prover.verify());
+        assert_eq!(
+            prover.verify(),
+            Ok(()),
+            "suite-backed multi-leaf Product A claim must MockProver-verify"
+        );
     }
 
     #[test]

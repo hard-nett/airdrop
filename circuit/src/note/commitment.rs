@@ -1,15 +1,10 @@
-use core::iter;
-use group::ff::{PrimeField, PrimeFieldBits};
 use pasta_curves::pallas;
 use subtle::{ConstantTimeEq, CtOption};
 
 use crate::{
     address::RecpAddr,
-    constants::{
-        fixed_bases::NOTE_COMMITMENT_PERSONALIZATION, L_ORCHARD_BASE, L_VALUE,
-    },
     keys::EligibleSk,
-    spec::extract_p,
+    note_poseidon::{lift_note_cmx, poseidon_note_cmx, rcm_to_base},
     value::NoteValue,
 };
 
@@ -22,22 +17,37 @@ impl NoteCommitTrapdoor {
     }
 }
 
-/// A commitment to a note.
+/// A commitment to a note (Poseidon-v1 + lift).
+///
+/// - **`cmx`**: Poseidon digest (public extracted commitment).
+/// - **`point`**: `[cmx] · NoteCommitR` for nullifier ECC continuity (ADR option A).
 #[derive(Clone, Debug)]
-pub struct NoteCommitment(pub(super) pallas::Point);
+pub struct NoteCommitment {
+    pub(super) point: pallas::Point,
+    pub(super) cmx: pallas::Base,
+}
 
 impl NoteCommitment {
+    /// Curve point form used by nullifier derivation.
     pub(crate) fn inner(&self) -> pallas::Point {
-        self.0
+        self.point
+    }
+
+    /// Poseidon-v1 note commitment digest (`cmx`).
+    pub(crate) fn cmx(&self) -> pallas::Base {
+        self.cmx
     }
 }
 
 impl NoteCommitment {
-    /// $NoteCommit^Orchard$.
+    /// Poseidon-v1 private note commitment (ADR-POSEIDON-NOTE-COMMIT).
     ///
-    /// Defined in [Zcash Protocol Spec § 5.4.8.4: Sinsemilla commitments][concretesinsemillacommit].
+    /// ```text
+    /// cmx = Poseidon_CL<9>(tag, nd, v, fdi, recp, esk, rho, psi, rcm_base)
+    /// cm_point = [cmx] · NoteCommitR
+    /// ```
     ///
-    /// [concretesinsemillacommit]: https://zips.z.cash/protocol/nu5.pdf#concretesinsemillacommit
+    /// `rcm_base` encoding: [`crate::note_poseidon::rcm_to_base`].
     pub(super) fn derive(
         nd: pallas::Base,
         v: NoteValue,
@@ -50,42 +60,18 @@ impl NoteCommitment {
     ) -> CtOption<Self> {
         let esk = esk.derive_pallas();
         let recp = recp.to_fp();
+        let rcm_base = rcm_to_base(rcm.0);
+        let v_base = pallas::Base::from(v.inner());
 
-        // Bit packing MUST match the in-circuit note_commit gadget pieces
-        // (and the MockProver expected hash in note_commit::tests::note_commit):
-        //
-        //   nd[0..255) || v[0..64) || fdi[0..64) || recp[0..255) ||
-        //   esk[0..255) || rho[0..255) || psi[0..255) || 0_pad[0..2)
-        //
-        // Piece `l` also contributes 7 pad bits in the MessagePiece path; the
-        // free-form bitstring uses a 2-bit pad that is equivalent under the
-        // Sinsemilla word padding used by both CommitDomain implementations.
-        // Keep this packing identical to the circuit unit test SSOT.
-        let domain = sinsemilla::CommitDomain::new(NOTE_COMMITMENT_PERSONALIZATION);
-        domain
-            .commit(
-                iter::empty()
-                    .chain(nd.to_le_bits().iter().by_vals().take(L_ORCHARD_BASE))
-                    .chain(v.to_le_bits().iter().by_vals().take(L_VALUE))
-                    .chain(fdi.to_le_bits().iter().by_vals().take(L_VALUE))
-                    .chain(recp.to_le_bits().iter().by_vals().take(L_ORCHARD_BASE))
-                    .chain(esk.to_le_bits().iter().by_vals().take(L_ORCHARD_BASE))
-                    .chain(rho.to_le_bits().iter().by_vals().take(L_ORCHARD_BASE))
-                    .chain(psi.to_le_bits().iter().by_vals().take(L_ORCHARD_BASE))
-                    .chain(
-                        pallas::Base::zero()
-                            .to_le_bits()
-                            .iter()
-                            .by_vals()
-                            .take(2),
-                    ),
-                &rcm.0,
-            )
-            .map(NoteCommitment)
+        let cmx = poseidon_note_cmx(nd, v_base, fdi, recp, esk, rho, psi, rcm_base);
+        let point = lift_note_cmx(cmx);
+        CtOption::new(NoteCommitment { point, cmx }, 1.into())
     }
 }
 
-/// The x-coordinate of the commitment to a note.
+/// The public note commitment digest (`cmx`).
+///
+/// Under Poseidon-v1 this is the Poseidon output itself (not `extract_p` of a Sinsemilla point).
 #[derive(Copy, Clone, Debug)]
 pub struct ExtractedNoteCommitment(pub(super) pallas::Base);
 
@@ -108,7 +94,7 @@ impl ExtractedNoteCommitment {
 
 impl From<NoteCommitment> for ExtractedNoteCommitment {
     fn from(cm: NoteCommitment) -> Self {
-        ExtractedNoteCommitment(extract_p(&cm.0))
+        ExtractedNoteCommitment(cm.cmx)
     }
 }
 
@@ -138,69 +124,69 @@ impl PartialEq for ExtractedNoteCommitment {
 
 impl Eq for ExtractedNoteCommitment {}
 
+// Re-export PrimeField for from_bytes.
+use ff::PrimeField;
+
 #[cfg(test)]
 mod packing_tests {
     use super::*;
     use crate::note::Note;
-    use ff::PrimeFieldBits;
+    use crate::note_poseidon::{lift_note_cmx, poseidon_note_cmx, rcm_to_base};
+    use group::Curve;
     use rand::rngs::OsRng;
 
-    fn gadget_style_commit(
-        nd: pallas::Base,
-        v: NoteValue,
-        fdi: pallas::Base,
-        recp: pallas::Base,
-        esk: pallas::Base,
-        rho: pallas::Base,
-        psi: pallas::Base,
-        rcm: pallas::Scalar,
-    ) -> pallas::Point {
-        let domain = sinsemilla::CommitDomain::new(NOTE_COMMITMENT_PERSONALIZATION);
-        domain
-            .commit(
-                iter::empty()
-                    .chain(nd.to_le_bits().iter().by_vals().take(L_ORCHARD_BASE))
-                    .chain(v.to_le_bits().iter().by_vals().take(L_VALUE))
-                    .chain(fdi.to_le_bits().iter().by_vals().take(L_VALUE))
-                    .chain(recp.to_le_bits().iter().by_vals().take(L_ORCHARD_BASE))
-                    .chain(esk.to_le_bits().iter().by_vals().take(L_ORCHARD_BASE))
-                    .chain(rho.to_le_bits().iter().by_vals().take(L_ORCHARD_BASE))
-                    .chain(psi.to_le_bits().iter().by_vals().take(L_ORCHARD_BASE))
-                    .chain(
-                        pallas::Base::zero()
-                            .to_le_bits()
-                            .iter()
-                            .by_vals()
-                            .take(2),
-                    ),
-                &rcm,
-            )
-            .unwrap()
-    }
-
     #[test]
-    fn derive_matches_gadget_style_for_dummy_note() {
+    fn derive_matches_poseidon_ssot_for_dummy_note() {
         let mut rng = OsRng;
         let (_sk, _fvk, esk, note) = Note::dummy(&mut rng, None);
         let rho = note.rho();
         let psi = note.rseed().psi(&rho);
         let rcm = note.rseed().rcm(&rho);
-        let derived = note.commitment().inner();
-        let via_gadget = gadget_style_commit(
+        let derived = note.commitment();
+
+        let rcm_base = rcm_to_base(rcm.inner());
+        let cmx = poseidon_note_cmx(
             note.nd().to_fp(),
-            note.value(),
+            pallas::Base::from(note.value().inner()),
             pallas::Base::from(note.fdi()),
             note.recipient().to_fp(),
             esk.derive_pallas(),
             rho.into_inner(),
             psi,
-            rcm.inner(),
+            rcm_base,
+        );
+        let point = lift_note_cmx(cmx);
+
+        assert_eq!(
+            derived.cmx(),
+            cmx,
+            "NoteCommitment::derive cmx must match poseidon_note_cmx SSOT"
         );
         assert_eq!(
-            extract_p(&derived),
-            extract_p(&via_gadget),
-            "NoteCommitment::derive must match gadget-style bitstring"
+            derived.inner().to_affine(),
+            point.to_affine(),
+            "NoteCommitment::derive point must match lift_note_cmx"
         );
+        assert_eq!(
+            ExtractedNoteCommitment::from(derived).inner(),
+            cmx,
+            "ExtractedNoteCommitment must be Poseidon cmx (not extract_p of lift)"
+        );
+    }
+
+    #[test]
+    fn rcm_base_encoding_documented() {
+        // Small scalars: identity via from_repr.
+        let small = pallas::Scalar::from(99u64);
+        assert_eq!(rcm_to_base(small), pallas::Base::from(99u64));
+
+        // Random rseed-derived rcm still yields a stable base word.
+        let mut rng = OsRng;
+        let (_sk, _fvk, _esk, note) = Note::dummy(&mut rng, None);
+        let rcm = note.rseed().rcm(&note.rho());
+        let a = rcm_to_base(rcm.inner());
+        let b = rcm_to_base(rcm.inner());
+        assert_eq!(a, b);
     }
 
     #[test]
@@ -211,53 +197,9 @@ mod packing_tests {
         let via_derive = esk.derive_pallas();
         let via_esk_to_base = esk_to_base(&esk);
         assert_eq!(via_derive, via_esk_to_base);
-        // Guest-safe reduction: LE secret bytes → BigUint → pallas (no halo2-base).
-        let sk_big = num_bigint::BigUint::from_bytes_le(&esk.secret_bytes());
-        let via_big = biguint_to_fe_simple(&sk_big);
+        // Guest-safe reduction: BE secret_bytes → BigUint → pallas (matches Fq LE limbs).
+        let sk_big = num_bigint::BigUint::from_bytes_be(&esk.secret_bytes());
+        let via_big = crate::spec::biguint_to_fe_simple(&sk_big);
         assert_eq!(via_derive, via_big, "CRT-style native must match derive_pallas");
-    }
-
-    fn pad7_vs_pad2() {
-        use group::ff::Field;
-        let nd = pallas::Base::from(7u64);
-        let v = NoteValue::from(1_000_000u64);
-        let fdi = pallas::Base::from(3u64);
-        let recp = pallas::Base::from(9u64);
-        let esk = pallas::Base::from(11u64);
-        let rho = pallas::Base::from(13u64);
-        let psi = pallas::Base::from(15u64);
-        let rcm = pallas::Scalar::from(17u64);
-        let domain = sinsemilla::CommitDomain::new(NOTE_COMMITMENT_PERSONALIZATION);
-        let pad2 = domain
-            .commit(
-                iter::empty()
-                    .chain(nd.to_le_bits().iter().by_vals().take(L_ORCHARD_BASE))
-                    .chain(v.to_le_bits().iter().by_vals().take(L_VALUE))
-                    .chain(fdi.to_le_bits().iter().by_vals().take(L_VALUE))
-                    .chain(recp.to_le_bits().iter().by_vals().take(L_ORCHARD_BASE))
-                    .chain(esk.to_le_bits().iter().by_vals().take(L_ORCHARD_BASE))
-                    .chain(rho.to_le_bits().iter().by_vals().take(L_ORCHARD_BASE))
-                    .chain(psi.to_le_bits().iter().by_vals().take(L_ORCHARD_BASE))
-                    .chain(std::iter::repeat(false).take(2)),
-                &rcm,
-            )
-            .unwrap();
-        let pad7 = domain
-            .commit(
-                iter::empty()
-                    .chain(nd.to_le_bits().iter().by_vals().take(L_ORCHARD_BASE))
-                    .chain(v.to_le_bits().iter().by_vals().take(L_VALUE))
-                    .chain(fdi.to_le_bits().iter().by_vals().take(L_VALUE))
-                    .chain(recp.to_le_bits().iter().by_vals().take(L_ORCHARD_BASE))
-                    .chain(esk.to_le_bits().iter().by_vals().take(L_ORCHARD_BASE))
-                    .chain(rho.to_le_bits().iter().by_vals().take(L_ORCHARD_BASE))
-                    .chain(psi.to_le_bits().iter().by_vals().take(L_ORCHARD_BASE))
-                    .chain(std::iter::repeat(false).take(7)),
-                &rcm,
-            )
-            .unwrap();
-        // For low-weight fields, trailing zero pads may not change the Sinsemilla digest
-        // (word padding absorbs zeros). Keep both packings documented.
-        let _ = (pad2, pad7);
     }
 }

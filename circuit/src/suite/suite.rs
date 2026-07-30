@@ -1,8 +1,17 @@
-//! main suite for headstash
+//! Main suite for Headstash **Product A** (private distro + claim).
 //!
-//! This module provides the `HeadstashCircuitSuite` which implements various traits
-//! for headstash operations including merkle tree generation, test data building,
-//! and circuit key management.
+//! # Designed usage (default)
+//!
+//! | Surface | Hash | Domain |
+//! |---------|------|--------|
+//! | Eligibility / distro Merkle | **Poseidon-v1** | `distro_hash_domain = "poseidon-v1"` |
+//! | Private note `cmx` | **Poseidon CL9** | `terp-hs-note-commit-v1` |
+//! | Sinsemilla leaf / CRH | **Recovery only** | `*_sinsemilla_legacy` APIs |
+//!
+//! Default builders (`gen_headstash_tree`, `derive_leaf`, `merkle_crh`,
+//! `generate_inclusion_test_case`, claim pre-inputs) use Poseidon. Sinsemilla
+//! exports remain for historical root recovery — do not register new drops under
+//! `sinsemilla-legacy`.
 use alloc::boxed::Box;
 
 use cw_orch::environment::ZkCwEnv;
@@ -66,11 +75,37 @@ pub struct TerpHeadstashConfig {
 #[derive(Debug, Default)]
 pub struct HeadstashCircuitSuite;
 
+/// Offline keygen: write Product A store-circuit blob for zkvm upload.
+///
+/// No chain / daemon required. Layout via [`crate::circuit::ProvingKey::build_and_write`]:
+/// `[params][cs][vk][CircuitFooter]` — footer `i = 6`, Pasta, K=18.
+pub fn build_headstash_keys_to(
+    vk_path: impl AsRef<std::path::Path>,
+) -> Result<crate::circuit::ProvingKey, BoxError> {
+    let path = vk_path.as_ref();
+    if let Some(parent) = path.parent() {
+        if !parent.as_os_str().is_empty() {
+            fs::create_dir_all(parent)?;
+        }
+    }
+    eprintln!("headstash keygen → {}", path.display());
+    eprintln!(
+        "  Product A: Poseidon distro + Poseidon note cmx; instance width i=6; K={}",
+        crate::circuit::K
+    );
+    let pk = crate::circuit::ProvingKey::build_and_write(path.to_path_buf())?;
+    eprintln!("  wrote store-circuit blob (params||cs||vk||footer)");
+    Ok(pk)
+}
+
 impl<Chain: ZkCwEnv> HeadstashCircuitSuite<Chain> {
+    /// Keygen for Product A claim circuit + write **store-circuit** blob for zkvm upload.
+    ///
+    /// Writes to the cw-orch [`CircuitUploadable::vk_path`] (default under
+    /// `artifacts/`). Prefer [`build_headstash_keys_to`] for offline keygen without a live chain.
     pub fn build_keys(&self) -> Result<crate::circuit::ProvingKey, BoxError> {
         use cw_orch::prelude::CircuitUploadable;
-        let pk = crate::circuit::ProvingKey::build_and_write(Self::vk_path())?;
-        Ok(pk)
+        build_headstash_keys_to(Self::vk_path())
     }
 }
 
@@ -95,16 +130,14 @@ pub trait HeadstashBitwiseInstance {
     /// from a secret key. Computes `epk = esk * G` on secp256k1, then reduces
     /// both coordinates mod pallas_p to match the in-circuit `.native` values.
     fn derive_epk_natives(sk: [u8; 32]) -> (Fp, Fp) {
-        use crate::spec::to_native_out_of_circuit;
-        use halo2_base::halo2_proofs::halo2curves::secp256k1::Fp as Secp256k1Fp;
+        use crate::circuit::gadget::secp256k1_chip::secp_coord_be_to_pallas_base;
         let secret_key = secp256k1::SecretKey::from_byte_array(sk).expect("valid secret key");
         let esk = EligibleSk::from(secret_key);
         let (epk_x_bytes, epk_y_bytes) = esk.epk().xy();
-        let epk_x = Secp256k1Fp::from_bytes(&epk_x_bytes.into()).expect("valid Fp");
-        let epk_y = Secp256k1Fp::from_bytes(&epk_y_bytes.into()).expect("valid Fp");
+        // Uncompressed coords are big-endian; CRT natives use the BE integer mod pallas.
         (
-            to_native_out_of_circuit(&epk_x),
-            to_native_out_of_circuit(&epk_y),
+            secp_coord_be_to_pallas_base(&epk_x_bytes),
+            secp_coord_be_to_pallas_base(&epk_y_bytes),
         )
     }
 
@@ -163,7 +196,11 @@ pub trait HeadstashBitwiseInstance {
     }
 }
 
-/// `HeadstashSinsemillaTree`: all functions powering creating of headstash distribution merkle tree instances
+/// Public inclusion / distro tree helpers for Headstash Product A.
+///
+/// Historical name retained for trait stability. **Defaults are Poseidon-v1**;
+/// methods named `*_sinsemilla_legacy` are recovery-only (Orchard-family
+/// personalizations). New drops must use Poseidon-v1 + `distro_hash_domain = "poseidon-v1"`.
 pub trait HeadstashSinsemillaTree: HeadstashBitwiseInstance {
     /// `get_input_path`: cli helper to retrieve input path
     fn get_input_path(&self) -> Result<String, BoxError> {
@@ -763,10 +800,21 @@ pub trait HeadstashSinsemillaTree: HeadstashBitwiseInstance {
         Ok(())
     }
 
-    /// TODO: create default notes of a specific public key allocation for a given headstash instance.
-    /// retrieves the entire tree from the headstash-API client, and then generate our notes 100% client side
+    /// Client-side “my notes” export from a published tree (IPFS/API).
+    ///
+    /// **Product A status:** not yet wired to a live Headstash API client.
+    /// Use offline suite builders instead:
+    /// - tree: [`HeadstashSinsemillaTree::gen_headstash_tree_poseidon_v1`]
+    /// - claim fixtures: [`HeadstashProofBuilder::suite_backed_claim_pair`]
+    /// - notes JSON: [`Self::create_headstash_notes`] / related suite export paths
     fn gen_headstash_my_notes(&self, input: PathBuf, output: PathBuf) -> Result<(), BoxError> {
-        todo!()
+        let _ = (input, output);
+        Err(
+            "gen_headstash_my_notes: not implemented for live API — use \
+             gen_headstash_tree_poseidon_v1 + suite_backed_claim_pair / create_headstash_notes \
+             for Product A offline fixtures"
+                .into(),
+        )
     }
 
     /// Find the first note matching token & amount, return its fdi
@@ -941,6 +989,22 @@ impl MerkleAuthPath {
     }
 }
 
+/// Poseidon-v1 **public eligibility** leaf from a fully formed claim [`Note`].
+///
+/// Uses the same epk native packing as suite leaf builders (BE coords → pallas).
+/// Distinct from private note `cmx` ([`Note::commitment`]).
+pub fn poseidon_distro_leaf_from_note(note: &Note) -> Fp {
+    use crate::circuit::gadget::secp256k1_chip::secp_coord_be_to_pallas_base;
+    let (epk_x_be, epk_y_be) = note.elig_sk().epk().xy();
+    poseidon_distro_leaf(
+        secp_coord_be_to_pallas_base(&epk_x_be),
+        secp_coord_be_to_pallas_base(&epk_y_be),
+        note.nd().to_fp(),
+        Fp::from(note.value().inner()),
+        Fp::from(note.fdi()),
+    )
+}
+
 /// Partial / crafted claim note fields (pre-proof JSON + suite fixtures).
 ///
 /// Holds the public-eligibility leaf inputs plus a recipient. Full proofs still
@@ -1002,19 +1066,33 @@ impl PartialClaimNote {
     }
 }
 
-/// Test data formatted for circuit consumption.
+/// Test data formatted for circuit consumption (Product A / Poseidon-v1).
+///
+/// # Shallow vs circuit root
+///
+/// - [`Self::root`] / [`Self::auth_path`] — suite tree depth only (path verify in suite).
+/// - [`Self::circuit_anchor`] / [`Self::circuit_merkle_path`] — depth-32 path with
+///   `ZERO` pad siblings + root via [`MerkleAuthPath::to_circuit_path_and_root_poseidon_v1`].
+///   **These** are what `Circuit::synthesize` recomputes as public `ANCHOR`.
+///
+/// Never feed a shallow suite root into MockProver / on-chain claim as `anchor`
+/// unless the tree was already built at depth 32.
 #[derive(Clone, Debug)]
 pub struct CircuitTestData {
     /// The selected leaf's input data
     pub leaf_data: TestLeafData,
-    /// Computed leaf hash
+    /// Computed Poseidon-v1 leaf hash
     pub leaf_hash: Fp,
-    /// Authentication path
+    /// Authentication path at suite tree depth
     pub auth_path: MerkleAuthPath,
-    /// Expected root
+    /// Shallow suite root (matches `auth_path` depth only)
     pub root: Fp,
-    /// Tree depth
+    /// Tree depth of the suite tree (not necessarily 32)
     pub tree_depth: usize,
+    /// Depth-32 Merkle path for the Halo2 claim circuit
+    pub circuit_merkle_path: MerklePath,
+    /// Depth-32 Poseidon-v1 anchor (public instance / contract root)
+    pub circuit_anchor: Anchor,
 }
 
 impl CircuitTestData {
@@ -1026,6 +1104,11 @@ impl CircuitTestData {
     /// Get position bits as u32.
     pub fn position(&self) -> u32 {
         self.auth_path.position()
+    }
+
+    /// Partial claim note bound to this leaf (eligibility key = `raw_addr`).
+    pub fn partial_claim_note(&self) -> PartialClaimNote {
+        PartialClaimNote::from_test_leaf(&self.leaf_data)
     }
 }
 
@@ -1368,13 +1451,14 @@ pub trait MerkleTestDataBuilder: HeadstashSinsemillaTree {
         (leaves_data, tree, selected_index, path, root)
     }
 
-    /// Generate test data compatible with the circuit's expected format.
+    /// Generate Product A test data for the claim circuit.
     ///
-    /// Returns data in the format needed by `constrain_genesis_inclusion`:
-    /// - epk (as x,y coordinates for secp256k1)
-    /// - nd, v, fdi as field elements
-    /// - path as [pallas::Base; DEPTH] array
-    /// - root as pallas::Base
+    /// Includes both the **shallow** suite path/root (for suite path unit tests)
+    /// and the **depth-32** `circuit_merkle_path` / `circuit_anchor` that match
+    /// `distro_poseidon_gadget::calculate_distro_root_poseidon`.
+    ///
+    /// Prefer [`HeadstashProofBuilder::suite_backed_claim_pair`] when you need a
+    /// full `(Circuit, Instance)` ready for MockProver.
     fn generate_circuit_test_data(
         &self,
         num_leaves: usize,
@@ -1385,6 +1469,8 @@ pub trait MerkleTestDataBuilder: HeadstashSinsemillaTree {
 
         let selected_leaf = &leaves_data[idx];
         let leaf_hash = self.compute_leaf_from_data(selected_leaf)?;
+        let (circuit_merkle_path, circuit_anchor) =
+            path.to_circuit_path_and_root_poseidon_v1(leaf_hash);
 
         Ok(CircuitTestData {
             leaf_data: selected_leaf.clone(),
@@ -1392,6 +1478,8 @@ pub trait MerkleTestDataBuilder: HeadstashSinsemillaTree {
             auth_path: path,
             root,
             tree_depth: tree.depth,
+            circuit_merkle_path,
+            circuit_anchor,
         })
     }
 }
@@ -1473,14 +1561,18 @@ pub struct HeadstashProofBundle {
 /// Trait for building headstash proofs from genesis distribution data.
 /// Optimized for 1-time-spend model (static merkle tree, single claim per note).
 pub trait HeadstashProofBuilder: HeadstashBitwiseInstance + MerkleTestDataBuilder {
-    /// Build SpendInfo from note and authentication path.
+    /// Build SpendInfo from note and suite auth path (Product A / Poseidon-v1).
+    ///
+    /// Pads to depth 32 and uses the **eligibility distro leaf** derived from the
+    /// note (not private `cmx`) so the path matches claim-circuit inclusion.
     fn build_spend_info(
         &self,
         note: &Note,
         fvk: &FullViewingKey,
         auth_path: &MerkleAuthPath,
     ) -> Result<SpendInfo, BoxError> {
-        let merkle_path = auth_path.to_circuit_path();
+        let leaf = poseidon_distro_leaf_from_note(note);
+        let (merkle_path, _anchor) = auth_path.to_circuit_path_and_root_poseidon_v1(leaf);
         SpendInfo::new(fvk.clone(), note.clone(), merkle_path)
             .ok_or_else(|| "Failed to create SpendInfo".into())
     }
@@ -2293,12 +2385,69 @@ mod test {
         assert!(circuit_data.tree_depth > 0);
         assert_eq!(circuit_data.auth_path.leaf_index, 1);
 
-        // Verify the path
+        // Shallow suite path verifies against shallow root.
         assert!(suite.verify_merkle_path(
             &circuit_data.leaf_hash,
             &circuit_data.auth_path,
             &circuit_data.root
         ));
+
+        // Depth-32 circuit path root is the product-facing anchor.
+        let (mp2, anchor2) = circuit_data
+            .auth_path
+            .to_circuit_path_and_root_poseidon_v1(circuit_data.leaf_hash);
+        assert_eq!(
+            circuit_data.circuit_anchor.to_bytes(),
+            anchor2.to_bytes(),
+            "CircuitTestData.circuit_anchor must match to_circuit_path_and_root_poseidon_v1"
+        );
+        assert_eq!(
+            mp2.position(),
+            circuit_data.circuit_merkle_path.position()
+        );
+        // When suite depth < 32, shallow root ≠ circuit anchor (pad layers).
+        if circuit_data.tree_depth < 32 {
+            assert_ne!(
+                circuit_data.circuit_anchor.to_bytes(),
+                circuit_data.root.to_repr(),
+                "shallow suite root must not be used as circuit/on-chain anchor when depth < 32"
+            );
+        }
+
+        let partial = circuit_data.partial_claim_note();
+        assert_eq!(partial.poseidon_leaf(), circuit_data.leaf_hash);
+    }
+
+    #[test]
+    fn test_circuit_test_data_and_suite_backed_shapes() {
+        // Independent OsRng trees share Product A tooling shape, not the same root.
+        let suite = HeadstashCircuitSuite::new(Mock::new("sender"));
+        let data = suite.generate_circuit_test_data(8, 2).unwrap();
+        let (circuit, instance, anchor, partial) =
+            suite.suite_backed_claim_pair(8, 2).unwrap();
+
+        assert_eq!(instance.anchor.to_bytes(), anchor.to_bytes());
+        assert_eq!(instance.to_bytes().len(), 168);
+        assert_eq!(data.auth_path.leaf_index, 2);
+
+        let rebuilt = suite.generate_leaf_data(
+            &partial.esk_bytes,
+            &partial.token,
+            partial.value,
+            partial.fdi,
+        );
+        assert_eq!(
+            partial.poseidon_leaf(),
+            suite.compute_leaf_from_data_poseidon_v1(&rebuilt)
+        );
+        assert_eq!(
+            data.leaf_hash,
+            suite.compute_leaf_from_data_poseidon_v1(&data.leaf_data)
+        );
+        let mut saw = false;
+        circuit.path.map(|_| saw = true);
+        assert!(saw, "suite_backed_claim_pair must assign depth-32 path");
+        assert_ne!(data.circuit_anchor.to_bytes(), [0u8; 32]);
     }
 
     #[test]

@@ -55,9 +55,20 @@ demo-circuit-smoke:
 demo-h1:
         cargo test -p zk-headstash --lib --features "circuit,std,interface" orchard_delta_part_t::h1_valid_claim -- --nocapture
 
-# Keys for zkvm (writes artifacts; long keygen).
+# Keys for zkvm upload (offline keygen → artifacts/; long; no network/mnemonic).
+# Override path: HEADSTASH_VK_PATH=artifacts/headstash_vk.bin
+# Parallel: RAYON_NUM_THREADS=8
 demo-keys:
         cargo run -p zk-test-press --bin cc_headstash --features interface
+
+# Alias: explicit offline-only wording
+demo-keys-offline: demo-keys
+
+# Product A suite+circuit soundness (no full prove): Poseidon fixtures + MockProver smoke filters.
+demo-product-a:
+        cargo test -p zk-headstash --lib --features "circuit,std,interface" -- \
+                note_poseidon distro_poseidon note::commitment suite:: tree:: \
+                orchard_delta_part_t::h2_ orchard_delta_part_t::claim_surface
 
 # ── E2E harness L0 (pure seams + suite re-exports; no Docker / no H1 prove) ──
 # Inventory + E2E-id map: crates/terp-rs/docs/private-bridge/E2E-HARNESS-PLAN.md

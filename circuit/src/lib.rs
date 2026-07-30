@@ -54,9 +54,15 @@ mod spec;
 /// Poseidon-v1 public distribution / inclusion Merkle set (pure helpers).
 ///
 /// See [`distro_poseidon`] and ADR `docs/plans/spectrum/ADR-POSEIDON-DISTRO-TREE.md`.
-/// Private note-commit remains Sinsemilla/Orchard for now.
 #[cfg(feature = "circuit")]
 pub mod distro_poseidon;
+
+/// Poseidon-v1 private note commitment (pure helpers).
+///
+/// See [`note_poseidon`] and ADR `docs/plans/spectrum/ADR-POSEIDON-NOTE-COMMIT.md`.
+/// Replaces Sinsemilla `NoteCommit` for Headstash private notes (lab; not mainnet).
+#[cfg(feature = "circuit")]
+pub mod note_poseidon;
 
 #[cfg(feature = "interface")]
 pub mod suite;

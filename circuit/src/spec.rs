@@ -331,7 +331,9 @@ pub fn i2lebsp<const NUM_BITS: usize>(int: u64) -> [bool; NUM_BITS] {
 /// wasm32 builds stay free of multicore+C-sys graphs. Host circuit chips may use
 /// the CrtInteger path for exact Fq encoding when proving.
 pub(crate) fn esk_to_base(esk: &crate::keys::EligibleSk) -> pallas::Base {
-    let big = num_bigint::BigUint::from_bytes_le(&esk.secret_bytes());
+    // `secp256k1::SecretKey::secret_bytes` is big-endian. Match in-circuit
+    // `Secp256k1Fq` limbs (LE `from_repr` after BE→LE reverse) reduced mod pallas.
+    let big = num_bigint::BigUint::from_bytes_be(&esk.secret_bytes());
     biguint_to_fe_simple(&big)
 }
 

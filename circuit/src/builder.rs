@@ -272,13 +272,37 @@ impl SpendInfo {
         }
     }
 
+    /// Check path root against `anchor`.
+    ///
+    /// **Product A (Headstash claim):** eligibility leaf is Poseidon-v1 over
+    /// `(epk_x, epk_y, nd, v, fdi)`, not private note `cmx`. Orchard-style
+    /// `root(cmx)` would not match the distro tree.
     fn has_matching_anchor(&self, anchor: &Anchor) -> bool {
         if self.note.value() == NoteValue::zero() {
             true
         } else {
-            let cm = self.note.commitment();
-            let path_root = self.merkle_path.root(cm.into());
-            &path_root == anchor
+            #[cfg(feature = "circuit")]
+            {
+                use crate::circuit::gadget::secp256k1_chip::secp_coord_be_to_pallas_base;
+                use crate::distro_poseidon::poseidon_distro_leaf;
+                use ff::PrimeField;
+                let (epk_x_be, epk_y_be) = self.note.elig_sk().epk().xy();
+                let leaf = poseidon_distro_leaf(
+                    secp_coord_be_to_pallas_base(&epk_x_be),
+                    secp_coord_be_to_pallas_base(&epk_y_be),
+                    self.note.nd().to_fp(),
+                    pallas::Base::from(self.note.value().inner()),
+                    pallas::Base::from(self.note.fdi()),
+                );
+                let path_root = self.merkle_path.root_from_leaf(leaf);
+                &path_root == anchor
+            }
+            #[cfg(not(feature = "circuit"))]
+            {
+                let cm = self.note.commitment();
+                let path_root = self.merkle_path.root(cm.into());
+                &path_root == anchor
+            }
         }
     }
 

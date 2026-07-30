@@ -115,10 +115,28 @@ pub struct NullifierK;
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub struct ValueCommitV;
 
+/// Fixed bases used in scalar mul with a **base-field** element.
+///
+/// - [`OrchardFixedBasesBase::NullifierK`] — nullifier outer form
+/// - [`OrchardFixedBasesBase::NoteCommitR`] — Poseidon note-commit lift `[cmx]·R` (ADR option A)
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+pub enum OrchardFixedBasesBase {
+    /// `K` base for `DeriveNullifier`.
+    NullifierK,
+    /// NoteCommit `R` as base-field fixed point (cmx lift only; rcm already in Poseidon).
+    NoteCommitR,
+}
+
+impl From<NullifierK> for OrchardFixedBasesBase {
+    fn from(_nullifier_k: NullifierK) -> Self {
+        Self::NullifierK
+    }
+}
+
 #[cfg(feature = "circuit")]
 impl FixedPoints<pallas::Affine> for OrchardFixedBases {
     type FullScalar = OrchardFixedBasesFull;
-    type Base = NullifierK;
+    type Base = OrchardFixedBasesBase;
     type ShortScalar = ValueCommitV;
 }
 
@@ -154,6 +172,35 @@ impl FixedPoint<pallas::Affine> for OrchardFixedBasesFull {
     }
 }
 
+#[cfg(feature = "circuit")]
+impl FixedPoint<pallas::Affine> for OrchardFixedBasesBase {
+    type FixedScalarKind = BaseFieldElem;
+
+    fn generator(&self) -> pallas::Affine {
+        match self {
+            Self::NullifierK => nullifier_k::generator(),
+            // Same generator / window tables as full-width NoteCommitR (NUM_WINDOWS equal
+            // for FullScalar and BaseFieldElem).
+            Self::NoteCommitR => note_commit_r::generator(),
+        }
+    }
+
+    fn u(&self) -> Vec<[[u8; 32]; H]> {
+        match self {
+            Self::NullifierK => nullifier_k::U.to_vec(),
+            Self::NoteCommitR => note_commit_r::U.to_vec(),
+        }
+    }
+
+    fn z(&self) -> Vec<u64> {
+        match self {
+            Self::NullifierK => nullifier_k::Z.to_vec(),
+            Self::NoteCommitR => note_commit_r::Z.to_vec(),
+        }
+    }
+}
+
+/// Backward-compatible `FixedPoint` for the unit struct (maps to [`OrchardFixedBasesBase::NullifierK`]).
 #[cfg(feature = "circuit")]
 impl FixedPoint<pallas::Affine> for NullifierK {
     type FixedScalarKind = BaseFieldElem;

@@ -57,7 +57,7 @@ impl Nullifier {
     ) -> Self {
         let k = pallas::Point::hash_to_curve("z.cash:Orchard")(b"K");
 
-        Nullifier(extract_p(&(k * mod_r_p(nk.prf_nf(rho) + psi) + cm.0)))
+        Nullifier(extract_p(&(k * mod_r_p(nk.prf_nf(rho) + psi) + cm.inner())))
     }
 }
 

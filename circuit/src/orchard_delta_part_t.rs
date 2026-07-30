@@ -18,11 +18,12 @@ use halo2_proofs::{circuit::Value, dev::MockProver};
 use pasta_curves::pallas;
 use rand::{rngs::OsRng, RngCore};
 
-use crate::circuit::gadget::secp256k1_chip::{Secp256k1Fp, Secp256k1Fq};
+use crate::circuit::gadget::secp256k1_chip::{
+    secp_coord_be_to_pallas_base, secp_fp_from_coord_be, secp_fq_from_secret_be,
+};
 use crate::circuit::{Circuit, Instance, K};
 use crate::distro_poseidon::poseidon_distro_leaf;
 use crate::note::Note;
-use crate::spec::to_native_out_of_circuit;
 use crate::tree::MerklePath;
 use crate::value::NoteDenom;
 
@@ -63,14 +64,14 @@ impl ClaimOutputNoteV0 {
 /// Valid circuit+instance pair (same construction as circuit unit tests).
 fn valid_claim_pair<R: RngCore>(mut rng: R) -> (Circuit, Instance) {
     let (_sk, _fvk, esk, spent_note) = Note::dummy(&mut rng, None);
-    let (epkx, epky) = esk.epk().xy();
+    let (epkx_be, epky_be) = esk.epk().xy();
     let (epkx, epky) = (
-        Secp256k1Fp::from_bytes(&epkx).expect("valid Fp"),
-        Secp256k1Fp::from_bytes(&epky).expect("valid Fp"),
+        secp_fp_from_coord_be(&epkx_be),
+        secp_fp_from_coord_be(&epky_be),
     );
-    let e_sk_fq = Secp256k1Fq::from_bytes(&esk.secret_bytes()).expect("valid Fq");
-    let epk_x_native: pallas::Base = to_native_out_of_circuit(&epkx);
-    let epk_y_native: pallas::Base = to_native_out_of_circuit(&epky);
+    let e_sk_fq = secp_fq_from_secret_be(&esk.secret_bytes());
+    let epk_x_native: pallas::Base = secp_coord_be_to_pallas_base(&epkx_be);
+    let epk_y_native: pallas::Base = secp_coord_be_to_pallas_base(&epky_be);
     let recp = spent_note.recipient();
 
     let nk = spent_note.nk(spent_note.rho());

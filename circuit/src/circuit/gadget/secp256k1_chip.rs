@@ -117,6 +117,35 @@ pub type Secp256k1Fq = Fq;
 /// Type alias for secp256k1 Fq chip.
 pub type Secp256k1FqChip = FpChip<Secp256k1Fq>;
 
+/// Load a secp256k1 scalar (`Fq`) from **big-endian** 32-byte secret-key encoding
+/// (`secp256k1::SecretKey::secret_bytes`).
+///
+/// `halo2curves` `Fq::from_repr` / `from_bytes` expect **little-endian** limbs; callers
+/// must reverse BE host encodings before use (see `test_secp256k1_key_pairing_valid`).
+pub fn secp_fq_from_secret_be(be: &[u8; 32]) -> Secp256k1Fq {
+    let mut le = *be;
+    le.reverse();
+    Secp256k1Fq::from_repr(le).expect("canonical secp256k1 scalar (Fq)")
+}
+
+/// Load a secp256k1 base-field coordinate (`Fp`) from **big-endian** 32-byte encoding
+/// (`PublicKey::serialize_uncompressed` x/y).
+pub fn secp_fp_from_coord_be(be: &[u8; 32]) -> Secp256k1Fp {
+    let mut le = *be;
+    le.reverse();
+    Secp256k1Fp::from_repr(le).expect("canonical secp256k1 coordinate (Fp)")
+}
+
+/// Pallas-base reduction of a BE secp scalar (same integer as [`secp_fq_from_secret_be`]).
+pub fn secp_secret_be_to_pallas_base(be: &[u8; 32]) -> pallas::Base {
+    biguint_to_fe_simple(&BigUint::from_bytes_be(be))
+}
+
+/// Pallas-base reduction of a BE secp affine coordinate.
+pub fn secp_coord_be_to_pallas_base(be: &[u8; 32]) -> pallas::Base {
+    biguint_to_fe_simple(&BigUint::from_bytes_be(be))
+}
+
 /// An integer represented as limbs with possible overflow (kept for API compat).
 #[derive(Clone, Debug)]
 pub struct OverflowInteger<F: ff::Field> {

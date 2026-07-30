@@ -13,8 +13,9 @@ Related: `POSEIDON-DISTRO-SURFACE.md`, `ADR-POSEIDON-DISTRO-TREE`, `SPEC-airdrop
 | **V0 – policy + fixtures** | `just demo-policy` / distro + suite unit tests | Tree root, domain, anchor match, nullifier scopes |
 | **V0b – L0 e2e pure** | `just demo-e2e-l0` | Bridge/DEX/SEAM pure seams + claim fixture schema (no prove) |
 | **V0c – product pure e2e** | see below | Register → bridge mint note → SwapActionV0 apply → reserves + ν |
-| **V1 – circuit construct** | `h1_*` MockProver when green | Full claim witnesses satisfy constraints |
-| **V2 – prove + contract** | `cc_headstash` + multi-test/daemon | Real proof bytes + `ProcessHeadstash` |
+| **V1 – circuit construct** | `h1_*` / suite-backed MockProver (**green** Product A) | Full claim witnesses satisfy constraints |
+| **V1b – store-circuit keys** | `just demo-keys` / `cc_headstash` offline | VK blob for zkvm upload (`params‖cs‖vk‖footer`) |
+| **V2 – prove + contract** | `cc_headstash --upload` + multi-test/daemon | Real proof bytes + `ProcessHeadstash` |
 
 ### Product pure e2e (V0c — no Halo2)
 
@@ -105,7 +106,8 @@ Consumer: contract tests, demo scripts, optional prover.
 |------|------|
 | `zk-headstash` suite / `distro_poseidon` | Tree + claim pair |
 | `orchard_delta_part_t` | H1–H6 regression |
-| `ProvingKey::build_and_write` / `cc_headstash` | VK footer for zkvm |
+| `build_headstash_keys_to` / `just demo-keys` / `cc_headstash` | Offline store-circuit blob for zkvm (no mnemonic) |
+| `cc_headstash --upload` | Optional daemon upload (`MNEMONIC` required; never commit) |
 | `cw-headstash` + `distro` | Roots + `ProcessHeadstash` |
 | `manifold` | Multi-drop factory story |
 | `gen_headstash_notes` | Human fixture generator |

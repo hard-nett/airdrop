@@ -28,9 +28,11 @@ use subtle::{Choice, ConditionallySelectable, CtOption};
 // Poseidon-v1 (ADR-POSEIDON-DISTRO-TREE) uses `pallas::Base::ZERO` padding, not
 // Orchard's historical uncommitted leaf `2` (Sinsemilla note-commitment tree).
 lazy_static! {
-    static ref UNCOMMITTED_DISTRO: pallas::Base = pallas::Base::ZERO;
-    /// Historical Orchard uncommitted leaf (Sinsemilla note tree only).
-    static ref UNCOMMITTED_ORCHARD_LEGACY: pallas::Base = pallas::Base::from(2);
+    /// Product A distro empty / pad leaf (`ZERO`).
+    pub(crate) static ref UNCOMMITTED_DISTRO: pallas::Base = pallas::Base::ZERO;
+    /// Historical Orchard uncommitted leaf (Sinsemilla note tree / recovery only).
+    pub(crate) static ref UNCOMMITTED_ORCHARD_LEGACY: pallas::Base = pallas::Base::from(2);
+    /// Empty-subtree roots for **Poseidon-v1** public distro (Product A).
     pub(crate) static ref EMPTY_ROOTS: Vec<MerkleHashOrchard> = {
         iter::empty()
             .chain(Some(MerkleHashOrchard::empty_leaf()))
@@ -333,127 +335,264 @@ pub mod testing {
 
 #[cfg(test)]
 mod tests {
+    //! Product A (`poseidon-v1` distro): empty leaf = `ZERO`, CRH = Poseidon.
+    //! Orchard ZIP / Sinsemilla vectors live under [`sinsemilla_legacy`].
+
     use {
-        crate::tree::{MerkleHashOrchard, EMPTY_ROOTS},
-        group::ff::PrimeField,
-        incrementalmerkletree::{frontier::Frontier, Level, Marking, MerklePath, Retention},
+        crate::{
+            constants::MERKLE_DEPTH_ORCHARD,
+            tree::{MerkleHashOrchard, MerklePath, EMPTY_ROOTS, UNCOMMITTED_DISTRO},
+        },
+        group::ff::{Field, PrimeField},
+        incrementalmerkletree::{Hashable, Level},
         pasta_curves::pallas,
-        shardtree::{store::memory::MemoryShardStore, ShardTree},
     };
 
+    /// Product A: empty / padding leaf is `pallas::Base::zero()` (not Orchard `2`).
     #[test]
-    fn test_vectors() {
-        let tv_empty_roots = crate::test_vectors::commitment_tree::test_vectors().empty_roots;
-
-        for (height, root) in EMPTY_ROOTS.iter().enumerate() {
-            assert_eq!(tv_empty_roots[height], root.to_bytes());
-        }
-
-        let mut tree: ShardTree<MemoryShardStore<MerkleHashOrchard, u32>, 4, 3> =
-            ShardTree::new(MemoryShardStore::empty(), 100);
-        for (i, tv) in crate::test_vectors::merkle_path::test_vectors()
-            .into_iter()
-            .enumerate()
-        {
-            let checkpoint_id = u32::try_from(i).unwrap();
-            let cmx = MerkleHashOrchard::from_bytes(&tv.leaves[i]).unwrap();
-            tree.append(
-                cmx,
-                Retention::Checkpoint {
-                    id: checkpoint_id,
-                    marking: Marking::Marked,
-                },
-            )
-            .unwrap();
-
-            let root = tree.root_at_checkpoint_id(&checkpoint_id).unwrap().unwrap();
-            assert_eq!(root.0, pallas::Base::from_repr(tv.root).unwrap());
-
-            // Check paths for all leaves up to this point. The test vectors include paths
-            // for not-yet-appended leaves (using UNCOMMITTED_ORCHARD as the leaf value),
-            // but BridgeTree doesn't encode these.
-            for j in 0..=i {
-                let position = j.try_into().unwrap();
-                assert_eq!(
-                    tree.witness_at_checkpoint_id(position, &checkpoint_id)
-                        .unwrap(),
-                    MerklePath::from_parts(
-                        tv.paths[j]
-                            .iter()
-                            .map(|v| MerkleHashOrchard::from_bytes(v).unwrap())
-                            .collect(),
-                        position
-                    )
-                    .ok()
-                );
-            }
-        }
+    fn poseidon_v1_empty_leaf_is_zero() {
+        assert_eq!(MerkleHashOrchard::empty_leaf().0, pallas::Base::zero());
+        assert_eq!(*UNCOMMITTED_DISTRO, pallas::Base::zero());
+        // Orchard ZIP empty leaf (`2`) must not equal Product A empty leaf.
+        assert_ne!(MerkleHashOrchard::empty_leaf().0, pallas::Base::from(2));
     }
 
+    /// Product A: EMPTY_ROOTS is the iterated Poseidon empty-subtree chain.
     #[test]
-    fn empty_roots_incremental() {
-        use incrementalmerkletree::Hashable;
+    fn poseidon_v1_empty_roots_match_iterated_crh() {
+        assert_eq!(EMPTY_ROOTS.len(), MERKLE_DEPTH_ORCHARD + 1);
+        assert_eq!(EMPTY_ROOTS[0], MerkleHashOrchard::empty_leaf());
 
-        let tv_empty_roots = crate::test_vectors::commitment_tree::test_vectors().empty_roots;
-
-        for (level, tv_root) in tv_empty_roots.iter().enumerate() {
+        let mut state = MerkleHashOrchard::empty_leaf();
+        for l in 0..MERKLE_DEPTH_ORCHARD {
+            state = MerkleHashOrchard::combine((l as u8).into(), &state, &state);
             assert_eq!(
-                MerkleHashOrchard::empty_root(Level::from(level as u8))
-                    .0
-                    .to_repr(),
-                *tv_root,
-                "Empty root mismatch at level {}",
-                level
+                EMPTY_ROOTS[l + 1],
+                state,
+                "EMPTY_ROOTS mismatch at height {}",
+                l + 1
+            );
+            assert_eq!(
+                MerkleHashOrchard::empty_root(Level::from((l + 1) as u8)),
+                state
             );
         }
     }
 
+    /// Product A: dummy path with ZERO siblings recomputes via Poseidon path root.
     #[test]
-    fn anchor_incremental() {
-        // These commitment values are derived from the bundle data that was generated for
-        // testing commitment tree construction inside of zcashd here.
-        // https://github.com/zcash/zcash/blob/ecec1f9769a5e37eb3f7fd89a4fcfb35bc28eed7/src/test/data/merkle_roots_orchard.h
-        let commitments = [
-            [
-                0x68, 0x13, 0x5c, 0xf4, 0x99, 0x33, 0x22, 0x90, 0x99, 0xa4, 0x4e, 0xc9, 0x9a, 0x75,
-                0xe1, 0xe1, 0xcb, 0x46, 0x40, 0xf9, 0xb5, 0xbd, 0xec, 0x6b, 0x32, 0x23, 0x85, 0x6f,
-                0xea, 0x16, 0x39, 0x0a,
-            ],
-            [
-                0x78, 0x31, 0x50, 0x08, 0xfb, 0x29, 0x98, 0xb4, 0x30, 0xa5, 0x73, 0x1d, 0x67, 0x26,
-                0x20, 0x7d, 0xc0, 0xf0, 0xec, 0x81, 0xea, 0x64, 0xaf, 0x5c, 0xf6, 0x12, 0x95, 0x69,
-                0x01, 0xe7, 0x2f, 0x0e,
-            ],
-            [
-                0xee, 0x94, 0x88, 0x05, 0x3a, 0x30, 0xc5, 0x96, 0xb4, 0x30, 0x14, 0x10, 0x5d, 0x34,
-                0x77, 0xe6, 0xf5, 0x78, 0xc8, 0x92, 0x40, 0xd1, 0xd1, 0xee, 0x17, 0x43, 0xb7, 0x7b,
-                0xb6, 0xad, 0xc4, 0x0a,
-            ],
-            [
-                0x9d, 0xdc, 0xe7, 0xf0, 0x65, 0x01, 0xf3, 0x63, 0x76, 0x8c, 0x5b, 0xca, 0x3f, 0x26,
-                0x46, 0x60, 0x83, 0x4d, 0x4d, 0xf4, 0x46, 0xd1, 0x3e, 0xfc, 0xd7, 0xc6, 0xf1, 0x7b,
-                0x16, 0x7a, 0xac, 0x1a,
-            ],
-            [
-                0xbd, 0x86, 0x16, 0x81, 0x1c, 0x6f, 0x5f, 0x76, 0x9e, 0xa4, 0x53, 0x9b, 0xba, 0xff,
-                0x0f, 0x19, 0x8a, 0x6c, 0xdf, 0x3b, 0x28, 0x0d, 0xd4, 0x99, 0x26, 0x16, 0x3b, 0xd5,
-                0x3f, 0x53, 0xa1, 0x21,
-            ],
-        ];
+    fn poseidon_v1_path_root_with_empty_siblings() {
+        #[cfg(feature = "circuit")]
+        {
+            use crate::distro_poseidon::{poseidon_distro_crh, poseidon_distro_path_root};
 
-        // This value was produced by the Python test vector generation code implemented here:
-        // https://github.com/zcash-hackworks/zcash-test-vectors/blob/f4d756410c8f2456f5d84cedf6dac6eb8c068eed/orchard_merkle_tree.py
-        let anchor = [
-            0xc8, 0x75, 0xbe, 0x2d, 0x60, 0x87, 0x3f, 0x8b, 0xcd, 0xeb, 0x91, 0x28, 0x2e, 0x64,
-            0x2e, 0x0c, 0xc6, 0x5f, 0xf7, 0xd0, 0x64, 0x2d, 0x13, 0x7b, 0x28, 0xcf, 0x28, 0xcc,
-            0x9c, 0x52, 0x7f, 0x0e,
-        ];
+            let leaf = pallas::Base::from(0xA11CEu64);
+            let position = 0u32;
+            let auth_path = [MerkleHashOrchard(*UNCOMMITTED_DISTRO); MERKLE_DEPTH_ORCHARD];
+            let path = MerklePath::from_parts(position, auth_path);
+            let anchor = path.root_from_leaf(leaf);
 
-        let mut frontier: Frontier<MerkleHashOrchard, 32> = Frontier::empty();
-        for commitment in commitments.iter() {
-            let cmx = MerkleHashOrchard(pallas::Base::from_repr(*commitment).unwrap());
-            frontier.append(cmx);
+            let path_fp = auth_path.map(|h| h.0);
+            let expected = poseidon_distro_path_root(leaf, position, &path_fp);
+            assert_eq!(anchor.inner(), expected);
+
+            // First step: left=leaf, right=ZERO at layer 0.
+            let parent0 = poseidon_distro_crh(0, leaf, pallas::Base::zero());
+            let mut node = parent0;
+            for l in 1..MERKLE_DEPTH_ORCHARD {
+                node = poseidon_distro_crh(l as u32, node, pallas::Base::zero());
+            }
+            assert_eq!(anchor.inner(), node);
         }
-        assert_eq!(frontier.root().0, pallas::Base::from_repr(anchor).unwrap());
+    }
+
+    /// Orchard ZIP / historical Sinsemilla note-tree vectors — **recovery only**.
+    ///
+    /// Product A public distro trees use Poseidon-v1 + ZERO padding. These tests
+    /// do **not** assert against [`EMPTY_ROOTS`] (Poseidon). They use a local
+    /// [`Hashable`] type with Orchard uncommitted leaf `2` and
+    /// [`MerkleHashOrchard::combine_sinsemilla_legacy`].
+    mod sinsemilla_legacy {
+        use super::*;
+        use crate::tree::UNCOMMITTED_ORCHARD_LEGACY;
+        use incrementalmerkletree::{frontier::Frontier, Level, Marking, MerklePath, Retention};
+        use shardtree::{store::memory::MemoryShardStore, ShardTree};
+        use subtle::{Choice, ConditionallySelectable};
+
+        /// Sinsemilla-legacy digest for Orchard ZIP recovery tests only.
+        /// Default [`MerkleHashOrchard`] `Hashable` is Poseidon-v1 (Product A).
+        #[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+        struct MerkleHashSinsemillaLegacy(pallas::Base);
+
+        lazy_static::lazy_static! {
+            static ref EMPTY_ROOTS_SINSEMILLA_LEGACY: alloc::vec::Vec<MerkleHashSinsemillaLegacy> = {
+                let mut roots = alloc::vec::Vec::with_capacity(MERKLE_DEPTH_ORCHARD + 1);
+                let mut state = MerkleHashSinsemillaLegacy(*UNCOMMITTED_ORCHARD_LEGACY);
+                roots.push(state);
+                for l in 0..MERKLE_DEPTH_ORCHARD {
+                    state = Hashable::combine(Level::from(l as u8), &state, &state);
+                    roots.push(state);
+                }
+                roots
+            };
+        }
+
+        impl ConditionallySelectable for MerkleHashSinsemillaLegacy {
+            fn conditional_select(a: &Self, b: &Self, choice: Choice) -> Self {
+                MerkleHashSinsemillaLegacy(pallas::Base::conditional_select(&a.0, &b.0, choice))
+            }
+        }
+
+        impl Hashable for MerkleHashSinsemillaLegacy {
+            fn empty_leaf() -> Self {
+                MerkleHashSinsemillaLegacy(*UNCOMMITTED_ORCHARD_LEGACY)
+            }
+
+            fn combine(level: Level, left: &Self, right: &Self) -> Self {
+                let h = MerkleHashOrchard::combine_sinsemilla_legacy(
+                    level,
+                    &MerkleHashOrchard(left.0),
+                    &MerkleHashOrchard(right.0),
+                );
+                MerkleHashSinsemillaLegacy(h.0)
+            }
+
+            fn empty_root(level: Level) -> Self {
+                EMPTY_ROOTS_SINSEMILLA_LEGACY[<usize>::from(level)]
+            }
+        }
+
+        #[test]
+        fn orchard_zip_empty_roots_sinsemilla_legacy() {
+            let tv_empty_roots =
+                crate::test_vectors::commitment_tree::test_vectors().empty_roots;
+            assert_eq!(
+                MerkleHashSinsemillaLegacy::empty_leaf().0,
+                pallas::Base::from(2)
+            );
+            for (height, root) in EMPTY_ROOTS_SINSEMILLA_LEGACY.iter().enumerate() {
+                assert_eq!(
+                    tv_empty_roots[height],
+                    root.0.to_repr(),
+                    "Sinsemilla-legacy empty root mismatch at height {}",
+                    height
+                );
+            }
+        }
+
+        #[test]
+        fn empty_roots_incremental_sinsemilla_legacy() {
+            let tv_empty_roots =
+                crate::test_vectors::commitment_tree::test_vectors().empty_roots;
+            for (level, tv_root) in tv_empty_roots.iter().enumerate() {
+                assert_eq!(
+                    MerkleHashSinsemillaLegacy::empty_root(Level::from(level as u8))
+                        .0
+                        .to_repr(),
+                    *tv_root,
+                    "Sinsemilla-legacy empty root mismatch at level {}",
+                    level
+                );
+            }
+        }
+
+        #[test]
+        fn test_vectors_sinsemilla_legacy() {
+            let tv_empty_roots =
+                crate::test_vectors::commitment_tree::test_vectors().empty_roots;
+            for (height, root) in EMPTY_ROOTS_SINSEMILLA_LEGACY.iter().enumerate() {
+                assert_eq!(tv_empty_roots[height], root.0.to_repr());
+            }
+
+            let mut tree: ShardTree<MemoryShardStore<MerkleHashSinsemillaLegacy, u32>, 4, 3> =
+                ShardTree::new(MemoryShardStore::empty(), 100);
+            for (i, tv) in crate::test_vectors::merkle_path::test_vectors()
+                .into_iter()
+                .enumerate()
+            {
+                let checkpoint_id = u32::try_from(i).unwrap();
+                let cmx = MerkleHashSinsemillaLegacy(
+                    pallas::Base::from_repr(tv.leaves[i]).unwrap(),
+                );
+                tree.append(
+                    cmx,
+                    Retention::Checkpoint {
+                        id: checkpoint_id,
+                        marking: Marking::Marked,
+                    },
+                )
+                .unwrap();
+
+                let root = tree.root_at_checkpoint_id(&checkpoint_id).unwrap().unwrap();
+                assert_eq!(root.0, pallas::Base::from_repr(tv.root).unwrap());
+
+                for j in 0..=i {
+                    let position = j.try_into().unwrap();
+                    assert_eq!(
+                        tree.witness_at_checkpoint_id(position, &checkpoint_id)
+                            .unwrap(),
+                        MerklePath::from_parts(
+                            tv.paths[j]
+                                .iter()
+                                .map(|v| MerkleHashSinsemillaLegacy(
+                                    pallas::Base::from_repr(*v).unwrap()
+                                ))
+                                .collect(),
+                            position
+                        )
+                        .ok()
+                    );
+                }
+            }
+        }
+
+        #[test]
+        fn anchor_incremental_sinsemilla_legacy() {
+            // zcashd merkle_roots_orchard.h / orchard_merkle_tree.py
+            let commitments = [
+                [
+                    0x68, 0x13, 0x5c, 0xf4, 0x99, 0x33, 0x22, 0x90, 0x99, 0xa4, 0x4e, 0xc9, 0x9a,
+                    0x75, 0xe1, 0xe1, 0xcb, 0x46, 0x40, 0xf9, 0xb5, 0xbd, 0xec, 0x6b, 0x32, 0x23,
+                    0x85, 0x6f, 0xea, 0x16, 0x39, 0x0a,
+                ],
+                [
+                    0x78, 0x31, 0x50, 0x08, 0xfb, 0x29, 0x98, 0xb4, 0x30, 0xa5, 0x73, 0x1d, 0x67,
+                    0x26, 0x20, 0x7d, 0xc0, 0xf0, 0xec, 0x81, 0xea, 0x64, 0xaf, 0x5c, 0xf6, 0x12,
+                    0x95, 0x69, 0x01, 0xe7, 0x2f, 0x0e,
+                ],
+                [
+                    0xee, 0x94, 0x88, 0x05, 0x3a, 0x30, 0xc5, 0x96, 0xb4, 0x30, 0x14, 0x10, 0x5d,
+                    0x34, 0x77, 0xe6, 0xf5, 0x78, 0xc8, 0x92, 0x40, 0xd1, 0xd1, 0xee, 0x17, 0x43,
+                    0xb7, 0x7b, 0xb6, 0xad, 0xc4, 0x0a,
+                ],
+                [
+                    0x9d, 0xdc, 0xe7, 0xf0, 0x65, 0x01, 0xf3, 0x63, 0x76, 0x8c, 0x5b, 0xca, 0x3f,
+                    0x26, 0x46, 0x60, 0x83, 0x4d, 0x4d, 0xf4, 0x46, 0xd1, 0x3e, 0xfc, 0xd7, 0xc6,
+                    0xf1, 0x7b, 0x16, 0x7a, 0xac, 0x1a,
+                ],
+                [
+                    0xbd, 0x86, 0x16, 0x81, 0x1c, 0x6f, 0x5f, 0x76, 0x9e, 0xa4, 0x53, 0x9b, 0xba,
+                    0xff, 0x0f, 0x19, 0x8a, 0x6c, 0xdf, 0x3b, 0x28, 0x0d, 0xd4, 0x99, 0x26, 0x16,
+                    0x3b, 0xd5, 0x3f, 0x53, 0xa1, 0x21,
+                ],
+            ];
+            let expected_anchor = [
+                0xc8, 0x75, 0xbe, 0x2d, 0x60, 0x87, 0x3f, 0x8b, 0xcd, 0xeb, 0x91, 0x28, 0x2e, 0x64,
+                0x2e, 0x0c, 0xc6, 0x5f, 0xf7, 0xd0, 0x64, 0x2d, 0x13, 0x7b, 0x28, 0xcf, 0x28, 0xcc,
+                0x9c, 0x52, 0x7f, 0x0e,
+            ];
+
+            let mut frontier: Frontier<MerkleHashSinsemillaLegacy, 32> = Frontier::empty();
+            for commitment in commitments.iter() {
+                let cmx = MerkleHashSinsemillaLegacy(
+                    pallas::Base::from_repr(*commitment).unwrap(),
+                );
+                frontier.append(cmx);
+            }
+            assert_eq!(
+                frontier.root().0,
+                pallas::Base::from_repr(expected_anchor).unwrap()
+            );
+        }
     }
 }

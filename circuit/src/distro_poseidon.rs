@@ -5,8 +5,8 @@
 //! # Scope
 //!
 //! This module is the **pure off-circuit** (and future in-circuit) hash SSOT for the
-//! **public eligibility / distribution tree only**. Private note commitment and Orchard
-//! Sinsemilla may remain on the historical path until a separate ADR.
+//! **public eligibility / distribution tree only**. Private note commitment is Poseidon-v1
+//! under [`crate::note_poseidon`] (ADR-POSEIDON-NOTE-COMMIT) — separate personalizations.
 //!
 //! # Hash domain tag (contract / manifold)
 //!
