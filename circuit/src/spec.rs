@@ -450,7 +450,8 @@ mod tests {
     use group::Group;
     use halo2_proofs::arithmetic::CurveExt;
     use pasta_curves::pallas;
-    use rand::{rngs::OsRng, RngCore};
+    use rand_core::RngCore;
+    use crate::os_rng;
 
     #[test]
     fn diversify_hash_substitution() {
@@ -461,9 +462,9 @@ mod tests {
 
     #[test]
     fn lebs2ip_round_trip() {
-        let mut rng = OsRng;
+        let mut rng = os_rng();
         {
-            let int = rng.next_u64();
+            let int = 0x0123_4567_89AB_CDEFu64;
             assert_eq!(lebs2ip::<64>(&i2lebsp(int)), int);
         }
 

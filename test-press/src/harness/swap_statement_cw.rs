@@ -7,7 +7,7 @@ use cosmwasm_std::{Binary, Uint128};
 use cw_private_dex::msg::{
     OracleBoundParams as CwOracleBoundParams, OracleMid as CwOracleMid, SwapStatementPublic,
 };
-use private_dex_seams::{
+use terp_seams::dex::{
     asset_id_b, build_swap_action_from_seam_notes, quote_exact_in, synthetic_pool_spend_nf,
     AssetId32, AssetMap, CM_ABSTRACT_LEAF_V0, SeamNoteSketch, SwapActionPublic, SwapActionV0,
     SwapFromSeamParams, SwapActionError,

@@ -365,7 +365,7 @@ impl CompactAction {
 /// Utilities for constructing test data.
 #[cfg(feature = "test-dependencies")]
 pub mod testing {
-    use rand::RngCore;
+    use rand_core::RngCore;
     use zcash_note_encryption::Domain;
 
     use crate::{
@@ -418,7 +418,7 @@ pub mod testing {
 
 #[cfg(test)]
 mod tests {
-    use rand::rngs::OsRng;
+    use crate::OsRng;
     use zcash_note_encryption::{
         try_compact_note_decryption, try_note_decryption, try_output_recovery_with_ovk,
         EphemeralKeyBytes,

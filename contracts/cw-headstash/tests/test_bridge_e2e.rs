@@ -222,6 +222,7 @@ impl BridgeEnv {
                 "ubridge".into(),
             )),
             wavs: valid_wavs_proof_one(),
+            circuit_id: None,
         };
 
         let headstash = app

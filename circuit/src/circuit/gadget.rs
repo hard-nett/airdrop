@@ -3,22 +3,18 @@
 use ff::Field;
 use pasta_curves::pallas;
 
-use super::{commit_ivk::CommitIvkChip, note_commit::NoteCommitChip, LeafHashChip};
 use crate::constants::{
-    OrchardCommitDomains, OrchardFixedBases, OrchardFixedBasesBase, OrchardFixedBasesFull,
-    OrchardHashDomains,
-    ValueCommitV,
+    OrchardFixedBases, OrchardFixedBasesBase, OrchardFixedBasesFull, ValueCommitV,
 };
 use halo2_gadgets::{
     ecc::{
-        chip::EccChip, EccInstructions, FixedPoint, FixedPointBaseField, FixedPointShort, Point,
-        ScalarFixed, ScalarFixedShort, X,
+        chip::EccChip, CircuitVersion, EccInstructions, FixedPoint, FixedPointBaseField,
+        FixedPointShort, Point, ScalarFixed, ScalarFixedShort, X,
     },
     poseidon::{
         primitives::{self as poseidon, ConstantLength},
         Hash as PoseidonHash, PoseidonSpongeInstructions, Pow5Chip as PoseidonChip,
     },
-    sinsemilla::chip::SinsemillaChip,
 };
 use halo2_proofs::{
     circuit::{AssignedCell, Chip, Layouter, Value},
@@ -39,40 +35,12 @@ impl super::Config {
         add_chip::AddChip::construct(self.add_config.clone())
     }
 
-    pub(super) fn commit_ivk_chip(&self) -> CommitIvkChip {
-        CommitIvkChip::construct(self.commit_ivk_config.clone())
-    }
-
-    pub(super) fn leaf_hash_chip(&self) -> LeafHashChip {
-        LeafHashChip::construct(self.leaf_hash_config.clone())
-    }
-
     pub(super) fn ecc_chip(&self) -> EccChip<OrchardFixedBases> {
-        EccChip::construct(self.ecc_config.clone())
-    }
-
-    pub(super) fn sinsemilla_chip_1(
-        &self,
-    ) -> SinsemillaChip<OrchardHashDomains, OrchardCommitDomains, OrchardFixedBases> {
-        SinsemillaChip::construct(self.sinsemilla_config_1.clone())
-    }
-
-    pub(super) fn sinsemilla_chip_2(
-        &self,
-    ) -> SinsemillaChip<OrchardHashDomains, OrchardCommitDomains, OrchardFixedBases> {
-        SinsemillaChip::construct(self.sinsemilla_config_2.clone())
+        EccChip::construct(self.ecc_config.clone(), CircuitVersion::AnchoredBase)
     }
 
     pub(super) fn poseidon_chip(&self) -> PoseidonChip<pallas::Base, 3, 2> {
         PoseidonChip::construct(self.poseidon_config.clone())
-    }
-
-    pub(super) fn note_commit_chip_new(&self) -> NoteCommitChip {
-        NoteCommitChip::construct(self.new_note_commit_config.clone())
-    }
-
-    pub(super) fn note_commit_chip_old(&self) -> NoteCommitChip {
-        NoteCommitChip::construct(self.old_note_commit_config.clone())
     }
 }
 

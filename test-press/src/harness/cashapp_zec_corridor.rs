@@ -23,17 +23,17 @@
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
-use bridge_auth_seams::{
+use terp_seams::bridge::{
     authorize_bridge_mint_apply, derive_claim_id_with_dest, derive_domain_binding,
     label_hash, terp_asset_id_from_tacit, AssetRegistry, BridgeMintClaim, BridgeMintPublic,
     MintedSet, NoteOutSketch, ReflectionSnapshot, DEFAULT_CONFIRMATIONS_K, DEFAULT_MAX_LC_LAG,
     ORIGIN_BRIDGE_MINT,
 };
-use compose_seams::{
+use terp_seams::compose::{
     mint_evidence_to_swap_action, apply_swap_action, AssetOrigin, AssetRecord, AssetRegistryView,
     AssetStatus, CorridorSwapSpendParams, MintSpendEvidence, Pool, PoolStatus, SwapSeamState,
 };
-use private_dex_seams::{
+use terp_seams::dex::{
     implied_price, quote_exact_in, AssetId, OracleBoundParams, OracleMid as DexOracleMid, PRICE_SCALE,
 };
 use serde::{Deserialize, Serialize};
@@ -1082,7 +1082,7 @@ pub fn try_persist_mint_note(note: &NoteOutSketch) -> Result<(), CorridorError> 
     use super::note_persist_client::{
         put_and_film_recover_after_mint, NotesPersistConfig,
     };
-    use seam_note_out::SeamNoteOutV0;
+    use terp_seams::dex::note::SeamNoteOutV0;
     use std::time::{SystemTime, UNIX_EPOCH};
 
     let bytes = note.to_seam_bytes();
@@ -1118,8 +1118,8 @@ pub fn seam_note_from_mint_openings(
     value: u64,
     asset_id: &Hash32,
     bridge_nullifier: &Hash32,
-) -> seam_note_out::SeamNoteOutV0 {
-    use seam_note_out::{
+) -> terp_seams::dex::note::SeamNoteOutV0 {
+    use terp_seams::dex::note::{
         CM_ABSTRACT_LEAF_V0, DOMAIN_TAG_NOTE_OUT, NF_BRIDGE_BURN, ORIGIN_BRIDGE_MINT,
         SeamNoteOutV0, VERSION_V0,
     };
@@ -1152,7 +1152,7 @@ pub fn seam_note_from_mint_openings(
 /// Auth headers from `NOTES_BEARER_TOKEN` (modular notes_auth bearer default).
 #[cfg(feature = "l0-seams")]
 pub fn put_and_recover_after_mint(
-    note: &seam_note_out::SeamNoteOutV0,
+    note: &terp_seams::dex::note::SeamNoteOutV0,
     hs_id: &str,
     owner_key: [u8; 32],
     data_dir: &Path,

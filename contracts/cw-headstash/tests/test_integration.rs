@@ -216,11 +216,9 @@ pub fn mock_headstash_instantiate_msg() -> HeadstashInstantiateMsg {
         distro_hash_domain: Default::default(),
         genesis_label: None,
         wavs: mock_wavs_proof(),
+        circuit_id: None,
     }
-,
-            circuit_id: None,
-            claim_mock_verify: None,
-        }
+}
 
 // Test full end-to-end flow: Factory creates Headstash -> Headstash initializes
 #[test]

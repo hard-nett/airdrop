@@ -3,8 +3,6 @@ use crate::tokenfactory::TokenStrategy;
 
 use super::*;
 use cosmwasm_std::{CanonicalAddr, Uint128};
-use pasta_curves::group::ff::PrimeField;
-use pasta_curves::pallas;
 use std::collections::{HashMap, HashSet};
 use zk_headstash::Anchor;
 use zk_headstash::address::RecpAddr;
@@ -25,9 +23,6 @@ pub struct HeadstashCfg {
     pub ts: Vec<TokenStrategy>,
     // w: wavs operator set
     pub w: WavsOperatorSet,
-    /// Lab: mock claim proof verify (skip host proof_instance_verify). Default false.
-    #[serde(default)]
-    pub claim_mock_verify: bool,
 }
 
 #[cosmwasm_schema::cw_serde]
@@ -49,12 +44,24 @@ impl HeadstashNote {
     // verifies a nullifier does not exist in the map, and will save to map if it does not
     // TODO: ffi api pasta curves
     fn verify_recp_posiedon_hash(&self) -> Result<(), StdError> {
-        match pallas::Base::from_repr(self.rr.as_slice().try_into()?)
-            .expect("proof has been verified")
-            == RecpAddr::try_from(self.i.recp.as_slice())?.to_fp()
-        {
-            true => Ok(()),
-            false => Err(StdError::msg("recipient addr not represented in proof ")),
+        // Product A instance serialization stores RecpAddr canonical bytes (not the
+        // in-circuit Poseidon digest). `rr` must be that same 32-byte recipient.
+        // The circuit binds Poseidon(rr limbs) to the instance column via to_fp().
+        let rr: [u8; 32] = self
+            .rr
+            .as_slice()
+            .try_into()
+            .map_err(|_| StdError::msg("rr must be 32 bytes"))?;
+        let inst: [u8; 32] = self
+            .i
+            .recp
+            .as_slice()
+            .try_into()
+            .map_err(|_| StdError::msg("instance recp must be 32 bytes"))?;
+        if rr == inst {
+            Ok(())
+        } else {
+            Err(StdError::msg("recipient addr not represented in proof"))
         }
     }
 }
@@ -120,8 +127,7 @@ pub fn process_headstash(
         let root_id = claim.root_id;
         // Claim must reference a registered eligibility root (additive set).
         // Anchor must equal the registered root bytes (depth-32 Poseidon path root for new drops).
-        let root_entry =
-            distro::assert_claim_root(deps.storage, root_id, Some(&claim.i.anchor))?;
+        let root_entry = distro::assert_claim_root(deps.storage, root_id, Some(&claim.i.anchor))?;
         // Default product path: only Poseidon-v1 inclusion roots (ADR).
         // Instantiation with `sinsemilla-legacy` genesis opts into recovery mode.
         if cfg.distro_hash_domain == DistroHashDomain::PoseidonV1 {
@@ -150,41 +156,33 @@ pub fn process_headstash(
         // Product A claim proof:
         // - lab: `claim_mock_verify` + non-empty proof bytes (policy still enforced above)
         // - production: `zk-api` + wasmvm `proof_instance_verify` against cfg.cid
-        if cfg.claim_mock_verify {
-            if claim.p.is_empty() {
+
+        #[cfg(feature = "zk-api")]
+        {
+            if cfg.cid == 0 {
                 return Err(StdError::msg(
-                    "claim_mock_verify: proof bytes must be non-empty",
+                    "circuit_id is 0: SetCircuitId after store-circuit before real verify",
                 ));
             }
-            // Lab path: root/nullifier/domain/denom already checked.
-        } else {
-            #[cfg(feature = "zk-api")]
-            {
-                if cfg.cid == 0 {
-                    return Err(StdError::msg(
-                        "circuit_id is 0: SetCircuitId after store-circuit before real verify",
-                    ));
-                }
-                let ok = deps
-                    .api
-                    .proof_instance_verify(
-                        cfg.cid.into(),
-                        &claim.p,
-                        &<HeadstashInstances as Into<Instance>>::into(claim.i.clone()).to_bytes(),
-                    )
-                    .map_err(|e| StdError::msg(e.to_string()))?;
-                if !ok {
-                    return Err(StdError::msg("invalid headstash proof"));
-                }
+            let ok = deps
+                .api
+                .proof_instance_verify(
+                    cfg.cid.into(),
+                    &claim.p,
+                    &<HeadstashInstances as Into<Instance>>::into(claim.i.clone()).to_bytes(),
+                )
+                .map_err(|e| StdError::msg(e.to_string()))?;
+            if !ok {
+                return Err(StdError::msg("invalid headstash proof"));
             }
-            #[cfg(not(feature = "zk-api"))]
-            {
-                let _ = (&cfg.cid, &claim.p, &claim.i);
-                return Err(StdError::msg(
-                    "headstash claim proof verify requires zk-api feature + zk wasmvm, \
+        }
+        #[cfg(not(feature = "zk-api"))]
+        {
+            let _ = (&cfg.cid, &claim.p, &claim.i);
+            return Err(StdError::msg(
+                "headstash claim proof verify requires zk-api feature + zk wasmvm, \
                      or claim_mock_verify=true for lab (use BridgeMintNote for corridor mint)",
-                ));
-            }
+            ));
         }
 
         // verify recp integrity
@@ -202,7 +200,7 @@ pub fn process_headstash(
 
         let denom_entries: Vec<_> = cts
             .iter()
-            .filter(|((_, d), _)| d == &t.proof_representation())
+            .filter(|((nd, _), _)| nd == &t.proof_representation())
             .map(|(k, &v)| (k.clone(), v))
             .collect();
 
@@ -299,22 +297,6 @@ pub fn set_circuit_id(
     Ok(Response::new()
         .add_attribute("action", "set_circuit_id")
         .add_attribute("circuit_id", circuit_id.to_string()))
-}
-
-/// Owner toggles lab claim mock-verify (production must stay false).
-pub fn set_claim_mock_verify(
-    deps: DepsMut,
-    info: MessageInfo,
-    claim_mock_verify: bool,
-) -> Result<Response, StdError> {
-    cw_ownable::assert_owner(deps.storage, &info.sender)?;
-    HEADSTASH_CFG.update(deps.storage, |mut cfg| -> Result<_, StdError> {
-        cfg.claim_mock_verify = claim_mock_verify;
-        Ok(cfg)
-    })?;
-    Ok(Response::new()
-        .add_attribute("action", "set_claim_mock_verify")
-        .add_attribute("claim_mock_verify", claim_mock_verify.to_string()))
 }
 
 pub fn query_nullifiers(

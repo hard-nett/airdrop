@@ -13,7 +13,6 @@ pub use interface::NoRickContractSuite;
 
 // version info for migration info
 pub const NORICK_CONTRACT: &str = "norick";
-const CONTRACT_VERSION: &str = env!("CARGO_PKG_VERSION");
 
 // ────────────────────────────────────────────────────────────────────────────
 

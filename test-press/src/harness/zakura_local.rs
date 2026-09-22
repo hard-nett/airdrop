@@ -200,7 +200,7 @@ pub fn default_golden_dest_binding_path() -> PathBuf {
     }
     // CARGO_MANIFEST_DIR = crates/headstash/test-press → ../../terp-rs/...
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("../../terp-rs/docs/private-bridge/e2e/zakura/golden-dest-binding.json")
+        .join("../../terp-rs/tests/e2e/private-bridge/zakura/golden-dest-binding.json")
 }
 
 pub fn load_golden_dest_binding(path: &Path) -> Result<GoldenDestBindingDoc, GoldenDestError> {

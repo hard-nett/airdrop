@@ -13,10 +13,10 @@
 use alloc::collections::BTreeSet;
 use alloc::vec::Vec;
 
-use ff::PrimeField;
 use halo2_proofs::{circuit::Value, dev::MockProver};
 use pasta_curves::pallas;
-use rand::{rngs::OsRng, RngCore};
+use rand_core::Rng;
+use crate::os_rng;
 
 use crate::circuit::gadget::secp256k1_chip::{
     secp_coord_be_to_pallas_base, secp_fp_from_coord_be, secp_fq_from_secret_be,
@@ -62,7 +62,7 @@ impl ClaimOutputNoteV0 {
 }
 
 /// Valid circuit+instance pair (same construction as circuit unit tests).
-fn valid_claim_pair<R: RngCore>(mut rng: R) -> (Circuit, Instance) {
+fn valid_claim_pair<R: Rng>(mut rng: R) -> (Circuit, Instance) {
     let (_sk, _fvk, esk, spent_note) = Note::dummy(&mut rng, None);
     let (epkx_be, epky_be) = esk.epk().xy();
     let (epkx, epky) = (
@@ -127,7 +127,7 @@ fn public_columns(instance: &Instance) -> Vec<Vec<pallas::Base>> {
 /// H1: Valid claim with Poseidon-v1 path — MockProver must fully verify.
 #[test]
 fn h1_valid_claim() {
-    let (circuit, instance) = valid_claim_pair(OsRng);
+    let (circuit, instance) = valid_claim_pair(os_rng());
     let public = public_columns(&instance);
     let prover = MockProver::run(K, &circuit, public).expect("H1: MockProver must construct");
     assert_eq!(instance.to_bytes().len(), 168, "H1: public instance wire size");
@@ -223,7 +223,7 @@ fn claim_surface_poseidon_root_and_instance_bytes() {
 /// H2: Double-claim of same nullifier rejected by nullifier set (contract policy model).
 #[test]
 fn h2_double_claim() {
-    let (_circuit, instance) = valid_claim_pair(OsRng);
+    let (_circuit, instance) = valid_claim_pair(os_rng());
     let nf = instance.nf.to_bytes();
     let mut seen: BTreeSet<[u8; 32]> = BTreeSet::new();
     assert!(seen.insert(nf), "first claim inserts nullifier");
@@ -236,7 +236,7 @@ fn h2_double_claim() {
 /// H3: Wrong distribution root (instance anchor ≠ path root) → verify fails.
 #[test]
 fn h3_bad_root() {
-    let (circuit, mut instance) = valid_claim_pair(OsRng);
+    let (circuit, mut instance) = valid_claim_pair(os_rng());
     let mut bad_bytes = instance.anchor.to_bytes();
     bad_bytes[0] ^= 0x01;
     instance.anchor = crate::Anchor::from_bytes(bad_bytes).expect("field element");
@@ -274,7 +274,7 @@ fn h4_noncanonical_nd() {
 /// H5: Public instance bytes do not embed eligibility secret key material.
 #[test]
 fn h5_recipient_privacy() {
-    let mut rng = OsRng;
+    let mut rng = os_rng();
     let (sk, _fvk, esk, _spent_note) = Note::dummy(&mut rng, None);
     let (_circuit, instance) = valid_claim_pair(&mut rng);
     let pub_bytes = instance.to_bytes();
@@ -298,7 +298,7 @@ fn h5_recipient_privacy() {
 /// H6: Successful claim instance maps to ClaimOutputNoteV0 without inventing fields.
 #[test]
 fn h6_claim_output_schema() {
-    let (_circuit, instance) = valid_claim_pair(OsRng);
+    let (_circuit, instance) = valid_claim_pair(os_rng());
     let note = ClaimOutputNoteV0::from_instance(&instance);
     assert_eq!(note.value, instance.v.inner());
     assert_eq!(&note.asset_tag[..], instance.nd.as_bytes());
@@ -308,22 +308,15 @@ fn h6_claim_output_schema() {
     assert_eq!(&note.owner[..], &instance.recp.to_canonical_bytes()[..]);
 }
 
-/// H12: Documented gap — public HS_ND is not yet forced equal to witness nd.
-/// When Part I lands constrain_instance(nd), this must flip to verify().is_err().
+/// H12: public HS_ND must equal the nd used in Poseidon note commit + distro leaf.
 #[test]
-fn h12_instance_nd_gap_documented() {
-    let (circuit, mut instance) = valid_claim_pair(OsRng);
+fn h12_instance_nd_bound_to_witness() {
+    let (circuit, mut instance) = valid_claim_pair(os_rng());
     instance.nd = NoteDenom::new_for_proof("not-the-witness-denom");
     let prover = MockProver::run(K, &circuit, public_columns(&instance)).expect("MockProver");
-    // TODAY: may still verify (gap §1.4). When constrained, expect is_err().
-    let result = prover.verify();
-    // Record status: either err (fixed) or ok (gap still open) — both valid for this round.
-    // Progression: Part I should make this always Err.
-    let _ = result;
-    // Structural: instance bytes still encode the mutated nd (public API surface).
-    assert_eq!(
-        instance.nd.as_bytes(),
-        NoteDenom::new_for_proof("not-the-witness-denom").as_bytes()
+    assert!(
+        prover.verify().is_err(),
+        "mutated public nd must fail MockProver after constrain_instance(HS_ND)"
     );
 }
 

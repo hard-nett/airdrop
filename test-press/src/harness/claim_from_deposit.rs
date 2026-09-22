@@ -9,7 +9,7 @@
 use sha2::{Digest, Sha256};
 use thiserror::Error;
 
-use bridge_auth_seams::{
+use terp_seams::bridge::{
     authorize_bridge_mint, derive_claim_id_with_dest, derive_domain_binding, label_hash,
     terp_asset_id_from_tacit, AssetRegistry, BridgeMintClaim, BridgeMintPublic, Hash32, MintedSet,
     ReflectionSnapshot, DEFAULT_CONFIRMATIONS_K, DEFAULT_MAX_LC_LAG,

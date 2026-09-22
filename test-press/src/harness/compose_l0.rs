@@ -5,7 +5,7 @@
 //!
 //! One module for harness CI: `cargo test -p zk-test-press --lib harness::compose_l0`.
 
-use compose_seams::{
+use terp_seams::compose::{
     run_product_path_burn_to_swap_oracle_zec, run_product_path_burn_to_swap_sketch,
     ProductPathOracleZecOutcome, ProductPathOutcome,
 };
@@ -24,7 +24,7 @@ pub fn assert_product_path_burn_to_swap_oracle_zec() -> Result<ProductPathOracle
 }
 
 // Re-export G2 types for harness consumers.
-pub use compose_seams::{
+pub use terp_seams::compose::{
     mint_evidence_to_swap_action, seam_note_out_to_swap_action, seam_note_out_to_swap_openings,
     swap_action_public_to_statement, CorridorSwapSpendParams, MintSpendEvidence,
     SwapStatementPublicView,

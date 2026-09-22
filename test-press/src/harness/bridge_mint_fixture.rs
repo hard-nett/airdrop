@@ -14,7 +14,7 @@ use std::path::Path;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-use bridge_auth_seams::{
+use terp_seams::bridge::{
     authorize_bridge_mint_apply, derive_claim_id_with_dest, derive_domain_binding,
     hinge_happy_fixture, label_hash, terp_asset_id_from_tacit, AssetRegistry, BridgeMintClaim,
     BridgeMintPublic, MintedSet, NoteOutSketch, ReflectionSnapshot, DEFAULT_CONFIRMATIONS_K,

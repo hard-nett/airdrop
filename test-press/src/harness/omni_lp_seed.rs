@@ -6,13 +6,13 @@
 //! Under `CORRIDOR_POOL_SEED=bridged_lp` / `CORRIDOR_PROFILE=omni_production_shaped`,
 //! product path **refuses** magic-only CreatePool (LAB_R_* without bridged source).
 //!
-//! SSOT pure: `private_dex_seams::lp_seed`.
+//! SSOT pure: `terp_seams::dex::lp_seed`.
 //! SSOT guide: `GUIDE-OMNI-E2E-PRODUCTION-SHAPED-2026-07-22.md`.
 
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use private_dex_seams::{
+use terp_seams::dex::{
     asset_id_b, asset_id_hub, authorize_create_pool_reserves, bootstrap_omni_liquidity_pure,
     reject_magic_pool_under_bridged_policy, DualHomePrepV0, EscrowLiabilityV0, LpBridgeMintV0,
     LpSeedError, LpSeedReceiptV0, PoolSeedPolicy, LP_SEED_SOURCE_BRIDGED_NOTES,
@@ -517,7 +517,7 @@ pub fn lp_mint_log_line(kind: &str, mint: &LpBridgeMintV0) -> String {
 }
 
 // Re-export fixture constants for suite/binary.
-pub use private_dex_seams::{OMNI_LP_BTC as FIXTURE_LP_BTC, OMNI_LP_ZEC as FIXTURE_LP_ZEC};
+pub use terp_seams::dex::{OMNI_LP_BTC as FIXTURE_LP_BTC, OMNI_LP_ZEC as FIXTURE_LP_ZEC};
 
 #[cfg(test)]
 mod tests {

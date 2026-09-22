@@ -31,6 +31,28 @@
 
 Owner later: `SetCircuitId`, `SetClaimMockVerify`.
 
+## Clearnet claim (real prove + `proof_instance_verify`)
+
+Not private-dex. Public `uterp` send. Lab Mock still uses `register_test_circuit` wrapping **Halo2 `Proof::verify`** (same bytes the host would check).
+
+```bash
+cd crates/headstash
+just demo-claim-clearnet
+# artifacts/headstash_claim_metrics.json → k, params/cs/vk/proof bytes, keygen/prove/verify secs
+
+# Same Product A path from the unified cw-orch / ict-rs suite (terp-rs):
+cd crates/terp-rs
+cargo test -p terp-orch --features headstash --test headstash_claim -- --ignored --nocapture
+# writes tests/suite/terp-orch/artifacts/headstash_claim_metrics.json
+
+# Vesta IPA param table (Params::new(k), k=1..=20) — pin for wasmvm zk_param/
+# crate: crates/terp-rs/tests/suite/ipa-params
+cargo test -p terp-ipa-params -- --nocapture
+cargo test -p terp-ipa-params --release -- --ignored --nocapture
+```
+
+ICTRS Docker (zk wasmvm): `HEADSTASH_CLAIM_MODE=real` after `just demo-keys` / `HEADSTASH_VK_PATH`.
+
 ## Local commands (headstash crate)
 
 ```bash

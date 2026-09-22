@@ -3,7 +3,7 @@
 //! Maps to E2E-01 / E2E-02 / E2E-03 at **min layer L0** (no CosmWasm, no Docker).
 //! CW bridge-mint on `cw-headstash` (CLARITY) may wire the same assertions later.
 
-use bridge_auth_seams::{
+use terp_seams::bridge::{
     authorize_bridge_mint, authorize_bridge_mint_apply, hinge_happy_fixture, BridgeMintError,
     NoteOutSketch, ORIGIN_BRIDGE_MINT, NF_BRIDGE_BURN,
 };
@@ -95,7 +95,7 @@ pub fn compose_bridge_mint_to_seam_bytes() -> Result<NoteOutSketch, L0Error> {
     // Optional cross-crate decode when seam_note_out is linked.
     #[cfg(feature = "l0-seams")]
     {
-        use seam_note_out::SeamNoteOutV0;
+        use terp_seams::dex::note::SeamNoteOutV0;
         let seam = SeamNoteOutV0::from_bytes(&bytes).map_err(|e| L0Error(format!("{e:?}")))?;
         if seam.origin != ORIGIN_BRIDGE_MINT {
             return Err(L0Error("seam origin mismatch".into()));

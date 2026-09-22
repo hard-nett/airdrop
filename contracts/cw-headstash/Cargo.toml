@@ -36,6 +36,8 @@ halo2_proofs  = { workspace = true }
 hex  = { workspace = true }
 pasta_curves = { workspace = true }
 rand_core  = { workspace = true }
+# ark-ff UniformRand is rand 0.8; workspace rand is 0.10 for zakura halo2.
+rand08 = { package = "rand", version = "0.8", features = ["std"] }
 serde  = { workspace = true }
 sha2  = { workspace = true }
 terp-auth  = { workspace = true }

@@ -109,7 +109,7 @@ pub fn generate_test_wavs_proof(total_operators: usize) -> WavsProofOfOwnership 
     use ark_ff::UniformRand;
     use ark_serialize::{CanonicalDeserialize, CanonicalSerialize};
     use cosmwasm_std::testing::MockApi;
-    use rand_core::OsRng;
+    use rand08::rngs::OsRng;
 
     assert!(total_operators >= 1, "total_operators must be >= 1");
     let api = MockApi::default();
@@ -160,7 +160,7 @@ mod tests {
     use ark_ff::UniformRand;
     use ark_serialize::{CanonicalDeserialize, CanonicalSerialize};
     use cosmwasm_std::testing::MockApi;
-    use rand_core::OsRng;
+    use rand08::rngs::OsRng;
 
     // Helper to serialize G1 point
     fn serialize_g1(point: &G1Affine) -> Vec<u8> {

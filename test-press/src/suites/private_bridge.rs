@@ -303,7 +303,6 @@ impl<Chain: ZkCwEnv> PrivateBridgeSuite<Chain> {
             )),
             wavs: generate_test_wavs_proof(1),
             circuit_id: None,
-            claim_mock_verify: None,
         }
     }
 
@@ -492,7 +491,7 @@ impl<Chain: ZkCwEnv> PrivateBridgeSuite<Chain> {
 
         // 2) Client holds plaintext SEAM (same happy hinge as mint world)
         let sketch = harness::compose_bridge_mint_to_seam_bytes().map_err(l0_to_cw)?;
-        let note = seam_note_out::SeamNoteOutV0::from_bytes(&sketch.to_seam_bytes())
+        let note = terp_seams::dex::note::SeamNoteOutV0::from_bytes(&sketch.to_seam_bytes())
             .map_err(|e| CwOrchError::StdErr(format!("seam decode: {e:?}")))?;
 
         // Prefer contract address as hs_id when config still has a season placeholder.

@@ -692,7 +692,6 @@ mod tests {
         plonk::{Circuit, ConstraintSystem, Error},
     };
     use pasta_curves::pallas;
-    use rand::rngs::OsRng;
 
     #[test]
     fn commit_ivk() {
@@ -797,7 +796,10 @@ mod tests {
                 let sinsemilla_chip = SinsemillaChip::construct(sinsemilla_config);
 
                 // Construct an ECC chip
-                let ecc_chip = EccChip::construct(ecc_config);
+                let ecc_chip = EccChip::construct(
+                    ecc_config,
+                    halo2_gadgets::ecc::CircuitVersion::AnchoredBase,
+                );
 
                 let commit_ivk_chip = CommitIvkChip::construct(commit_ivk_config.clone());
 
@@ -816,7 +818,7 @@ mod tests {
                 )?;
 
                 // Use a random scalar for rivk
-                let rivk = pallas::Scalar::random(OsRng);
+                let rivk = pallas::Scalar::random(&mut rand::rng());
                 let rivk_gadget = ScalarFixed::new(
                     ecc_chip.clone(),
                     layouter.namespace(|| "rivk"),

@@ -7,10 +7,11 @@ use cosmwasm_std::{
 use crate::error::ContractError;
 use crate::msg::{
     CeremonyInfo, CeremonyResponse, CeremonyStatus, ConfigResponse, ExecuteMsg, InstantiateMsg,
+    RegistrationGate,
     IsRegisteredResponse, IsSpentResponse, QueryMsg, RawSpentKeyResponse, SudoMsg,
 };
 use crate::raw_keys::SPENT_NAMESPACE;
-use crate::state::{spent_key, Ceremony, Config, CEREMONIES, CONFIG, REGISTRATIONS, SPENT};
+use crate::state::{spent_key, Ceremony, ClerkLeaf, Config, CEREMONIES, CLERK_LEAVES, CONFIG, REGISTRATIONS, SPENT};
 
 #[cfg_attr(not(feature = "library"), entry_point)]
 pub fn instantiate(
@@ -51,6 +52,10 @@ pub fn execute(
             domain,
             registration_open,
             anchor_policy,
+            registration_gate,
+            clerk,
+            membership_module,
+            vm_verifier,
         } => start_ceremony(
             deps,
             info,
@@ -58,9 +63,21 @@ pub fn execute(
             domain,
             registration_open,
             anchor_policy,
+            registration_gate,
+            clerk,
+            membership_module,
+            vm_verifier,
         ),
         ExecuteMsg::CloseCeremony { session_id } => close_ceremony(deps, info, session_id),
-        ExecuteMsg::Register { session_id } => register(deps, env, info, session_id),
+        ExecuteMsg::Register {
+            session_id,
+            leaf_commit,
+            proof,
+        } => register(deps, env, info, session_id, leaf_commit, proof),
+        ExecuteMsg::AttestLeaf {
+            session_id,
+            leaf_commit,
+        } => attest_leaf(deps, info, session_id, leaf_commit),
         ExecuteMsg::SetRegistrationOpen { session_id, open } => {
             set_registration_open(deps, info, session_id, open)
         }
@@ -86,6 +103,10 @@ pub fn query(deps: Deps, _env: Env, msg: QueryMsg) -> StdResult<Binary> {
                     status: c.status,
                     registration_open: c.registration_open,
                     anchor_policy: c.anchor_policy,
+                    registration_gate: c.registration_gate,
+                    clerk: c.clerk,
+                    membership_module: c.membership_module,
+                    vm_verifier: c.vm_verifier,
                 },
             })
         }
@@ -101,8 +122,11 @@ pub fn query(deps: Deps, _env: Env, msg: QueryMsg) -> StdResult<Binary> {
             to_json_binary(&IsSpentResponse { spent })
         }
         QueryMsg::IsRegistered { session_id, addr } => {
-            let registered = REGISTRATIONS.has(deps.storage, (&session_id, &addr));
-            to_json_binary(&IsRegisteredResponse { registered })
+            let leaf = REGISTRATIONS.may_load(deps.storage, (&session_id, &addr))?;
+            to_json_binary(&IsRegisteredResponse {
+                registered: leaf.is_some(),
+                leaf_commit: leaf.filter(|s| !s.is_empty()),
+            })
         }
         QueryMsg::RawSpentKey {
             domain,
@@ -147,6 +171,10 @@ pub fn start_ceremony(
     domain: String,
     registration_open: bool,
     anchor_policy: Option<String>,
+    registration_gate: RegistrationGate,
+    clerk: Option<String>,
+    membership_module: Option<String>,
+    vm_verifier: Option<String>,
 ) -> Result<Response, ContractError> {
     ensure_admin(deps.as_ref(), &info)?;
     if session_id.is_empty() {
@@ -166,6 +194,10 @@ pub fn start_ceremony(
             status: CeremonyStatus::Active,
             registration_open,
             anchor_policy,
+            registration_gate,
+            clerk,
+            membership_module,
+            vm_verifier,
         },
     )?;
     Ok(Response::new()
@@ -198,6 +230,8 @@ fn register(
     _env: Env,
     info: MessageInfo,
     session_id: String,
+    leaf_commit: Option<String>,
+    proof: Option<cosmwasm_std::Binary>,
 ) -> Result<Response, ContractError> {
     let c = CEREMONIES
         .may_load(deps.storage, &session_id)?
@@ -215,17 +249,172 @@ fn register(
             session_id: session_id.clone(),
         });
     }
+    match c.registration_gate {
+        RegistrationGate::Open => {}
+        RegistrationGate::PrePropose => return Err(ContractError::PreProposeUnwired),
+        RegistrationGate::VmProof => {
+            let verifier = c.vm_verifier.as_ref().ok_or_else(|| ContractError::GateDenied {
+                reason: "vm_verifier not set".into(),
+            })?;
+            let proof = proof.ok_or_else(|| ContractError::GateDenied {
+                reason: "proof required for vm_proof gate".into(),
+            })?;
+            #[derive(serde::Serialize)]
+            struct Vq<'a> {
+                verify_min_holders: VqInner<'a>,
+            }
+            #[derive(serde::Serialize)]
+            struct VqInner<'a> {
+                session_id: &'a str,
+                registrant: &'a str,
+                proof: &'a cosmwasm_std::Binary,
+            }
+            #[derive(serde::Deserialize)]
+            struct Vr {
+                ok: bool,
+            }
+            let q = Vq {
+                verify_min_holders: VqInner {
+                    session_id: &session_id,
+                    registrant: info.sender.as_str(),
+                    proof: &proof,
+                },
+            };
+            let ans: Vr = deps
+                .querier
+                .query_wasm_smart(verifier, &q)
+                .map_err(|_| ContractError::GateDenied {
+                    reason: "vm verifier query failed".into(),
+                })?;
+            if !ans.ok {
+                return Err(ContractError::GateDenied {
+                    reason: "min-holders proof rejected".into(),
+                });
+            }
+        }
+        RegistrationGate::ClerkAttested => {
+            let leaf = leaf_commit
+                .as_deref()
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .ok_or(ContractError::LeafCommitRequired)?;
+            let rec = CLERK_LEAVES
+                .may_load(deps.storage, (&session_id, leaf))?
+                .ok_or_else(|| ContractError::GateDenied {
+                    reason: "leaf_commit not attested by clerk".into(),
+                })?;
+            if let Some(owner) = rec.consumed_by {
+                if owner != info.sender.as_str() {
+                    return Err(ContractError::LeafConsumed { addr: owner });
+                }
+            }
+        }
+        RegistrationGate::DaoMember => {
+            let module = c.membership_module.as_ref().ok_or_else(|| {
+                ContractError::GateDenied {
+                    reason: "membership_module not set".into(),
+                }
+            })?;
+            // Query site for voting power — fail closed if the module is missing.
+            #[derive(serde::Serialize)]
+            struct VpQuery<'a> {
+                voting_power_at_height: VpInner<'a>,
+            }
+            #[derive(serde::Serialize)]
+            struct VpInner<'a> {
+                address: &'a str,
+            }
+            let q = VpQuery {
+                voting_power_at_height: VpInner {
+                    address: info.sender.as_str(),
+                },
+            };
+            let raw: Result<cosmwasm_std::Binary, _> =
+                deps.querier.query_wasm_smart(module, &q);
+            if raw.is_err() {
+                return Err(ContractError::GateDenied {
+                    reason: "membership query failed".into(),
+                });
+            }
+        }
+    }
     let addr = info.sender.as_str();
     if REGISTRATIONS.has(deps.storage, (&session_id, addr)) {
         return Err(ContractError::AlreadyRegistered {
             addr: addr.to_string(),
         });
     }
-    REGISTRATIONS.save(deps.storage, (&session_id, addr), &Empty {})?;
+    let stored_leaf = leaf_commit
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .unwrap_or("")
+        .to_string();
+    if c.registration_gate == RegistrationGate::ClerkAttested && !stored_leaf.is_empty() {
+        CLERK_LEAVES.save(
+            deps.storage,
+            (&session_id, stored_leaf.as_str()),
+            &ClerkLeaf {
+                consumed_by: Some(addr.to_string()),
+            },
+        )?;
+    }
+    REGISTRATIONS.save(deps.storage, (&session_id, addr), &stored_leaf)?;
     Ok(Response::new()
         .add_attribute("action", "register")
         .add_attribute("session_id", session_id)
         .add_attribute("addr", addr))
+}
+
+fn attest_leaf(
+    deps: DepsMut,
+    info: MessageInfo,
+    session_id: String,
+    leaf_commit: String,
+) -> Result<Response, ContractError> {
+    let c = CEREMONIES
+        .may_load(deps.storage, &session_id)?
+        .ok_or_else(|| ContractError::CeremonyNotFound {
+            session_id: session_id.clone(),
+        })?;
+    if c.status != CeremonyStatus::Active {
+        return Err(ContractError::CeremonyNotActive {
+            session_id: session_id.clone(),
+            status: c.status.as_str().into(),
+        });
+    }
+    let clerk_ok = c
+        .clerk
+        .as_deref()
+        .map(|a| a == info.sender.as_str())
+        .unwrap_or(false);
+    if clerk_ok {
+        // clerk may attest
+    } else if c.clerk.is_none() {
+        ensure_admin(deps.as_ref(), &info)?;
+        let cfg = crate::state::CONFIG.load(deps.storage)?;
+        if cfg.admin.is_none() {
+            return Err(ContractError::Unauthorized);
+        }
+    } else {
+        return Err(ContractError::Unauthorized);
+    }
+    let leaf = leaf_commit.trim();
+    if leaf.is_empty() {
+        return Err(ContractError::LeafCommitRequired);
+    }
+    if CLERK_LEAVES.has(deps.storage, (&session_id, leaf)) {
+        return Err(ContractError::LeafAlreadyAttested);
+    }
+    CLERK_LEAVES.save(
+        deps.storage,
+        (&session_id, leaf),
+        &ClerkLeaf { consumed_by: None },
+    )?;
+    Ok(Response::new()
+        .add_attribute("action", "attest_leaf")
+        .add_attribute("session_id", session_id)
+        .add_attribute("leaf_commit", leaf))
 }
 
 fn set_registration_open(
@@ -351,6 +540,10 @@ mod tests {
                 domain: "terp.vote.v1".into(),
                 registration_open: true,
                 anchor_policy: Some("m1-admin-roots".into()),
+                registration_gate: RegistrationGate::Open,
+                clerk: None,
+                membership_module: None,
+                vm_verifier: None,
             },
         )
         .unwrap();
@@ -365,6 +558,10 @@ mod tests {
                 domain: "terp.vote.v1".into(),
                 registration_open: true,
                 anchor_policy: None,
+                registration_gate: RegistrationGate::Open,
+                clerk: None,
+                membership_module: None,
+                vm_verifier: None,
             },
         )
         .unwrap_err();
@@ -375,9 +572,8 @@ mod tests {
             deps.as_mut(),
             mock_env(),
             mock_info("terp1voter", &[]),
-            ExecuteMsg::Register {
-                session_id: "round-1".into(),
-            },
+            ExecuteMsg::Register { session_id: "round-1".into(), leaf_commit: None,
+                proof: None },
         )
         .unwrap();
 
@@ -481,6 +677,10 @@ mod tests {
                 domain: "d".into(),
                 registration_open: false,
                 anchor_policy: None,
+                registration_gate: RegistrationGate::Open,
+                clerk: None,
+                membership_module: None,
+                vm_verifier: None,
             },
         )
         .unwrap();
@@ -519,6 +719,10 @@ mod tests {
                 domain: "terp.vote.v1".into(),
                 registration_open: true,
                 anchor_policy: None,
+                registration_gate: RegistrationGate::Open,
+                clerk: None,
+                membership_module: None,
+                vm_verifier: None,
             },
         )
         .unwrap();
@@ -553,4 +757,159 @@ mod tests {
         // keep Addr import warm for future multi-test
         let _ = Addr::unchecked("terp1x");
     }
+    #[test]
+    fn clerk_attested_requires_leaf_then_register() {
+        let (mut deps,) = setup();
+        let admin = mock_info("terp1admin", &[]);
+        execute(
+            deps.as_mut(),
+            mock_env(),
+            admin.clone(),
+            ExecuteMsg::StartCeremony {
+                session_id: "s-clerk".into(),
+                domain: "d".into(),
+                registration_open: true,
+                anchor_policy: None,
+                registration_gate: RegistrationGate::ClerkAttested,
+                clerk: Some("terp1clerk".into()),
+                membership_module: None,
+                vm_verifier: None,
+            },
+        )
+        .unwrap();
+
+        let err = execute(
+            deps.as_mut(),
+            mock_env(),
+            mock_info("terp1voter", &[]),
+            ExecuteMsg::Register { session_id: "s-clerk".into(), leaf_commit: Some("leaf-a".into()),
+                proof: None },
+        )
+        .unwrap_err();
+        assert!(matches!(err, ContractError::GateDenied { .. }));
+
+        execute(
+            deps.as_mut(),
+            mock_env(),
+            mock_info("terp1clerk", &[]),
+            ExecuteMsg::AttestLeaf {
+                session_id: "s-clerk".into(),
+                leaf_commit: "leaf-a".into(),
+            },
+        )
+        .unwrap();
+
+        execute(
+            deps.as_mut(),
+            mock_env(),
+            mock_info("terp1voter", &[]),
+            ExecuteMsg::Register { session_id: "s-clerk".into(), leaf_commit: Some("leaf-a".into()),
+                proof: None },
+        )
+        .unwrap();
+
+        let err = execute(
+            deps.as_mut(),
+            mock_env(),
+            mock_info("terp1other", &[]),
+            ExecuteMsg::Register { session_id: "s-clerk".into(), leaf_commit: Some("leaf-a".into()),
+                proof: None },
+        )
+        .unwrap_err();
+        assert!(matches!(err, ContractError::LeafConsumed { .. }));
+    }
+
+    #[test]
+    fn dao_member_without_module_denied() {
+        let (mut deps,) = setup();
+        execute(
+            deps.as_mut(),
+            mock_env(),
+            mock_info("terp1admin", &[]),
+            ExecuteMsg::StartCeremony {
+                session_id: "s-dao".into(),
+                domain: "d".into(),
+                registration_open: true,
+                anchor_policy: None,
+                registration_gate: RegistrationGate::DaoMember,
+                clerk: None,
+                membership_module: None,
+                vm_verifier: None,
+            },
+        )
+        .unwrap();
+        let err = execute(
+            deps.as_mut(),
+            mock_env(),
+            mock_info("terp1voter", &[]),
+            ExecuteMsg::Register { session_id: "s-dao".into(), leaf_commit: None,
+                proof: None },
+        )
+        .unwrap_err();
+        assert!(matches!(err, ContractError::GateDenied { .. }));
+    }
+
+    #[test]
+    fn pre_propose_gate_unwired() {
+        let (mut deps,) = setup();
+        execute(
+            deps.as_mut(),
+            mock_env(),
+            mock_info("terp1admin", &[]),
+            ExecuteMsg::StartCeremony {
+                session_id: "s-pp".into(),
+                domain: "d".into(),
+                registration_open: true,
+                anchor_policy: None,
+                registration_gate: RegistrationGate::PrePropose,
+                clerk: None,
+                membership_module: None,
+                vm_verifier: None,
+            },
+        )
+        .unwrap();
+        let err = execute(
+            deps.as_mut(),
+            mock_env(),
+            mock_info("terp1voter", &[]),
+            ExecuteMsg::Register { session_id: "s-pp".into(), leaf_commit: None,
+                proof: None },
+        )
+        .unwrap_err();
+        assert_eq!(err, ContractError::PreProposeUnwired);
+    }
+
+    #[test]
+    fn vm_proof_without_verifier_denied() {
+        let (mut deps,) = setup();
+        execute(
+            deps.as_mut(),
+            mock_env(),
+            mock_info("terp1admin", &[]),
+            ExecuteMsg::StartCeremony {
+                session_id: "s-vm".into(),
+                domain: "d".into(),
+                registration_open: true,
+                anchor_policy: None,
+                registration_gate: RegistrationGate::VmProof,
+                clerk: None,
+                membership_module: None,
+                vm_verifier: None,
+            },
+        )
+        .unwrap();
+        let err = execute(
+            deps.as_mut(),
+            mock_env(),
+            mock_info("terp1voter", &[]),
+            ExecuteMsg::Register {
+                session_id: "s-vm".into(),
+                leaf_commit: None,
+                proof: Some(cosmwasm_std::Binary::from(b"x")),
+            },
+        )
+        .unwrap_err();
+        assert!(matches!(err, ContractError::GateDenied { .. }));
+    }
+
 }

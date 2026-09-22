@@ -14,29 +14,28 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use private_dex_seams::{
-    apply_egress_burn, build_egress_burn_from_settle, egress_nullifier,
-    DestKind as PureDestKind, EgressBurnEvidenceV0 as PureEvidence, EgressBurnPublic, EgressError,
-    EgressSeamState, SettleLikeOpening, SwapActionV0, ZecEgressReceiptV0 as PureZecReceipt,
-    EGRESS_NF_LABEL,
-};
 use serde::{Deserialize, Serialize};
+use terp_seams::dex::{
+    DestKind as PureDestKind, EGRESS_NF_LABEL, EgressBurnEvidenceV0 as PureEvidence,
+    EgressBurnPublic, EgressError, EgressSeamState, SettleLikeOpening, SwapActionV0,
+    ZecEgressReceiptV0 as PureZecReceipt, apply_egress_burn, build_egress_burn_from_settle,
+    egress_nullifier,
+};
 
 use super::lab_pay_zec::{
-    confirm_open_at_sealed_dest_with_cfg, egress_burn_evidence_path,
-    lab_pay_zec_after_burn as lab_pay_zec_host, zec_egress_receipt_path, LabPayError,
-    OpenConfirmResult,
+    LabPayError, OpenConfirmResult, confirm_open_at_sealed_dest_with_cfg,
+    egress_burn_evidence_path, lab_pay_zec_after_burn as lab_pay_zec_host, zec_egress_receipt_path,
 };
 // Pay mode labels + dest_kind SSOT: lab_pay_zec (ZAKURA-PAY).
 pub use super::lab_pay_zec::{
-    confirm_open_at_sealed_dest, dest_kind_from_display, wallet_rpc_available, MODE_LAB_INVENTORY_PAY,
-    MODE_LAB_INVENTORY_PAY_SIMULATED,
+    MODE_LAB_INVENTORY_PAY, MODE_LAB_INVENTORY_PAY_SIMULATED, confirm_open_at_sealed_dest,
+    dest_kind_from_display, wallet_rpc_available,
 };
-use super::mint_evidence::{decode_hex32, hex32, MintEvidenceError, SettleReceiptV0};
-use super::swap_statement_cw::{lab_asset_out_zec, SwapSpendHandoffV0};
+use super::mint_evidence::{MintEvidenceError, SettleReceiptV0, decode_hex32, hex32};
+use super::swap_statement_cw::{SwapSpendHandoffV0, lab_asset_out_zec};
 use super::zakura_local::{
-    assert_dest_binding_equal, owner_binding_from_dest_display, rpc_ready, seal_funded_dest,
-    SealedDestSource, SealedDestV0, ZakuraLocalConfig,
+    SealedDestSource, SealedDestV0, ZakuraLocalConfig, assert_dest_binding_equal,
+    owner_binding_from_dest_display, rpc_ready, seal_funded_dest,
 };
 
 /// Env gate for Option D stage after settle.
@@ -192,9 +191,10 @@ fn pure_evidence_to_json(
         terp_tx_hash: evidence.terp_tx_hash.clone(),
         burn: public_to_json(&evidence.burn),
         proof_mode: evidence.proof_mode.clone(),
-        settle_receipt_ref: evidence.settle_receipt_ref.clone().or_else(|| {
-            settle.map(|s| format!("pool_id={};status={}", s.pool_id, s.status))
-        }),
+        settle_receipt_ref: evidence
+            .settle_receipt_ref
+            .clone()
+            .or_else(|| settle.map(|s| format!("pool_id={};status={}", s.pool_id, s.status))),
         settle_receipt_path: settle_path.map(|p| p.display().to_string()),
         chain_id: settle.map(|s| s.chain_id.clone()),
         headstash_contract: settle.map(|s| s.headstash_contract.clone()),
@@ -237,7 +237,8 @@ impl EgressBurnEvidenceJson {
         if let Some(parent) = path.parent() {
             fs::create_dir_all(parent).map_err(|e| EgressDError::Io(e.to_string()))?;
         }
-        let s = serde_json::to_string_pretty(self).map_err(|e| EgressDError::Json(e.to_string()))?;
+        let s =
+            serde_json::to_string_pretty(self).map_err(|e| EgressDError::Json(e.to_string()))?;
         fs::write(path, s).map_err(|e| EgressDError::Io(e.to_string()))
     }
 
@@ -252,7 +253,8 @@ impl ZecEgressReceiptJson {
         if let Some(parent) = path.parent() {
             fs::create_dir_all(parent).map_err(|e| EgressDError::Io(e.to_string()))?;
         }
-        let s = serde_json::to_string_pretty(self).map_err(|e| EgressDError::Json(e.to_string()))?;
+        let s =
+            serde_json::to_string_pretty(self).map_err(|e| EgressDError::Json(e.to_string()))?;
         fs::write(path, s).map_err(|e| EgressDError::Io(e.to_string()))
     }
 
@@ -693,7 +695,6 @@ pub fn assert_lab_degrade_labels(burn_surface: &str, pay_mode: &str) -> Result<(
 /// to celebrate architecture (still honesty-labeled for mock proof / P-lab).
 /// Inventory funder modes always forbid product celebration.
 pub fn product_celebrate_forbidden(burn_surface: &str, pay_mode: &str) -> bool {
-    use private_dex_seams::reject_funder_only_as_product;
     burn_surface == BURN_SURFACE_PURE_RECORD_LAB
         || pay_mode == MODE_LAB_INVENTORY_PAY_SIMULATED
         || reject_funder_only_as_product(pay_mode)
@@ -732,12 +733,10 @@ fn _type_check_action(_a: &SwapActionV0) {}
 mod tests {
     use super::*;
     use crate::harness::mint_evidence::mint_evidence_from_claim_fields;
-    use crate::harness::swap_statement_cw::{
-        build_swap_spend_handoff_from_mint, ProofModeLabel,
-    };
+    use crate::harness::swap_statement_cw::{ProofModeLabel, build_swap_spend_handoff_from_mint};
     use crate::harness::zakura_local::{
-        owner_binding_from_dest_display, primary_golden_dest, SealedDestSource, REGTEST_MINER_DEST,
-        REGTEST_MINER_OWNER_BINDING_HEX,
+        REGTEST_MINER_DEST, REGTEST_MINER_OWNER_BINDING_HEX, SealedDestSource,
+        owner_binding_from_dest_display, primary_golden_dest,
     };
 
     fn fixture_mint() -> crate::harness::MintEvidenceV0 {
@@ -810,7 +809,8 @@ mod tests {
     fn option_d_after_settle_happy_pure_labeled() {
         // Pin residual inventory so ambient omni/product profile cannot flaky-fail.
         use crate::harness::lab_pay_zec::{
-            ENV_CORRIDOR_ALLOW_LAB_INVENTORY_RESIDUAL, ENV_CORRIDOR_PROFILE, ENV_CORRIDOR_ZEC_RELEASE,
+            ENV_CORRIDOR_ALLOW_LAB_INVENTORY_RESIDUAL, ENV_CORRIDOR_PROFILE,
+            ENV_CORRIDOR_ZEC_RELEASE,
         };
         let prev_release = std::env::var(ENV_CORRIDOR_ZEC_RELEASE).ok();
         let prev_profile = std::env::var(ENV_CORRIDOR_PROFILE).ok();
@@ -997,8 +997,7 @@ mod tests {
         let sealed = sealed_golden();
         let settle = sample_settle(&handoff);
         let opening = settle_opening_from_handoff(&handoff, &sealed).unwrap();
-        let (evidence, _) =
-            apply_pure_egress_burn_labeled(&opening, &sealed, None).unwrap();
+        let (evidence, _) = apply_pure_egress_burn_labeled(&opening, &sealed, None).unwrap();
         let mut wrong = sealed.clone();
         wrong.owner_binding = [0xAB; 32];
         wrong.owner_binding_hex = hex::encode(wrong.owner_binding);

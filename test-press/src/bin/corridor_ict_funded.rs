@@ -1048,8 +1048,8 @@ fn run_sync() -> Result<(), Box<dyn std::error::Error>> {
                     nullifier_hex: hex::encode(pure_evidence.burn.nullifier),
                     dest_commitment_hex: hex::encode(pure_evidence.burn.dest_commitment),
                     dest_kind: match pure_evidence.burn.dest_kind {
-                        private_dex_seams::DestKind::Transparent => "transparent".into(),
-                        private_dex_seams::DestKind::Shielded => "shielded".into(),
+                        terp_seams::dex::DestKind::Transparent => "transparent".into(),
+                        terp_seams::dex::DestKind::Shielded => "shielded".into(),
                     },
                     root_hex: hex::encode(pure_evidence.burn.root),
                     source_pool_id: pure_evidence.burn.source_pool_id,
@@ -1076,8 +1076,8 @@ fn run_sync() -> Result<(), Box<dyn std::error::Error>> {
                 dest_display: zec.dest_display.clone(),
                 dest_owner_binding_hex: zec.dest_owner_binding_hex.clone(),
                 dest_kind: match zec.dest_kind {
-                    private_dex_seams::DestKind::Transparent => "transparent".into(),
-                    private_dex_seams::DestKind::Shielded => "shielded".into(),
+                    terp_seams::dex::DestKind::Transparent => "transparent".into(),
+                    terp_seams::dex::DestKind::Shielded => "shielded".into(),
                 },
                 zec_txid: zec.zec_txid.clone(),
                 amount_zat: zec.amount_zat,

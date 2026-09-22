@@ -67,7 +67,7 @@ impl<Chain: ZkCwEnv + cw_orch::prelude::CircuitUploadable> Deploy<Chain> for Hea
     }
 
     fn load_from(chain: Chain) -> Result<Self, Self::Error> {
-        todo!()
+        Ok(Self::new(chain))
     }
 
     fn deploy_on(chain: Chain, data: Self::DeployData) -> Result<Self, Self::Error> {
@@ -136,7 +136,6 @@ impl HeadstashDeployData {
                     },
                 },
                 circuit_id: None,
-                claim_mock_verify: Some(true), // lab Product A claim path without zk wasmvm
             },
         })
     }

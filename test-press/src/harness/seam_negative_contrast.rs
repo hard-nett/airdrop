@@ -6,14 +6,14 @@
 //!
 //! SSOT: `DESIGN-HARNESS-NEGATIVE-CONTRAST-2026-07-22.md`
 
-use private_dex_seams::{
+use terp_seams::dex::{
     apply_egress_burn, apply_swap, authorize_escrow_release, build_egress_burn_from_settle,
     check_oracle_bound, oracle_mint_note, oracle_update_reserves, quote_exact_in,
     settle_opening_from_note_fields, AssetId, DestKind, EgressBurnEvidenceV0, NoteIn, OracleBoundParams,
     OracleMid, Pool, PoolStatus, SeamError, SeamState, SwapPublic, ThresholdEscrowAuth,
     MODE_FROST_ESCROW_RELEASE, MODE_THRESHOLD_ESCROW_RELEASE,
 };
-use private_dex_seams::{
+use terp_seams::dex::{
     authorize_create_pool_reserves, mint_lp_zec_note, DualHomePrepV0, EscrowLiabilityV0,
     LpSeedReceiptV0, PoolSeedPolicy, LP_SEED_SOURCE_BRIDGED_NOTES, LP_SEED_SOURCE_MAGIC_LAB,
 };
@@ -186,7 +186,7 @@ fn nf_u64(tag: u8) -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use private_dex_seams::reject_funder_only_as_product;
+    use terp_seams::dex::reject_funder_only_as_product;
     use threshold_committee::{lab_sign_with_threshold, LabCommittee};
 
     #[test]
@@ -386,9 +386,9 @@ mod tests {
             0,
         );
         let burn = build_egress_burn_from_settle(&opening).unwrap();
-        let mut st = private_dex_seams::EgressSeamState::default();
+        let mut st = terp_seams::dex::EgressSeamState::default();
         let err = apply_egress_burn(&mut st, &burn.public, &burn.witness, Some(&wrong)).unwrap_err();
-        assert!(matches!(err, private_dex_seams::EgressError::ErrDestMismatch));
+        assert!(matches!(err, terp_seams::dex::EgressError::ErrDestMismatch));
     }
 
     #[test]
@@ -409,10 +409,10 @@ mod tests {
             0,
         );
         let burn = build_egress_burn_from_settle(&opening).unwrap();
-        let mut st = private_dex_seams::EgressSeamState::default();
+        let mut st = terp_seams::dex::EgressSeamState::default();
         apply_egress_burn(&mut st, &burn.public, &burn.witness, Some(&dest)).unwrap();
         let err = apply_egress_burn(&mut st, &burn.public, &burn.witness, Some(&dest)).unwrap_err();
-        assert!(matches!(err, private_dex_seams::EgressError::ErrNullifierExists));
+        assert!(matches!(err, terp_seams::dex::EgressError::ErrNullifierExists));
     }
 
     #[test]
@@ -462,12 +462,12 @@ mod tests {
         empty.burn.nullifier = [0u8; 32];
         assert!(matches!(
             authorize_escrow_release(&empty, &dest, &auth),
-            Err(private_dex_seams::EscrowReleaseError::MissingBurn)
+            Err(terp_seams::dex::EscrowReleaseError::MissingBurn)
         ));
         // Wrong dest
         assert!(matches!(
             authorize_escrow_release(&evidence, &[0xEE; 32], &auth),
-            Err(private_dex_seams::EscrowReleaseError::DestMismatch)
+            Err(terp_seams::dex::EscrowReleaseError::DestMismatch)
         ));
         // Bad auth
         let bad = ThresholdEscrowAuth {
@@ -476,7 +476,7 @@ mod tests {
         };
         assert!(matches!(
             authorize_escrow_release(&evidence, &dest, &bad),
-            Err(private_dex_seams::EscrowReleaseError::BadThresholdAuth)
+            Err(terp_seams::dex::EscrowReleaseError::BadThresholdAuth)
         ));
     }
 

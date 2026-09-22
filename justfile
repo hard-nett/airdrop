@@ -35,7 +35,7 @@ optimizer-clean:
 prepare-corridor-wasm-force:
         #!/usr/bin/env bash
         set -euo pipefail
-        FORCE_WASM_REBUILD=1 bash "{{justfile_directory()}}/../../crates/terp-rs/docs/private-bridge/e2e/prepare-corridor-ict-wasm.sh"
+        FORCE_WASM_REBUILD=1 bash "{{justfile_directory()}}/../../crates/terp-rs/tests/e2e/private-bridge/prepare-corridor-ict-wasm.sh"
 
 # ── Demo path (see docs/circuit/DEMO-PATH.md) ─────────────────────────────
 
@@ -59,12 +59,41 @@ demo-h1:
 # Override path: HEADSTASH_VK_PATH=artifacts/headstash_vk.bin
 # Parallel: RAYON_NUM_THREADS=8
 demo-keys:
-        cargo run -p zk-test-press --bin cc_headstash --features interface
+        cargo run -p zk-headstash --example curate_keys --features "circuit,std,interface,host-crypto,multicore"
 
 # Alias: explicit offline-only wording
 demo-keys-offline: demo-keys
 
+# No-Rick VK + e2e proofs into testdata (host halo2, no wasm-bindgen).
+demo-norick-testdata:
+        bash "{{repo_root}}/tests/tsh/zk/gen-testdata.sh"
+
+
 # Product A suite+circuit soundness (no full prove): Poseidon fixtures + MockProver smoke filters.
+# Fresh K=18 keys + prove + cw-orch Mock ProcessHeadstash via proof_instance_verify (clearnet uterp).
+# Writes artifacts/headstash_claim_metrics.json (circuit / proof sizes, timings). Slow.
+
+# Eligible EVM pubkeys for genesis notes. Local geth (scripts/geth) or public RPCs.
+# Rust: batched eth_getTransactionByHash + parallel explorer lookups.
+#   ETH_RPC_MODE=public ETH_SCRAPE_LIMIT=50 just scrape-eth-pubkeys
+scrape-eth-pubkeys:
+        cargo run -p headstash-eth-pubkeys --release
+
+# Map recovered keys onto community snapshots without touching originals.
+# Also writes <name>.unallocated.csv + communities/UNALLOCATED.md (burn ledger).
+enrich-eth-pubkeys:
+        cargo run -p headstash-eth-pubkeys --release -- --enrich-only
+
+scrape-eth-pubkeys-js:
+        cd "{{justfile_directory()}}/scripts" && node scrape-pubkeys.js
+
+# Poseidon-v1 notes + merkle from enriched CSVs (rayon). Skips unallocated/burn rows.
+gen-community-notes:
+        cargo run -p headstash-eth-pubkeys --release --bin gen_community_notes
+
+demo-claim-clearnet:
+        cargo test -p zk-test-press --test claim_clearnet --features "interface,zk" -- --ignored --nocapture
+
 demo-product-a:
         cargo test -p zk-headstash --lib --features "circuit,std,interface" -- \
                 note_poseidon distro_poseidon note::commitment suite:: tree:: \
@@ -168,10 +197,10 @@ e2e-l1:
 
 # ── Private Bridge corridor lab film (Layer A host; D1–D7 freezes) ───────────
 # Honest: lab_simulated notify + pure/Mock suites — NOT mainnet Cash App / BTC / ZEC.
-# SSOT: crates/terp-rs/docs/private-bridge/e2e/CORRIDOR-LAB-STATUS.md
+# SSOT: crates/terp-rs/tests/e2e/private-bridge/CORRIDOR-LAB-STATUS.md
 # Design freezes: crates/terp-rs/docs/private-bridge/DESIGN-DECISIONS-CORRIDOR-2026-07-20.md
 
-spectrum_e2e := justfile_directory() / "../terp-rs/docs/private-bridge/e2e"
+spectrum_e2e := justfile_directory() / "../terp-rs/tests/e2e/private-bridge"
 
 # One-command host film: cashapp pure + harness + hash-market notify smoke.
 demo-corridor-lab:
@@ -190,7 +219,7 @@ demo-corridor-lab:
         echo "OK demo-corridor-lab (lab only)"
         echo "  companion pure L0 spine: just demo-e2e-l0"
         echo "  companion L1 Mock mint:  just demo-e2e-l1"
-        echo "  status: crates/terp-rs/docs/private-bridge/e2e/CORRIDOR-LAB-STATUS.md"
+        echo "  status: crates/terp-rs/tests/e2e/private-bridge/CORRIDOR-LAB-STATUS.md"
 
 # Notify plane only (build/start hash-market lab + smoke).
 demo-corridor-lab-smoke:
@@ -214,7 +243,7 @@ demo-corridor-mint-after-observe:
 # ── ict_local_funded (S1/S2/S6) — fresh Terp + regtest observe + chain mint ─
 # Honest: local multi-net fidelity, NOT mainnet money. mock_verify labeled.
 # Requires: Docker, dockerd, terpnetwork/terp-core:local-zk (or CORRIDOR_ICT_IMAGE_TAG).
-# SSOT: crates/terp-rs/docs/private-bridge/e2e/CORRIDOR-LAB-STATUS.md + agents/.../STATUS-HARNESS-OBSERVE.md
+# SSOT: crates/terp-rs/tests/e2e/private-bridge/CORRIDOR-LAB-STATUS.md + agents/.../STATUS-HARNESS-OBSERVE.md
 
 prepare-corridor-ict-wasm:
         #!/usr/bin/env bash
@@ -411,7 +440,7 @@ demo-corridor-omni-e2e:
           bash "$E2E/demo-corridor-omni-e2e.sh"
 
 # ── Zakura local (D6) — ZEC dest / RPC; does not break demo-corridor-lab ─────
-# SSOT: crates/terp-rs/docs/private-bridge/e2e/ZAKURA-LOCAL.md
+# SSOT: crates/terp-rs/tests/e2e/private-bridge/ZAKURA-LOCAL.md
 
 demo-zakura-local-dest:
         #!/usr/bin/env bash

@@ -36,7 +36,8 @@ use ff::{Field, FromUniformBytes, PrimeField, PrimeFieldBits};
 use hex::decode;
 use pasta_curves::pallas::Base;
 use pasta_curves::{arithmetic::CurveAffine, group::Curve, pallas, Fp};
-use rand_core::{OsRng, RngCore};
+use rand_core::RngCore;
+use crate::os_rng;
 use serde_json::{json, Value};
 use sinsemilla::HashDomain;
 use std::error::Error;
@@ -94,8 +95,63 @@ pub fn build_headstash_keys_to(
         crate::circuit::K
     );
     let pk = crate::circuit::ProvingKey::build_and_write(path.to_path_buf())?;
-    eprintln!("  wrote store-circuit blob (params||cs||vk||footer)");
+    let blob = fs::read(path)?;
+    validate_store_circuit_blob(&blob)?;
+    eprintln!("  wrote store-circuit blob (params||cs||vk||footer) {} bytes", blob.len());
     Ok(pk)
+}
+
+/// Fail closed if the blob is not a wasmvm store-circuit body + CircuitFooter.
+fn validate_store_circuit_blob(bytes: &[u8]) -> Result<(), BoxError> {
+    const FOOT: usize = zk_cosmwasm::COSMWASM_FOOTER_LENGTH;
+    if bytes.len() < FOOT {
+        return Err(format!("store-circuit blob shorter than footer ({})", bytes.len()).into());
+    }
+    let footer = zk_cosmwasm::CircuitFooter::from_bytes(&bytes[bytes.len() - FOOT..])
+        .map_err(|e| format!("CircuitFooter: {e}"))?;
+    if footer.prover_id != Into::<u8>::into(zk_cosmwasm::CircuitType::Plonkish)
+        || footer.curve_id != Into::<u8>::into(zk_cosmwasm::curves::CurveType::Pasta)
+        || footer.k != crate::circuit::K as u8
+        || footer.i != 6
+    {
+        return Err(format!(
+            "footer meta expected Plonkish/Pasta/K={}/i=6, got prover={} curve={} k={} i={}",
+            crate::circuit::K, footer.prover_id, footer.curve_id, footer.k, footer.i
+        )
+        .into());
+    }
+    let expect = footer.param_len as usize + footer.cs_len as usize + footer.vk_len as usize + FOOT;
+    if bytes.len() != expect {
+        return Err(format!(
+            "blob len {} != param+cs+vk+footer {}",
+            bytes.len(),
+            expect
+        )
+        .into());
+    }
+    let param = &bytes[..footer.param_len as usize];
+    let vk_body = &bytes[footer.param_len as usize..bytes.len() - FOOT];
+    let param_hash = cosmwasm_std::Checksum::generate(param);
+    let vk_hash = cosmwasm_std::Checksum::generate(vk_body);
+    if param_hash.as_slice() != footer.param_checksum.as_slice() {
+        return Err("param checksum mismatch vs footer".into());
+    }
+    if vk_hash.as_slice() != footer.vk_checksum.as_slice() {
+        return Err("vk/cs checksum mismatch vs footer".into());
+    }
+    // Same split wasmvm uses to load appstate param + vk files.
+    zk_cosmwasm::AnyVerifyingKey::from_bytes(bytes)
+        .map_err(|e| format!("AnyVerifyingKey::from_bytes: {e}"))?;
+    eprintln!(
+        "  footer ok: Plonkish Pasta K={} i=6 param_len={} cs_len={} vk_len={}",
+        footer.k, footer.param_len, footer.cs_len, footer.vk_len
+    );
+    eprintln!(
+        "  appstate keys param={} vk={}",
+        footer.param_filename(),
+        footer.vk_filename()
+    );
+    Ok(())
 }
 
 impl<Chain: ZkCwEnv> HeadstashCircuitSuite<Chain> {
@@ -121,7 +177,7 @@ pub trait HeadstashBitwiseInstance {
     /// Returns `esk mod pallas_p`, matching the in-circuit `.native` value.
     fn derive_esk_native(&self, sk: [u8; 32]) -> Fp {
         use crate::spec::biguint_to_fe_simple;
-        let skfq = halo2_base::halo2_proofs::halo2curves::secq256k1::Fp::from_repr(sk).expect("Fq");
+        let skfq = crate::circuit::gadget::secp256k1_chip::secp_fq_from_secret_be(&sk);
         let sk_big = halo2_base::utils::fe_to_biguint(&skfq);
         biguint_to_fe_simple(&sk_big)
     }
@@ -1144,7 +1200,7 @@ pub trait MerkleTestDataBuilder: HeadstashSinsemillaTree {
     ///
     /// Creates `count` test leaves with random addresses and predetermined token/value pairs.
     fn generate_test_leaves(&self, count: usize) -> Vec<TestLeafData> {
-        let mut rng = OsRng;
+        let mut rng = os_rng();
         let tokens = ["uterp", "ibc/ATOM", "factory/token"];
         let values = [1_000_000u64, 5_000_000u64, 10_000_000u64, 50_000_000u64];
 
@@ -1588,7 +1644,7 @@ pub trait HeadstashProofBuilder: HeadstashBitwiseInstance + MerkleTestDataBuilde
         leaf_data: &TestLeafData,
         auth_path: &MerkleAuthPath,
     ) -> Result<HeadstashProofBundle, BoxError> {
-        let mut rng = OsRng;
+        let mut rng = os_rng();
 
         let sk = SpendingKey::random(&mut rng);
         let fvk = FullViewingKey::from(&sk);
@@ -1644,7 +1700,7 @@ pub trait HeadstashProofBuilder: HeadstashBitwiseInstance + MerkleTestDataBuilde
         let leaf = partial.poseidon_leaf();
         let (merkle_path, anchor) = path.to_circuit_path_and_root_poseidon_v1(leaf);
 
-        let mut rng = OsRng;
+        let mut rng = os_rng();
         let sk = SpendingKey::random(&mut rng);
         let fvk = FullViewingKey::from(&sk);
         let esk = EligibleSk::from_bytes(leaf_data.raw_addr);
@@ -1696,7 +1752,7 @@ pub trait HeadstashLaunchpadInstance: HeadstashBitwiseInstance + HeadstashIpfsIn
         recp: RecpAddr,
         hv: HeadstashValue,
     ) -> Result<Proof, BoxError> {
-        let mut rng = OsRng;
+        let mut rng = os_rng();
         let r = self.rho_from_secure_random().to_bytes();
         let rho = self.rho_from_secure_random();
         let rseed = RandomSeed::from_bytes(r, &rho).expect("random seed");
@@ -2315,8 +2371,8 @@ mod test {
     #[test]
     fn test_poseidon_v1_two_leaf_matches_distro_module() {
         let suite = HeadstashCircuitSuite::new(Mock::new("sender"));
-        let sk0 = EligibleSk::random(&mut OsRng).secret_bytes();
-        let sk1 = EligibleSk::random(&mut OsRng).secret_bytes();
+        let sk0 = EligibleSk::random(&mut rand::rng()).secret_bytes();
+        let sk1 = EligibleSk::random(&mut rand::rng()).secret_bytes();
         let d0 = suite.generate_leaf_data(&sk0, "uterp", 1_000_000, 0);
         let d1 = suite.generate_leaf_data(&sk1, "uterp", 5_000_000, 1);
         let l0 = suite.compute_leaf_from_data_poseidon_v1(&d0);

@@ -124,9 +124,11 @@ pub struct InitialMint {
 }
 
 pub fn derive_nd(raw: &str) -> Binary {
+    // Same as `NoteDenom::new_for_proof`: blake3 then clear high bits of the
+    // last byte so the 32-byte value is a canonical pallas::Base.
     let hash = blake3::hash(raw.as_bytes());
     let mut hash_bytes = *hash.as_bytes();
-    hash_bytes[0] &= 0x1F;
+    hash_bytes[31] &= 0x1F;
     hash_bytes.into()
 }
 impl HeadstashTokenObject {

@@ -75,7 +75,6 @@
 #![cfg(feature = "circuit")]
 
 use ff::{FromUniformBytes, PrimeField};
-use group::Curve;
 use halo2_gadgets::poseidon::primitives::{self as poseidon, ConstantLength, P128Pow5T3};
 use pasta_curves::pallas;
 
@@ -220,7 +219,6 @@ mod tests {
     };
     use ff::Field;
     use group::{ff::PrimeField, Group};
-    use pasta_curves::arithmetic::CurveAffine;
 
     fn sample_note_fields(
         seed: u64,
@@ -285,35 +283,107 @@ mod tests {
         let base = poseidon_note_cmx(nd, v, fdi, recp, esk, rho, psi, rcm_base);
         assert_ne!(
             base,
-            poseidon_note_cmx(nd + pallas::Base::ONE, v, fdi, recp, esk, rho, psi, rcm_base)
+            poseidon_note_cmx(
+                nd + pallas::Base::ONE,
+                v,
+                fdi,
+                recp,
+                esk,
+                rho,
+                psi,
+                rcm_base
+            )
         );
         assert_ne!(
             base,
-            poseidon_note_cmx(nd, v + pallas::Base::ONE, fdi, recp, esk, rho, psi, rcm_base)
+            poseidon_note_cmx(
+                nd,
+                v + pallas::Base::ONE,
+                fdi,
+                recp,
+                esk,
+                rho,
+                psi,
+                rcm_base
+            )
         );
         assert_ne!(
             base,
-            poseidon_note_cmx(nd, v, fdi + pallas::Base::ONE, recp, esk, rho, psi, rcm_base)
+            poseidon_note_cmx(
+                nd,
+                v,
+                fdi + pallas::Base::ONE,
+                recp,
+                esk,
+                rho,
+                psi,
+                rcm_base
+            )
         );
         assert_ne!(
             base,
-            poseidon_note_cmx(nd, v, fdi, recp + pallas::Base::ONE, esk, rho, psi, rcm_base)
+            poseidon_note_cmx(
+                nd,
+                v,
+                fdi,
+                recp + pallas::Base::ONE,
+                esk,
+                rho,
+                psi,
+                rcm_base
+            )
         );
         assert_ne!(
             base,
-            poseidon_note_cmx(nd, v, fdi, recp, esk + pallas::Base::ONE, rho, psi, rcm_base)
+            poseidon_note_cmx(
+                nd,
+                v,
+                fdi,
+                recp,
+                esk + pallas::Base::ONE,
+                rho,
+                psi,
+                rcm_base
+            )
         );
         assert_ne!(
             base,
-            poseidon_note_cmx(nd, v, fdi, recp, esk, rho + pallas::Base::ONE, psi, rcm_base)
+            poseidon_note_cmx(
+                nd,
+                v,
+                fdi,
+                recp,
+                esk,
+                rho + pallas::Base::ONE,
+                psi,
+                rcm_base
+            )
         );
         assert_ne!(
             base,
-            poseidon_note_cmx(nd, v, fdi, recp, esk, rho, psi + pallas::Base::ONE, rcm_base)
+            poseidon_note_cmx(
+                nd,
+                v,
+                fdi,
+                recp,
+                esk,
+                rho,
+                psi + pallas::Base::ONE,
+                rcm_base
+            )
         );
         assert_ne!(
             base,
-            poseidon_note_cmx(nd, v, fdi, recp, esk, rho, psi, rcm_base + pallas::Base::ONE)
+            poseidon_note_cmx(
+                nd,
+                v,
+                fdi,
+                recp,
+                esk,
+                rho,
+                psi,
+                rcm_base + pallas::Base::ONE
+            )
         );
     }
 
@@ -388,6 +458,7 @@ mod tests {
 
     #[test]
     fn lift_note_cmx_is_note_commit_r_mul() {
+        use group::Curve;
         let cmx = pallas::Base::from(9u64);
         let point = lift_note_cmx(cmx);
         let expected = note_commit_r::generator() * mod_r_p(cmx);

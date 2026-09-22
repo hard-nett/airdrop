@@ -9,11 +9,10 @@ use blake2b_simd::{Hash as Blake2bHash, Params};
 use fpe::ff1::{BinaryNumeralString, FF1};
 use group::{
     ff::{Field, PrimeField},
-    prime::PrimeCurveAffine,
-    Curve, GroupEncoding,
+    Curve, Group, GroupEncoding,
 };
 use pasta_curves::pallas;
-use rand::RngCore;
+use rand_core::Rng;
 #[cfg(feature = "host-crypto")]
 use secp256k1::SecretKey;
 use subtle::{Choice, ConditionallySelectable, ConstantTimeEq, CtOption};
@@ -56,7 +55,7 @@ impl SpendingKey {
     /// derived according to [ZIP 32].
     ///
     /// [ZIP 32]: https://zips.z.cash/zip-0032
-    pub fn random(rng: &mut impl RngCore) -> Self {
+    pub fn random(rng: &mut impl Rng) -> Self {
         loop {
             let mut bytes = [0; 32];
             rng.fill_bytes(&mut bytes);
@@ -888,7 +887,7 @@ impl SharedSecret {
             .collect();
 
         // Batch-normalize the shared secrets.
-        let mut secrets_affine = vec![pallas::Affine::identity(); secrets.len()];
+        let mut secrets_affine = vec![pallas::Point::identity().to_affine(); secrets.len()];
         group::Curve::batch_normalize(&secrets, &mut secrets_affine);
 
         // Re-insert the invalid ephemeral_key positions.
@@ -935,7 +934,7 @@ pub struct EligibleSk([u8; 32]);
 
 impl EligibleSk {
     /// Generates a random key that will be eligible for a headstash instance.
-    pub fn random(rng: &mut impl RngCore) -> Self {
+    pub fn random(rng: &mut impl Rng) -> Self {
         let mut bytes = [0; 32];
         rng.fill_bytes(&mut bytes);
         Self::from_bytes(bytes)

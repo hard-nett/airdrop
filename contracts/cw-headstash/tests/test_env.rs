@@ -272,5 +272,6 @@ pub fn mock_headstash_instantiate_msg() -> HeadstashInstantiateMsg {
         distro_hash_domain: Default::default(),
         genesis_label: None,
         wavs: mock_wavs_proof(),
+        circuit_id: None,
     }
 }

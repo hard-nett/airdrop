@@ -22,10 +22,6 @@ pub struct InstantiateMsg {
     /// Stored circuit id after zkvm `store-circuit` / `upload_circuit` (default 0 until set).
     #[serde(default)]
     pub circuit_id: Option<u64>,
-    /// **Lab only:** when true, `ProcessHeadstash` accepts non-empty mock proofs without
-    /// `proof_instance_verify`. Production must leave false and use `zk-api` + real cid.
-    #[serde(default)]
-    pub claim_mock_verify: Option<bool>,
 }
 
 #[cfg_attr(feature = "interface", derive(cw_orch::ExecuteFns))]
@@ -38,10 +34,6 @@ pub enum ExecuteMsg {
     /// Owner: bind wasmvm store-circuit id used by `proof_instance_verify`.
     SetCircuitId {
         circuit_id: u64,
-    },
-    /// Owner: toggle lab claim mock-verify (never enable on production).
-    SetClaimMockVerify {
-        claim_mock_verify: bool,
     },
     /// Register an **additive** eligibility root (Poseidon-v1 only for new drops).
     /// Owner-only. Assigns the next `root_id` and stores root + domain.

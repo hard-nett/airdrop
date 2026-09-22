@@ -5,7 +5,6 @@
 //!
 //! Private note commitment: [`crate::circuit::note_poseidon_gadget`] (Poseidon-v1).
 
-use group::ff::Field;
 use halo2_gadgets::{
     poseidon::{
         primitives::{ConstantLength, P128Pow5T3},
@@ -150,10 +149,10 @@ pub fn calculate_distro_root_poseidon(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::distro_poseidon::{poseidon_distro_crh, poseidon_distro_leaf, poseidon_distro_path_root};
-    use ff::Field;
+    use crate::distro_poseidon::{
+        poseidon_distro_crh, poseidon_distro_leaf, poseidon_distro_path_root,
+    };
     use halo2_gadgets::poseidon::Pow5Config as PoseidonConfig;
-    use halo2_gadgets::utilities::cond_swap::CondSwapConfig;
     use halo2_proofs::{
         circuit::{SimpleFloorPlanner, Value},
         dev::MockProver,

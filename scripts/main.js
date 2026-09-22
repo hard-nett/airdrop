@@ -7,7 +7,8 @@ import { processGenesisDistribution, checkAddresses } from './genesis-script.js'
 import { fairPercentileRanges, applyNormalizationToAllProjects, generateOverviewReadme } from './calculations.js'
 import { SAC_ENCODED_FILE, SAC_JSON_PATH, HEADSTASH_YAML, ETH_RPC_URL } from './constants.js';
 import { readYamlFile } from './utils.js'
-import { determineAllPubkeys } from './pubkeys.js'
+import { ethers } from 'ethers';
+import { determineAllPubkeys, runPubkeyScrapeCli } from './pubkeys.js'
 
 // Process command line arguments
 const args = process.argv.slice(2);
@@ -50,9 +51,13 @@ if (args.length < 1) {
 } else if (args[0] === '-11') {
     generateOverviewReadme()
 } else if (args[0] === '-12') {
-    const provider = new ethers.JsonRpcProvider(ETH_RPC_URL);
-    determineAllPubkeys(provider)
-
+    // Self-hosted geth *or* public-good RPC pool (ETH_RPC_MODE=auto|local|public).
+    if (process.env.ETH_RPC_MODE === 'local' && !process.env.ETH_RPC_URLS) {
+        const provider = new ethers.JsonRpcProvider(ETH_RPC_URL);
+        await determineAllPubkeys(provider);
+    } else {
+        await runPubkeyScrapeCli();
+    }
 } else {
     console.error('Invalid option.');
 }

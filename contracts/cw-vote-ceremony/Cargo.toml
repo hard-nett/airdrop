@@ -16,10 +16,12 @@ crate-type = ["cdylib", "rlib"]
 default = []
 library = []
 backtraces = ["cosmwasm-std/backtraces"]
+interface = ["dep:cw-orch"]
 
 [dependencies]
 cosmwasm-schema = "1.5"
 cosmwasm-std = { version = "1.5", features = ["iterator"] }
+cw-orch = { path = "../../../cw-orchestrator/cw-orch", optional = true }
 cw-storage-plus = "1.2"
 schemars = "0.8"
 serde = { version = "1.0", default-features = false, features = ["derive"] }

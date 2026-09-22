@@ -1,4 +1,5 @@
 use cosmwasm_schema::{cw_serde, QueryResponses};
+
 use cosmwasm_std::Binary;
 
 /// Ceremony lifecycle status (string-stable for raw-query consumers).
@@ -42,11 +43,33 @@ pub enum ExecuteMsg {
         /// Optional anchor policy / root hint (opaque product string).
         #[serde(default)]
         anchor_policy: Option<String>,
+        #[serde(default = "default_gate")]
+        registration_gate: RegistrationGate,
+        /// Clerk address allowed to AttestLeaf (defaults to admin).
+        #[serde(default)]
+        clerk: Option<String>,
+        /// Voting / membership contract for DaoMember gate.
+        #[serde(default)]
+        membership_module: Option<String>,
+        /// Verifier / dummy-SA stand-in for VmProof (VerifyMinHolders).
+        #[serde(default)]
+        vm_verifier: Option<String>,
     },
     /// Close ceremony (no further spends / registrations).
     CloseCeremony { session_id: String },
-    /// Participant self-register (eligibility product hooks later).
-    Register { session_id: String },
+    /// Participant self-register. `leaf_commit` required when gate is ClerkAttested.
+    Register {
+        session_id: String,
+        #[serde(default)]
+        leaf_commit: Option<String>,
+        #[serde(default)]
+        proof: Option<Binary>,
+    },
+    /// Clerk/admin attests a registration leaf (dual L-reg half).
+    AttestLeaf {
+        session_id: String,
+        leaf_commit: String,
+    },
     /// Admin can toggle registration window.
     SetRegistrationOpen {
         session_id: String,
@@ -56,6 +79,27 @@ pub enum ExecuteMsg {
 
 fn default_true() -> bool {
     true
+}
+
+/// How Register is gated for this session (configurable product policy).
+#[cw_serde]
+#[derive(Default)]
+pub enum RegistrationGate {
+    /// Anyone with gas while registration_open (legacy).
+    #[default]
+    Open,
+    /// Register requires a clerk-attested leaf_commit (dregg / event-reg clerk).
+    ClerkAttested,
+    /// Register requires non-zero voting power on membership_module.
+    DaoMember,
+    /// Hook site for pre-propose; not fully wired (rejects until implemented).
+    PrePropose,
+    /// Dummy SA / wasmvm Authenticate stand-in (`vm_verifier` query VerifyMinHolders).
+    VmProof,
+}
+
+fn default_gate() -> RegistrationGate {
+    RegistrationGate::Open
 }
 
 /// Privileged path: thin gate ConfirmExecution → chain sudo → MarkSpent.
@@ -113,6 +157,14 @@ pub struct CeremonyInfo {
     pub status: CeremonyStatus,
     pub registration_open: bool,
     pub anchor_policy: Option<String>,
+    #[serde(default)]
+    pub registration_gate: RegistrationGate,
+    #[serde(default)]
+    pub clerk: Option<String>,
+    #[serde(default)]
+    pub membership_module: Option<String>,
+    #[serde(default)]
+    pub vm_verifier: Option<String>,
 }
 
 #[cw_serde]
@@ -128,6 +180,9 @@ pub struct IsSpentResponse {
 #[cw_serde]
 pub struct IsRegisteredResponse {
     pub registered: bool,
+    /// Bound leaf when Register stored one (ClerkAttested). Absent/empty on Open.
+    #[serde(default)]
+    pub leaf_commit: Option<String>,
 }
 
 #[cw_serde]

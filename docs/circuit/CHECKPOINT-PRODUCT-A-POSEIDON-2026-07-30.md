@@ -45,3 +45,34 @@ just demo-keys
 1. Run `just demo-keys` once and verify footer / store-circuit on lab chain.  
 2. Contract multi-test claim with mock ZK then real prove.  
 3. FE: public mint → shield SEAM (Product B).
+
+---
+
+# Follow-up: strip unused Sinsemilla CS (2026-08-14)
+
+**Session:** complete Poseidon note-commit layout (residual from `019fb059`).
+
+## Landed
+
+| Area | Status |
+|------|--------|
+| `NoteCommitChip` / dual Sinsemilla / MerkleChip / CommitIvk / LeafHash **not configured** on Product A `Circuit` | synthesize already Poseidon-only; configure matches |
+| Range table | `load_kbit_range_table` loads `[0, 2^10)` for ECC / secp256k1 lookups |
+| Helpers | `gadget.rs` no longer constructs unused Sinsemilla chips |
+
+## Still residual (not on Product A prove path)
+
+- `circuit/src/circuit/note_commit.rs`, `commit_ivk.rs`, `headstash_merkle_tree.rs` remain in-tree for legacy unit tests
+- Off-circuit `sinsemilla` crate / Orchard ZIP vectors
+- `commit_ivk` (IVK) still Sinsemilla if re-enabled later
+- Existing `artifacts/headstash_vk.bin` is **stale** — VK/CS changed; re-run `just demo-keys`
+
+## Tests run (host, no `interface`)
+
+```
+cargo test -p zk-headstash --lib --no-default-features \
+  --features "circuit,std,host-crypto,multicore" -- \
+  note_poseidon distro_poseidon note::commitment
+# 27 passed
+```
+

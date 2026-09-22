@@ -22,29 +22,21 @@ use group::Curve;
 use halo2_proofs::{
     circuit::{floor_planner, Layouter, Value},
     plonk::{
-        self, Advice, BatchVerifier, Column, Constraints, Expression, Instance as InstanceColumn,
-        Selector, SingleVerifier,
+        self, Advice, BatchVerifier, Column, Instance as InstanceColumn, SingleVerifier,
+        TableColumn,
     },
-    poly::Rotation,
     transcript::{Blake2bRead, Blake2bWrite},
 };
 
 use pasta_curves::{pallas, vesta};
-use rand::RngCore;
+use rand_core::RngCore;
 use tracing::info;
 
-use self::{
-    commit_ivk::{CommitIvkChip, CommitIvkConfig},
-    gadget::add_chip::{AddChip, AddConfig},
-    note_commit::{NoteCommitChip, NoteCommitConfig},
-};
+use self::gadget::add_chip::{AddChip, AddConfig};
 use crate::{
     address::RecpAddr,
     builder::SpendInfo,
-    circuit::headstash_merkle_tree::{LeafHashChip, LeafHashConfig},
-    constants::{
-        OrchardCommitDomains, OrchardFixedBases, OrchardHashDomains, MERKLE_DEPTH_ORCHARD,
-    },
+    constants::{OrchardFixedBases, MERKLE_DEPTH_ORCHARD},
     keys::NullifierDerivingKey,
     note::{
         commitment::{NoteCommitTrapdoor, NoteCommitment},
@@ -61,10 +53,6 @@ use halo2_gadgets::{
         Point,
     },
     poseidon::{primitives as poseidon, Pow5Chip as PoseidonChip, Pow5Config as PoseidonConfig},
-    sinsemilla::{
-        chip::{SinsemillaChip, SinsemillaConfig},
-        merkle::chip::{MerkleChip, MerkleConfig},
-    },
     utilities::{
         cond_swap::{CondSwapChip, CondSwapConfig},
         lookup_range_check::{LookupRangeCheck, LookupRangeCheckConfig},
@@ -82,7 +70,9 @@ mod note_commit_bit_tests;
 
 pub use crate::Proof;
 
-/// Size of the Headstash circuit (shared with Part T harness).
+/// Row budget. K=17 is not enough (`NotEnoughRowsAvailable`): ECC + secp +
+/// 32-deep Poseidon still fill more than 2^17 rows. The unused Orchard
+/// selector is gone; that does not shrink the row count.
 pub(crate) const K: u32 = 18;
 
 // Absolute offsets for public inputs.
@@ -101,7 +91,6 @@ const CMX: usize = 5;
 #[derive(Clone, Debug)]
 pub struct Config {
     primary: Column<InstanceColumn>,
-    q_orchard: Selector,
     advices: [Column<Advice>; 10],
     add_config: AddConfig,
     ecc_config: EccConfig<OrchardFixedBases>,
@@ -109,22 +98,8 @@ pub struct Config {
     poseidon_config: PoseidonConfig<pallas::Base, 3, 2>,
     /// Conditional swap for Poseidon-v1 distro Merkle path ordering.
     cond_swap_config: CondSwapConfig,
-    /// Kept configured so CS/VK layout stays stable; distro path uses Poseidon, not these chips.
-    /// Removing MerkleChip::configure changes fixed/advice allocation and breaks note_commit.
-    #[allow(dead_code)]
-    merkle_config_1: MerkleConfig<OrchardHashDomains, OrchardCommitDomains, OrchardFixedBases>,
-    #[allow(dead_code)]
-    merkle_config_2: MerkleConfig<OrchardHashDomains, OrchardCommitDomains, OrchardFixedBases>,
-    /// Sinsemilla configs for **private note commit**.
-    sinsemilla_config_1:
-        SinsemillaConfig<OrchardHashDomains, OrchardCommitDomains, OrchardFixedBases>,
-    sinsemilla_config_2:
-        SinsemillaConfig<OrchardHashDomains, OrchardCommitDomains, OrchardFixedBases>,
-    commit_ivk_config: CommitIvkConfig,
-    /// Legacy Sinsemilla leaf canonicity config (unused by Poseidon distro path).
-    leaf_hash_config: LeafHashConfig,
-    old_note_commit_config: NoteCommitConfig,
-    new_note_commit_config: NoteCommitConfig,
+    /// Shared 10-bit lookup table for ECC / secp256k1 range checks (not Sinsemilla).
+    range_table: TableColumn,
 }
 
 /// The Orchard Action circuit.
@@ -154,6 +129,30 @@ impl From<Circuit> for zk_cosmwasm::CosmwasmCircuit<Circuit> {
     fn from(c: Circuit) -> Self {
         zk_cosmwasm::CosmwasmCircuit::new(c)
     }
+}
+
+
+/// Load [0, 2^{10}) into the shared lookup column used by ECC / secp256k1 range checks.
+/// Product A no longer configures Sinsemilla, so this replaces `SinsemillaChip::load`.
+fn load_kbit_range_table(
+    table_idx: TableColumn,
+    layouter: &mut impl Layouter<pallas::Base>,
+) -> Result<(), plonk::Error> {
+    const KBITS: usize = 10;
+    layouter.assign_table(
+        || "k-bit range table",
+        |mut table| {
+            for index in 0..(1 << KBITS) {
+                table.assign_cell(
+                    || "table_idx",
+                    table_idx,
+                    index,
+                    || Value::known(pallas::Base::from(index as u64)),
+                )?;
+            }
+            Ok(())
+        },
+    )
 }
 
 impl Circuit {
@@ -245,59 +244,14 @@ impl plonk::Circuit<pallas::Base> for Circuit {
             meta.advice_column(),
         ];
 
-        // Constrain v_old - v_new = magnitude * sign    (https://p.z.cash/ZKS:action-cv-net-integrity?partial).
-        // Either v_old = 0, or calculated root = anchor (https://p.z.cash/ZKS:action-merkle-path-validity?partial).
-        // Constrain v_old = 0 or enable_spends = 1      (https://p.z.cash/ZKS:action-enable-spend).
-        // Constrain v_new = 0 or enable_outputs = 1     (https://p.z.cash/ZKS:action-enable-output).
-        let q_orchard = meta.selector();
-        meta.create_gate("Orchard circuit checks", |meta| {
-            let q_orchard = meta.query_selector(q_orchard);
-            let v_old = meta.query_advice(advices[0], Rotation::cur());
-            let v_new = meta.query_advice(advices[1], Rotation::cur());
-            let magnitude = meta.query_advice(advices[2], Rotation::cur());
-            let sign = meta.query_advice(advices[3], Rotation::cur());
-
-            let root = meta.query_advice(advices[4], Rotation::cur());
-            let anchor = meta.query_advice(advices[5], Rotation::cur());
-
-            let enable_spends = meta.query_advice(advices[6], Rotation::cur());
-            let enable_outputs = meta.query_advice(advices[7], Rotation::cur());
-
-            let one = Expression::Constant(pallas::Base::one());
-
-            Constraints::with_selector(
-                q_orchard,
-                [
-                    (
-                        "v_old - v_new = magnitude * sign",
-                        v_old.clone() - v_new.clone() - magnitude * sign,
-                    ),
-                    (
-                        "Either v_old = 0, or root = anchor",
-                        v_old.clone() * (root - anchor),
-                    ),
-                    (
-                        "v_old = 0 or enable_spends = 1",
-                        v_old * (one.clone() - enable_spends),
-                    ),
-                    (
-                        "v_new = 0 or enable_outputs = 1",
-                        v_new * (one - enable_outputs),
-                    ),
-                ],
-            )
-        });
+        // Orchard action gate (v_old/v_new/enable_spend/enable_output) is not
+        // synthesized. Dropping its selector keeps those polynomials out of the CS.
 
         // Addition of two field elements.
         let add_config = AddChip::configure(meta, advices[7], advices[8], advices[6]);
 
-        // Fixed columns for the Sinsemilla generator lookup table
+        // Single 10-bit lookup column for ECC / secp256k1 range checks.
         let table_idx = meta.lookup_table_column();
-        let lookup = (
-            table_idx,
-            meta.lookup_table_column(),
-            meta.lookup_table_column(),
-        );
 
         // Instance column used for public inputs
         let primary = meta.instance_column();
@@ -357,75 +311,19 @@ impl plonk::Circuit<pallas::Base> for Circuit {
         ];
         let secp256k1 = Secp256k1Config::configure(meta, secp_advices, range_check.clone());
 
-        // Sinsemilla + MerkleChip configuration (Orchard-shaped layout).
-        // Distro inclusion synthesize uses Poseidon+CondSwap only; MerkleChip is not
-        // called but remains configured to preserve CS column allocation for note_commit.
-        let (sinsemilla_config_1, merkle_config_1) = {
-            let sinsemilla_config_1 = SinsemillaChip::configure(
-                meta,
-                advices[..5].try_into().unwrap(),
-                advices[6],
-                lagrange_coeffs[0],
-                lookup,
-                range_check.clone(),
-                false,
-            );
-            let merkle_config_1 = MerkleChip::configure(meta, sinsemilla_config_1.clone());
-            (sinsemilla_config_1, merkle_config_1)
-        };
-        let (sinsemilla_config_2, merkle_config_2) = {
-            let sinsemilla_config_2 = SinsemillaChip::configure(
-                meta,
-                advices[5..].try_into().unwrap(),
-                advices[7],
-                lagrange_coeffs[1],
-                lookup,
-                range_check,
-                false,
-            );
-            let merkle_config_2 = MerkleChip::configure(meta, sinsemilla_config_2.clone());
-            (sinsemilla_config_2, merkle_config_2)
-        };
-
-        // Configuration to handle decomposition and canonicity checking
-        // for CommitIvk.
-        let commit_ivk_config = CommitIvkChip::configure(meta, advices);
-
-        // Configuration to handle decomposition and canonicity checking
-        // for leaf hash (Sinsemilla-legacy; distro path uses Poseidon-v1).
-        let leaf_hash_config = LeafHashChip::configure(meta, advices);
-
         // CondSwap for Poseidon-v1 distro Merkle path (node/sibling ordering).
         let cond_swap_config =
             CondSwapChip::configure(meta, advices[0..5].try_into().unwrap());
 
-        // Configuration to handle decomposition and canonicity checking
-        // for NoteCommit_old.
-        let old_note_commit_config =
-            NoteCommitChip::configure(meta, advices, sinsemilla_config_1.clone());
-
-        // Configuration to handle decomposition and canonicity checking
-        // for NoteCommit_new.
-        let new_note_commit_config =
-            NoteCommitChip::configure(meta, advices, sinsemilla_config_2.clone());
-
         Config {
             primary,
-            q_orchard,
             advices,
             add_config,
             ecc_config,
             secp256k1,
             poseidon_config,
             cond_swap_config,
-            merkle_config_1,
-            merkle_config_2,
-            sinsemilla_config_1,
-            sinsemilla_config_2,
-            commit_ivk_config,
-            leaf_hash_config,
-            old_note_commit_config,
-            new_note_commit_config,
+            range_table: table_idx,
         }
     }
 
@@ -435,8 +333,8 @@ impl plonk::Circuit<pallas::Base> for Circuit {
         config: Self::Config,
         mut layouter: impl Layouter<pallas::Base>,
     ) -> Result<(), plonk::Error> {
-        // Load the Sinsemilla generator lookup table used by the whole circuit.
-        SinsemillaChip::load(config.sinsemilla_config_1.clone(), &mut layouter)?;
+        // Load [0, 2^10) for ECC / secp256k1 lookup range checks.
+        load_kbit_range_table(config.range_table, &mut layouter)?;
 
         // Construct the ECC chip.
         let ecc_chip = config.ecc_chip();
@@ -503,13 +401,15 @@ impl plonk::Circuit<pallas::Base> for Circuit {
             (nd, v, fdi, recp, psi_old, rho_old, nk)
         };
 
-        // NOTE (Part I / H12): public HS_ND / HS_V / RECP instance equality deferred.
-        let _ = recp.clone();
+        // Public instances must match the same cells used in Poseidon note + distro leaf.
+        // Distro tree is public (unlike Orchard Sinsemilla cmx-in-tree); binding nd/v/recp
+        // here is what makes a clearnet claim mint the allocation the proof opened.
+        layouter.constrain_instance(nd.cell(), config.primary, HS_ND)?;
+        layouter.constrain_instance(recp.cell(), config.primary, RECP)?;
 
         // --- Note commit + nullifier FIRST (Poseidon-v1 cmx + lift), before distro path.
         // Running 32 Poseidon CRH layers first was associated with normalize/Fixed
         // permutation failures in the composite circuit; keep Orchard-shaped order.
-        // NoteCommitChip (Sinsemilla) remains configured for CS column layout only.
         let rcm_base = assign_free_advice(
             layouter.namespace(|| "witness rcm_base"),
             config.advices[0],
@@ -528,6 +428,7 @@ impl plonk::Circuit<pallas::Base> for Circuit {
             || "constrain v == v_for_cm (note commit)",
             |mut region| region.constrain_equal(v.cell(), v_for_cm.cell()),
         )?;
+        layouter.constrain_instance(v_for_cm.cell(), config.primary, HS_V)?;
 
         let (cm_old, cmx_cell) = note_poseidon_gadget::note_commit_poseidon(
             layouter.namespace(|| "derive note commitment Poseidon-v1"),
@@ -537,7 +438,7 @@ impl plonk::Circuit<pallas::Base> for Circuit {
             nd.clone(),
             v_for_cm,
             fdi.clone(),
-            recp,
+            recp.clone(),
             esk_crt.native.clone(),
             rho_old.clone(),
             psi_old.clone(),
@@ -902,7 +803,8 @@ mod tests {
     use ff::PrimeField;
     use halo2_proofs::{circuit::Value, dev::MockProver};
     use pasta_curves::pallas;
-    use rand::{rngs::OsRng, RngCore};
+    use rand_core::RngCore;
+    use crate::os_rng;
 
     use super::{Circuit, Instance, Proof, ProvingKey, VerifyingKey, K};
     use crate::{
@@ -989,7 +891,7 @@ mod tests {
     // TODO: recast as a proptest
     #[test]
     fn round_trip() {
-        let mut rng = OsRng;
+        let mut rng = os_rng();
 
         let (circuits, instances): (Vec<_>, Vec<_>) = iter::once(())
             .map(|()| generate_circuit_instance(&mut rng))
@@ -1014,7 +916,8 @@ mod tests {
                     K,
                     &circuits[0],
                 );
-            assert_eq!(usize::from(circuit_cost.proof_size(1)), 5568);
+            // Layout after unused Sinsemilla configure removal.
+            assert_eq!(usize::from(circuit_cost.proof_size(1)), 4704);
             assert_eq!(usize::from(circuit_cost.proof_size(2)), 7840);
             usize::from(circuit_cost.proof_size(instances.len()))
         };
@@ -1108,7 +1011,7 @@ mod tests {
 
     //     if std::env::var_os("ORCHARD_CIRCUIT_TEST_GENERATE_NEW_PROOF").is_some() {
     //         let create_proof = || -> std::io::Result<()> {
-    //             let mut rng = OsRng;
+    //             let mut rng = os_rng();
 
     //             let (circuit, instance) = generate_circuit_instance(rng);
     //             let instances = &[instance.clone()];
@@ -1137,7 +1040,7 @@ mod tests {
     /// Verifies that a participant can prove their inclusion in the genesis distribution
     #[test]
     fn test_genesis_merkle_inclusion() {
-        let mut rng = OsRng;
+        let mut rng = os_rng();
 
         let (circuits, instances): (Vec<_>, Vec<_>) = iter::once(())
             .map(|()| generate_circuit_instance(&mut rng))
@@ -1171,7 +1074,7 @@ mod tests {
     fn test_genesis_merkle_path_with_various_positions() {
         // Test genesis merkle path verification with different leaf positions
         // This validates that the merkle path proof works correctly at any tree position
-        let mut rng = OsRng;
+        let mut rng = os_rng();
 
         // Test multiple instances with potentially different merkle paths
         for test_num in 0..3 {

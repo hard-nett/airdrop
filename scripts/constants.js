@@ -9,7 +9,8 @@ const TOTAL_SUPPLY = 420000000;
 const GAIA_PERC_SUPPLY = 0.061152;
 const BCNA_PERC_SUPPLY = 0.01911;
 
-const ETH_RPC_URL = "https://mainnet.infura.io/v3/YOUR_KEY";
+// Default single URL (legacy). Prefer ETH_RPC_URLS / ETH_RPC_MODE in scrape-pubkeys.
+const ETH_RPC_URL = process.env.ETH_RPC_URL || "http://127.0.0.1:8545";
 // YAML files
 const HEADSTASH_YAML = "../headstash.yaml";
 const GENESIS_YAML_FILE = "../headstash/scripts-data/final_tally.csv";

@@ -135,13 +135,13 @@ fn test_secp256k1_key_pairing_valid() {
 
     let mut sk_le = sk_bytes;
     sk_le.reverse();
-    let sk = Secp256k1Fq::from_repr(sk_le).expect("valid Fq");
+    let sk = secp_fq_from_le(sk_le);
     let mut pk_x_le = pk_x_bytes;
     pk_x_le.reverse();
-    let pk_x = Secp256k1Fp::from_repr(pk_x_le).expect("valid Fp");
+    let pk_x = secp_fp_from_le(pk_x_le);
     let mut pk_y_le = pk_y_bytes;
     pk_y_le.reverse();
-    let pk_y = Secp256k1Fp::from_repr(pk_y_le).expect("valid Fp");
+    let pk_y = secp_fp_from_le(pk_y_le);
 
     println!("Testing VALID key pair:");
     println!("  sk:   {:?}", hex::encode(sk_bytes));
@@ -224,13 +224,13 @@ fn test_secp256k1_key_pairing_invalid() {
 
     let mut sk_le = sk_bytes;
     sk_le.reverse();
-    let sk = Secp256k1Fq::from_repr(sk_le).expect("valid Fq");
+    let sk = secp_fq_from_le(sk_le);
     let mut pk_x_le = pk_x_bytes;
     pk_x_le.reverse();
-    let pk_x = Secp256k1Fp::from_repr(pk_x_le).expect("valid Fp");
+    let pk_x = secp_fp_from_le(pk_x_le);
     let mut pk_y_le = pk_y_bytes;
     pk_y_le.reverse();
-    let pk_y = Secp256k1Fp::from_repr(pk_y_le).expect("valid Fp");
+    let pk_y = secp_fp_from_le(pk_y_le);
 
     let circuit = KeyPairingTestCircuit { sk, pk_x, pk_y };
     let prover = MockProver::run(18, &circuit, vec![]).expect("prover should run");
@@ -255,7 +255,7 @@ fn test_foreign_field_limb_decomposition() {
         0x88, 0x99,
     ];
 
-    let v = Secp256k1Fp::from_repr(test_value_bytes).expect("valid Fp");
+    let v = secp_fp_from_le(test_value_bytes);
     let v_biguint = halo2_base::utils::fe_to_biguint(&v);
 
     // Decompose into 4x64-bit limbs
@@ -309,8 +309,8 @@ fn test_secp256k1_pk_to_pallas_crt_conversion() {
     let pk_x_bytes: [u8; 32] = pk_bytes[1..33].try_into().unwrap();
     let pk_y_bytes: [u8; 32] = pk_bytes[33..65].try_into().unwrap();
 
-    let pk_x_fp = Secp256k1Fp::from_repr(pk_x_bytes).expect("valid Fp");
-    let pk_y_fp = Secp256k1Fp::from_repr(pk_y_bytes).expect("valid Fp");
+    let pk_x_fp = secp_fp_from_le(pk_x_bytes);
+    let pk_y_fp = secp_fp_from_le(pk_y_bytes);
     let pk_x_big = fe_to_biguint(&pk_x_fp);
     let pk_y_big = fe_to_biguint(&pk_y_fp);
 
@@ -350,7 +350,7 @@ fn test_secp256k1_sk_to_pallas_base_conversion() {
         0x1f, 0x20,
     ];
 
-    let sk_fq = Secp256k1Fq::from_repr(sk_bytes).expect("valid Fq");
+    let sk_fq = secp_fq_from_le(sk_bytes);
     let sk_big = fe_to_biguint(&sk_fq);
 
     // Decompose into 4x64-bit limbs
@@ -425,9 +425,9 @@ fn test_eth_key_pairing_with_crt() {
     let pk_x_bytes: [u8; 32] = pk_bytes[1..33].try_into().unwrap();
     let pk_y_bytes: [u8; 32] = pk_bytes[33..65].try_into().unwrap();
 
-    let sk_fq = Secp256k1Fq::from_repr(sk.secret_bytes()).expect("valid Fq");
-    let pk_x_fp = Secp256k1Fp::from_repr(pk_x_bytes).expect("valid Fp");
-    let pk_y_fp = Secp256k1Fp::from_repr(pk_y_bytes).expect("valid Fp");
+    let sk_fq = secp_fq_from_le(sk.secret_bytes());
+    let pk_x_fp = secp_fp_from_le(pk_x_bytes);
+    let pk_y_fp = secp_fp_from_le(pk_y_bytes);
 
     // Verify CRT decomposition with 4x64-bit limbs
     let sk_limbs = crate::spec::decompose_biguint_simple(&fe_to_biguint(&sk_fq), 4, 64);
@@ -469,7 +469,7 @@ fn test_document_foreign_field_flow() {
     let sk_bytes = [0x42; 32];
 
     println!("\n2. Convert to secp256k1::Fq field element");
-    let _sk_fq = Secp256k1Fq::from_repr(sk_bytes).expect("valid Fq");
+    let _sk_fq = secp_fq_from_le(sk_bytes);
 
     println!("\n3. In circuit: Load as CRT integer");
     println!("   - Decompose 256 bits -> 4 limbs x 64 bits");

@@ -17,7 +17,7 @@ use halo2_proofs::{
     transcript::{Blake2bRead, Blake2bWrite},
 };
 use pasta_curves::{pallas, vesta};
-use rand::RngCore;
+use rand::Rng;
 
 use std::{
     fs::File,
@@ -465,7 +465,7 @@ impl ProvingKey {
 
     /// build and write the provingkey and verifying key, as defined by the terp-ADR that specifies how we serialize our proving keys for on-chain compatibility.
     /// path - the path to the artifacts directory.
-    pub fn build_and_write(vkpath: PathBuf) -> cw_orch::anyhow::Result<Self> {
+    pub fn build_and_write(vkpath: PathBuf) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
         let mut vkw = BufWriter::new(File::create(&vkpath)?);
         let pk: ProvingKey = Self::build();
         let vk = pk.pk.get_vk();
@@ -501,7 +501,7 @@ impl ProvingKey {
         );
 
         let mut output =
-            Vec::with_capacity(param_len + cs_len + vk_len + halo2_proofs::COSMWASM_FOOTER_LENGTH);
+            Vec::with_capacity(param_len + cs_len + vk_len + zk_cosmwasm::COSMWASM_FOOTER_LENGTH);
 
         output.extend_from_slice(&buf1);
         output.extend_from_slice(&buf2);
@@ -601,7 +601,7 @@ impl Proof {
         pk: &ProvingKey,
         circuits: &[NoRickCircuit<pasta_curves::Fp>],
         instances: &[NoRickInstance],
-        mut rng: impl RngCore,
+        mut rng: impl Rng,
     ) -> Result<Self, plonk::Error> {
         let instances: Vec<_> = instances.iter().map(|i| i.to_halo2_instance()).collect();
         let instances: Vec<Vec<_>> = instances

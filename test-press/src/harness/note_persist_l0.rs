@@ -1,7 +1,7 @@
 //! L0 design-usage tests: bridge note → opaque envelope → addr `cm.<hex>` persist.
 //!
 //! Opaque dummy envelopes exercise store rules without crypto. With feature
-//! `l0-seams`, one test uses production `seam_note_out::encrypt_note_out` /
+//! `l0-seams`, one test uses production `terp_seams::dex::note::encrypt_note_out` /
 //! `decrypt_note_out` (XChaCha20-Poly1305) then MiniNoteStore round-trip.
 //!
 //! In-process mini-store mirrors `HeadstashStore` path layout
@@ -295,7 +295,7 @@ mod tests {
     #[cfg(feature = "l0-seams")]
     #[test]
     fn note_persist_l0_seams_decode_then_envelope() {
-        use seam_note_out::SeamNoteOutV0;
+        use terp_seams::dex::note::SeamNoteOutV0;
         let note = compose_bridge_mint_to_seam_bytes().expect("compose");
         let bytes = note.to_seam_bytes();
         let seam = SeamNoteOutV0::from_bytes(&bytes).expect("decode seam");
@@ -318,7 +318,7 @@ mod tests {
     #[cfg(feature = "l0-seams")]
     #[test]
     fn note_persist_l0_seams_encrypt_store_decrypt_roundtrip() {
-        use seam_note_out::{
+        use terp_seams::dex::note::{
             decrypt_note_out, encrypt_note_out, note_addr_cm, persist_plan_from_seam_note,
             SeamNoteOutV0,
         };
@@ -342,7 +342,7 @@ mod tests {
         store.set_note(hs, &addr, &env).unwrap();
         let got = store.get_note(hs, &addr).unwrap().unwrap();
         let recovered = decrypt_note_out(
-            &seam_note_out::NoteEnvelope::from_json_value(&got.to_json()).expect("parse"),
+            &terp_seams::dex::note::NoteEnvelope::from_json_value(&got.to_json()).expect("parse"),
             &key,
         )
         .expect("decrypt");

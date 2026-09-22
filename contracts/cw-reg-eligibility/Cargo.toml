@@ -1,0 +1,25 @@
+[workspace]
+
+[package]
+name = "cw-reg-eligibility"
+version = "0.1.0"
+edition = "2021"
+description = "Lab stand-in for DAO dummy-SA + wasmvm Authenticate (min-holders / eligibility)"
+license = "Apache-2.0"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[features]
+default = []
+library = []
+interface = ["dep:cw-orch"]
+
+[dependencies]
+cosmwasm-schema = "1.5"
+cosmwasm-std = { version = "1.5", features = ["iterator"] }
+cw-orch = { path = "../../../cw-orchestrator/cw-orch", optional = true }
+cw-storage-plus = "1.2"
+schemars = "0.8"
+serde = { version = "1.0", default-features = false, features = ["derive"] }
+thiserror = "1.0"

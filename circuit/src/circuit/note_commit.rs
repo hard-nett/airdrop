@@ -21,7 +21,7 @@ use crate::{
     value::NoteValue,
 };
 use halo2_gadgets::{
-    ecc::{chip::EccChip, Point, ScalarFixed},
+    ecc::{chip::EccChip, CircuitVersion, Point, ScalarFixed},
     sinsemilla::{
         chip::{SinsemillaChip, SinsemillaConfig},
         CommitDomain, Message, MessagePiece,
@@ -2187,7 +2187,7 @@ mod tests {
     };
     use pasta_curves::pallas;
 
-    use rand::rngs::OsRng;
+    use crate::os_rng;
 
     #[test]
     fn decomposition_values() {
@@ -2306,7 +2306,10 @@ mod tests {
                     SinsemillaChip::construct(note_commit_config.sinsemilla_config.clone());
 
                 // Construct an ECC chip
-                let ecc_chip = EccChip::construct(ecc_config);
+                let ecc_chip = EccChip::construct(
+                    ecc_config,
+                    halo2_gadgets::ecc::CircuitVersion::AnchoredBase,
+                );
 
                 // Construct a NoteCommit chip
                 let note_commit_chip = NoteCommitChip::construct(note_commit_config.clone());
@@ -2360,7 +2363,7 @@ mod tests {
                     self.psi,
                 )?;
 
-                let rcm = pallas::Scalar::random(OsRng);
+                let rcm = pallas::Scalar::random(&mut rand::rng());
                 let rcm_gadget =
                     ScalarFixed::new(ecc_chip.clone(), lo.namespace(|| "rcm"), Value::known(rcm))?;
 

@@ -41,4 +41,21 @@ pub enum ContractError {
 
     #[error("registration closed for session {session_id}")]
     RegistrationClosed { session_id: String },
+
+    #[error("registration gate denied: {reason}")]
+    GateDenied { reason: String },
+
+    #[error("leaf_commit required for clerk_attested gate")]
+    LeafCommitRequired,
+
+    #[error("leaf already attested")]
+    LeafAlreadyAttested,
+
+    #[error("pre-propose registration gate is not wired")]
+    PreProposeUnwired,
+
+    #[error("leaf already consumed by {addr}")]
+    LeafConsumed { addr: String },
 }
+
+

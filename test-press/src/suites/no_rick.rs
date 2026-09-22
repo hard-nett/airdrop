@@ -37,7 +37,8 @@ pub mod interface {
         /// This is the canonical method for generating headstash test data.
         /// Returns all artifacts needed for E2E testing.
         pub fn build_keys(&self) -> Result<ProvingKey, cw_orch::anyhow::Error> {
-            Ok(ProvingKey::build_and_write(Self::vk_path())?)
+            Ok(ProvingKey::build_and_write(Self::vk_path())
+                .map_err(|e| cw_orch::anyhow::format_err!(e.to_string()))?)
         }
     }
 

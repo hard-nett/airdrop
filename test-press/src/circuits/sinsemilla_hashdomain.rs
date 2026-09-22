@@ -30,7 +30,10 @@ use zk_headstash::{
 };
 
 use halo2_gadgets::{
-    ecc::chip::{EccChip, EccConfig},
+    ecc::{
+        CircuitVersion,
+        chip::{EccChip, EccConfig},
+    },
     sinsemilla::chip::{SinsemillaChip, SinsemillaConfig},
     utilities::lookup_range_check::{LookupRangeCheck, LookupRangeCheckConfig},
 };
@@ -193,7 +196,7 @@ impl Circuit<pallas::Base> for LeafHashTestCircuit {
         )?;
 
         let sinsemilla_chip = SinsemillaChip::construct(sinsemilla_config);
-        let ecc_chip = EccChip::construct(ecc_config);
+        let ecc_chip = EccChip::construct(ecc_config, CircuitVersion::AnchoredBase);
         let lhc = LeafHashChip::construct(leaf_hash_config);
         let secp256k1 = Secp256k1Chip::construct(secp256k1_config);
 

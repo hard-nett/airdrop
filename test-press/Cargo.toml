@@ -22,9 +22,9 @@ interface = [
 zk = ["cosmwasm-std/zk", "cw-orch/zk",]
 # Optional cross-crate decode of NoteOutSketch → SeamNoteOutV0 (compose L0)
 # + note encrypt / persist plan.
-l0-seams = ["dep:seam_note_out"]
-# Live HTTP PUT/GET against hash-market notes_base (reqwest via seam_note_out).
-note-http = ["l0-seams", "seam_note_out/http"]
+l0-seams = []
+# Live HTTP PUT/GET against hash-market notes_base.
+note-http = ["l0-seams", "terp-seams/http"]
 # L3 Daemon path: ict-rs Docker Terp + ict-rs-cw-orch Daemon + BridgeMintNote.
 # Required by `corridor_ict_funded` binary / `just demo-corridor-ict`.
 ict-daemon = [
@@ -52,26 +52,22 @@ name = "deploy_private_dex_testnet"
 path = "src/bin/deploy_private_dex_testnet.rs"
 required-features = ["interface"]
 
+
 [dependencies]
 async-trait = { workspace = true }
 base64  = { workspace = true }
 blake3  = { workspace = true }
-# Spectrum L0 pure seams (path crates; not in workspace members).
-bridge_auth_seams = { path = "../../terp-rs/crates/bridge_auth_seams" }
-compose_seams = { path = "../../terp-rs/crates/compose_seams" }
-private_dex_seams = { path = "../../terp-rs/crates/private_dex_seams" }
+# Unified L0 seams (dex + bridge + corridor + compose).
+terp-seams = { path = "../../terp-rs/crates/terp-seams", features = ["dex"] }
 # Lab t-of-n multi-sig (same digests as hash-market ThresholdCommitteeCustody)
 threshold_committee = { path = "../../terp-rs/crates/threshold_committee" }
 # ZF FROST lab (Object A) — preferred product custody
 frost_escrow = { path = "../../terp-rs/crates/frost_escrow" }
-# TODO(cashapp_zec_corridor): when fixtures/cashapp_zec_corridor lands in parent main,
-# add path dep and drop local DepositIntentV0 in harness/cashapp_zec_corridor.rs.
-# cashapp_zec_corridor = { path = "../../terp-rs/crates/cashapp_zec_corridor" }
-seam_note_out = { path = "../../terp-rs/crates/seam_note_out", optional = true }
+# Corridor L0 also lives in terp_seams::corridor (harness may still use local DepositIntentV0).
 sha2 = { workspace = true }
 corez = "0.1.1"
 cosmwasm-std  = { workspace = true }
-cw-headstash = { workspace = true, optional = true, features = ["interface"] }
+cw-headstash = { workspace = true, optional = true, features = ["interface", "library", "zk-api"] }
 cw-headstash-manifold = { workspace = true, optional = true, features = ["interface"] }
 # Always: SwapStatementPublic map + lab handoff types (G3). interface feature enables cw-orch.
 cw-private-dex = { workspace = true }
@@ -87,7 +83,7 @@ ff   = { workspace = true }
 group.workspace = true
 halo2-base  = { workspace = true }
 halo2_gadgets = { workspace = true }
-halo2_proofs  = { workspace = true }
+halo2_proofs  = { workspace = true, features = ["multicore"] }
 headstash-randomness  = { workspace = true }
 hex  = { workspace = true }
 ict-rs = { workspace = true, optional = true, features = ["terp"] }
@@ -106,6 +102,11 @@ thiserror = { workspace = true }
 tracing-subscriber = "0.3.23"
 zk-cosmwasm  = { workspace = true }
 # Host prove path: re-enable host-crypto + multicore (guest uses workspace defaults only).
-zk-headstash = { workspace = true, features = ["host-crypto", "multicore", "interface"] }
+zk-headstash = { workspace = true, features = ["host-crypto", "interface", "multicore"] }
+
+[[test]]
+name = "claim_clearnet"
+path = "tests/claim_clearnet.rs"
+required-features = ["interface", "zk"]
 
 [dev-dependencies]

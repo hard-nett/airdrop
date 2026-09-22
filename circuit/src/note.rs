@@ -4,7 +4,7 @@ use core::fmt;
 use ff::PrimeField;
 use memuse::DynamicUsage;
 use pasta_curves::pallas;
-use rand::RngCore;
+use rand::Rng;
 use subtle::CtOption;
 
 use crate::{
@@ -64,7 +64,7 @@ impl Rho {
 pub struct RandomSeed([u8; 32]);
 
 impl RandomSeed {
-    pub(crate) fn random(rng: &mut impl RngCore, rho: &Rho) -> Self {
+    pub(crate) fn random(rng: &mut impl Rng, rho: &Rho) -> Self {
         loop {
             let mut bytes = [0; 32];
             rng.fill_bytes(&mut bytes);
@@ -210,7 +210,7 @@ impl Note {
         recipient: RecpAddr,
         esk: EligibleSk,
         rho: Rho,
-        mut rng: impl RngCore,
+        mut rng: impl Rng,
     ) -> Self {
         loop {
             let note = Note::from_parts(
@@ -232,7 +232,7 @@ impl Note {
     ///
     /// [orcharddummynotes]: https://zips.z.cash/protocol/nu5.pdf#orcharddummynotes
     pub fn dummy(
-        rng: &mut impl RngCore,
+        rng: &mut impl Rng,
         rho: Option<Rho>,
     ) -> (SpendingKey, FullViewingKey, EligibleSk, Self) {
         let esk = EligibleSk::random(rng);

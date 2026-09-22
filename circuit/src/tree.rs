@@ -17,7 +17,8 @@ use sinsemilla::HashDomain;
 
 use ff::{Field, PrimeField, PrimeFieldBits};
 use lazy_static::lazy_static;
-use rand::RngCore;
+use rand::Rng;
+use rand_core::RngCore;
 use serde::de::{Deserializer, Error};
 use serde::ser::Serializer;
 use serde::{Deserialize, Serialize};
@@ -121,7 +122,7 @@ impl From<incrementalmerkletree::MerklePath<MerkleHashOrchard, 32>> for MerklePa
 
 impl MerklePath {
     /// Generates a dummy Merkle path for use in dummy spent notes.
-    pub(crate) fn dummy(mut rng: &mut impl RngCore) -> Self {
+    pub(crate) fn dummy(mut rng: &mut impl Rng) -> Self {
         MerklePath {
             position: rng.next_u32(),
             auth_path: [(); MERKLE_DEPTH_ORCHARD]

@@ -10,7 +10,7 @@
 //! Pure host recompute via `private_dex_seams` (no Docker). Multi-net accounts can
 //! later overwrite curated addresses without changing route logic.
 
-use private_dex_seams::{
+use terp_seams::dex::{
     apply_egress_burn, apply_swap, build_egress_burn_from_settle, quote_exact_in,
     settle_opening_from_note_fields, AssetId, DestKind, EgressSeamState, NoteIn, OracleMid,
     Pool, PoolStatus, SeamState, SwapPublic, ABSTRACT_LEAF_LABEL,
@@ -444,7 +444,7 @@ pub fn assert_oracle_cannot_mint() {
         mid: 1_000_000,
         observed_height: 1,
     };
-    assert!(private_dex_seams::oracle_mint_note(&mid, AssetId::Hub, 1).is_err());
+    assert!(terp_seams::dex::oracle_mint_note(&mid, AssetId::Hub, 1).is_err());
 }
 
 #[cfg(test)]

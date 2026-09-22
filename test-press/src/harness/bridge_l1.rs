@@ -4,14 +4,14 @@
 //! Domain B JSON (`bridge_mint_fixture`) into [`cw_headstash::bridge`] CosmWasm
 //! types used by `ExecuteMsg::BridgeMintNote`.
 //!
-//! SSOT: ROUND2-BRIDGE + `bridge_auth_seams::hinge_happy_fixture`.
+//! SSOT: ROUND2-BRIDGE + `terp_seams::bridge::hinge_happy_fixture`.
 
 use cosmwasm_std::Binary;
 use cw_headstash::bridge::{
     happy_bridge_mint_world, mock_bridge_proof_bytes, AssetEntry, AssetStatus, BridgeCfg,
     BridgeMintClaimPublic, Hash32, ReflectionSnapshot, DEFAULT_CONFIRMATIONS_K, DEFAULT_MAX_LC_LAG,
 };
-use bridge_auth_seams::{label_hash, terp_asset_id_from_tacit};
+use terp_seams::bridge::{label_hash, terp_asset_id_from_tacit};
 
 use super::bridge_mint_fixture::BridgeMintFixtureDoc;
 use super::claim_from_deposit::{BridgeMintClaimPure, CorridorLabMintPolicy};

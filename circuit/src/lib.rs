@@ -23,6 +23,12 @@ extern crate alloc;
 #[cfg(feature = "std")]
 extern crate std;
 
+/// rand 0.10 OS entropy is fallible (`SysRng`). Tests/prove use thread rng (infallible).
+#[cfg(feature = "std")]
+pub(crate) fn os_rng() -> rand::rngs::ThreadRng {
+    rand::rng()
+}
+
 use alloc::vec::Vec;
 
 mod action;
@@ -71,6 +77,8 @@ pub mod suite;
 mod test_vectors;
 #[cfg(all(test, feature = "circuit"))]
 mod orchard_delta_part_t;
+#[cfg(all(test, feature = "circuit", feature = "host-crypto", feature = "interface"))]
+mod snap_bench;
 pub mod tree;
 pub mod value;
 pub mod zip32;

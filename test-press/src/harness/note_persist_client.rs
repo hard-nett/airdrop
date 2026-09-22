@@ -19,7 +19,7 @@
 //!   → encrypt 382B → envelope → PUT or local notes/{hs_id}/{addr}.json
 //! ```
 //!
-//! Feature `l0-seams` required (links `seam_note_out` + compose helpers).
+//! Feature `l0-seams` required (links `terp_seams::dex::note` + compose helpers).
 
 #[cfg(feature = "l0-seams")]
 use super::note_persist_l0::{MiniNoteStore, NoteEnvelope as LocalEnvelope};
@@ -138,15 +138,15 @@ pub struct NotePersistReceipt {
 
 /// **Product call site** after successful `BridgeMintNote` / claim.
 ///
-/// Caller must still hold cleartext [`seam_note_out::SeamNoteOutV0`] (rcm /
+/// Caller must still hold cleartext [`terp_seams::dex::note::SeamNoteOutV0`] (rcm /
 /// openings). Encrypts full 382B and writes to HeadstashStore-shaped backend.
 #[cfg(feature = "l0-seams")]
 pub fn put_note_after_mint(
-    note: &seam_note_out::SeamNoteOutV0,
+    note: &terp_seams::dex::note::SeamNoteOutV0,
     cfg: &NotesPersistConfig,
     addr_override: Option<&str>,
 ) -> Result<NotePersistReceipt, L0Error> {
-    use seam_note_out::{
+    use terp_seams::dex::note::{
         note_addr_cm, persist_plan_from_seam_note_opts, EncryptNoteOpts,
     };
 
@@ -183,7 +183,7 @@ pub fn put_note_after_mint(
                 .iter()
                 .map(|(k, v)| (k.as_str(), v.as_str()))
                 .collect();
-            seam_note_out::put_note_envelope(base, &plan.hs_id, &plan.addr, &plan.envelope, &headers)
+            terp_seams::dex::note::put_note_envelope(base, &plan.hs_id, &plan.addr, &plan.envelope, &headers)
                 .map_err(|e| L0Error(format!("put_note_envelope: {e:?}")))?;
         }
         #[cfg(not(feature = "note-http"))]
@@ -220,8 +220,8 @@ pub fn put_note_after_mint(
 pub fn get_and_decrypt_note(
     cfg: &NotesPersistConfig,
     addr: &str,
-) -> Result<seam_note_out::SeamNoteOutV0, L0Error> {
-    use seam_note_out::{decrypt_note_out, NoteEnvelope};
+) -> Result<terp_seams::dex::note::SeamNoteOutV0, L0Error> {
+    use terp_seams::dex::note::{decrypt_note_out, NoteEnvelope};
 
     let env = if let Some(base) = cfg.notes_base.as_ref() {
         #[cfg(feature = "note-http")]
@@ -231,7 +231,7 @@ pub fn get_and_decrypt_note(
                 .iter()
                 .map(|(k, v)| (k.as_str(), v.as_str()))
                 .collect();
-            seam_note_out::get_note_envelope(base, &cfg.hs_id, addr, &headers)
+            terp_seams::dex::note::get_note_envelope(base, &cfg.hs_id, addr, &headers)
                 .map_err(|e| L0Error(format!("get_note_envelope: {e:?}")))?
         }
         #[cfg(not(feature = "note-http"))]
@@ -263,7 +263,7 @@ pub fn get_and_decrypt_note(
 /// the same client-held note material (plaintext never on chain).
 #[cfg(feature = "l0-seams")]
 pub fn l2_smoke_put_get_decrypt(
-    note: &seam_note_out::SeamNoteOutV0,
+    note: &terp_seams::dex::note::SeamNoteOutV0,
     cfg: &NotesPersistConfig,
 ) -> Result<NotePersistReceipt, L0Error> {
     let receipt = put_note_after_mint(note, cfg, None)?;
@@ -287,7 +287,7 @@ pub fn list_note_addrs(cfg: &NotesPersistConfig) -> Result<Vec<String>, L0Error>
         .iter()
         .map(|(k, v)| (k.as_str(), v.as_str()))
         .collect();
-    seam_note_out::list_note_keys(base, &cfg.hs_id, &headers)
+    terp_seams::dex::note::list_note_keys(base, &cfg.hs_id, &headers)
         .map_err(|e| L0Error(format!("list_note_keys: {e:?}")))
 }
 
@@ -296,8 +296,8 @@ pub fn list_note_addrs(cfg: &NotesPersistConfig) -> Result<Vec<String>, L0Error>
 pub fn recover_note_via_pir(
     cfg: &NotesPersistConfig,
     addr: &str,
-) -> Result<seam_note_out::SeamNoteOutV0, L0Error> {
-    use seam_note_out::decrypt_note_out;
+) -> Result<terp_seams::dex::note::SeamNoteOutV0, L0Error> {
+    use terp_seams::dex::note::decrypt_note_out;
     let base = cfg.notes_base.as_ref().ok_or_else(|| {
         L0Error("recover_note_via_pir requires notes_base".into())
     })?;
@@ -306,7 +306,7 @@ pub fn recover_note_via_pir(
         .iter()
         .map(|(k, v)| (k.as_str(), v.as_str()))
         .collect();
-    let env = seam_note_out::pir_get_note_envelope(base, &cfg.hs_id, addr, &headers)
+    let env = terp_seams::dex::note::pir_get_note_envelope(base, &cfg.hs_id, addr, &headers)
         .map_err(|e| L0Error(format!("pir_get: {e:?}")))?;
     decrypt_note_out(&env, &cfg.owner_key).map_err(|e| L0Error(format!("decrypt: {e:?}")))
 }
@@ -316,7 +316,7 @@ pub fn recover_note_via_pir(
 pub fn recover_note(
     cfg: &NotesPersistConfig,
     addr: &str,
-) -> Result<seam_note_out::SeamNoteOutV0, L0Error> {
+) -> Result<terp_seams::dex::note::SeamNoteOutV0, L0Error> {
     get_and_decrypt_note(cfg, addr)
 }
 
@@ -328,7 +328,7 @@ pub fn recover_note(
 pub fn recover_note_film(
     cfg: &NotesPersistConfig,
     addr: &str,
-) -> Result<seam_note_out::SeamNoteOutV0, L0Error> {
+) -> Result<terp_seams::dex::note::SeamNoteOutV0, L0Error> {
     if cfg.notes_base.is_some() {
         #[cfg(feature = "note-http")]
         {
@@ -347,7 +347,7 @@ pub fn recover_note_film(
 /// Put after mint then film recover (PIR when HTTP, direct when local).
 #[cfg(feature = "l0-seams")]
 pub fn put_and_film_recover_after_mint(
-    note: &seam_note_out::SeamNoteOutV0,
+    note: &terp_seams::dex::note::SeamNoteOutV0,
     cfg: &NotesPersistConfig,
 ) -> Result<NotePersistReceipt, L0Error> {
     let receipt = put_note_after_mint(note, cfg, None)?;
@@ -364,7 +364,7 @@ pub fn put_and_film_recover_after_mint(
 mod tests {
     use super::*;
     use crate::harness::compose_bridge_mint_to_seam_bytes;
-    use seam_note_out::SeamNoteOutV0;
+    use terp_seams::dex::note::SeamNoteOutV0;
     use std::time::{SystemTime, UNIX_EPOCH};
 
     fn tmp() -> PathBuf {

@@ -15,7 +15,7 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use private_dex_seams::{DualHomePrepV0, OMNI_LP_BTC, OMNI_LP_ZEC, OMNI_USER_BTC};
+use terp_seams::dex::{DualHomePrepV0, OMNI_LP_BTC, OMNI_LP_ZEC, OMNI_USER_BTC};
 use serde::{Deserialize, Serialize};
 
 use super::lab_pay_zec::{try_getbalance_zat, try_getreceivedbyaddress_zat, wallet_rpc_available};

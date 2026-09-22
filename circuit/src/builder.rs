@@ -1,40 +1,23 @@
 //! Logic for building Orchard components of transactions.
 
-use alloc::collections::BTreeMap;
-use alloc::vec::Vec;
 use core::fmt;
-use core::iter;
 
 use ff::Field;
 use pasta_curves::pallas;
-use rand::{prelude::SliceRandom, CryptoRng, RngCore};
+use rand::Rng;
 
 use crate::address::RecpAddr;
 use crate::keys::EligibleSk;
 use crate::value::NoteDenom;
 use crate::{
-    address::Address,
-    // bundle::{Authorization, Authorized, Bundle, Flags},
-    keys::{
-        FullViewingKey, OutgoingViewingKey, Scope, SpendAuthorizingKey, SpendValidatingKey,
-        SpendingKey,
-    },
-    note::{ExtractedNoteCommitment, Note, Nullifier, Rho, TransmittedNoteCiphertext},
-    // note_encryption::OrchardNoteEncryption,
-    primitives::redpallas::{self, Binding, SpendAuth},
+    keys::{FullViewingKey, OutgoingViewingKey, SpendAuthorizingKey, SpendingKey},
+    note::{ExtractedNoteCommitment, Note, Nullifier, Rho},
     tree::{Anchor, MerklePath},
     value::{self, NoteValue, ValueCommitTrapdoor, ValueSum},
-    Proof,
 };
 
 #[cfg(feature = "host-crypto")]
-use {
-    crate::{
-        action::Action,
-        circuit::{Circuit, Instance, ProvingKey},
-    },
-    nonempty::NonEmpty,
-};
+use crate::{action::Action, circuit::Circuit};
 
 #[cfg(all(feature = "circuit", not(feature = "host-crypto")))]
 use crate::{action::Action, circuit::Instance};
@@ -257,7 +240,7 @@ impl SpendInfo {
     /// Defined in [Zcash Protocol Spec § 4.8.3: Dummy Notes (Orchard)][orcharddummynotes].
     ///
     /// [orcharddummynotes]: https://zips.z.cash/protocol/nu5.pdf#orcharddummynotes
-    fn dummy(rng: &mut impl RngCore) -> Self {
+    fn dummy(rng: &mut impl Rng) -> Self {
         let (sk, fvk, esk, note) = Note::dummy(rng, None);
         let merkle_path = MerklePath::dummy(rng);
 
@@ -315,7 +298,7 @@ impl SpendInfo {
     /// [orchardsend]: https://zips.z.cash/protocol/nu5.pdf#orchardsend
     fn build(
         &self,
-        mut rng: impl RngCore,
+        mut rng: impl Rng,
     ) -> (
         Nullifier,
         // SpendValidatingKey,
@@ -330,7 +313,7 @@ impl SpendInfo {
         (nf_old, alpha)
     }
 
-    // fn into_pczt(self, rng: impl RngCore) -> crate::pczt::Spend {
+    // fn into_pczt(self, rng: impl Rng) -> crate::pczt::Spend {
     //     let (nf_old, _, alpha, rk) = self.build(rng);
 
     //     crate::pczt::Spend {
@@ -382,7 +365,7 @@ impl OutputInfo {
     /// Defined in [Zcash Protocol Spec § 4.8.3: Dummy Notes (Orchard)][orcharddummynotes].
     ///
     /// [orcharddummynotes]: https://zips.z.cash/protocol/nu5.pdf#orcharddummynotes
-    pub fn dummy(rng: &mut impl RngCore) -> Self {
+    pub fn dummy(rng: &mut impl Rng) -> Self {
         let fvk: FullViewingKey = (&SpendingKey::random(rng)).into();
         // let recipient = fvk.address_at(0u32, Scope::External);
         let recipient = RecpAddr::new([0; 32]);
@@ -402,7 +385,7 @@ impl OutputInfo {
         nf_old: Nullifier,
         v: NoteValue,
         nd: NoteDenom,
-        mut rng: impl RngCore,
+        mut rng: impl Rng,
     ) -> (Note, ExtractedNoteCommitment) {
         // TransmittedNoteCiphertext
         let rho = Rho::from_nf_old(nf_old);
@@ -433,7 +416,7 @@ impl OutputInfo {
     //     self,
     //     cv_net: &ValueCommitment,
     //     nf_old: Nullifier,
-    //     rng: impl RngCore,
+    //     rng: impl Rng,
     // ) -> crate::pczt::Output {
     //     let (note, cmx, encrypted_note) = self.build(cv_net, nf_old, rng);
 
@@ -462,7 +445,7 @@ struct ActionInfo {
 }
 
 impl ActionInfo {
-    fn new(spend: SpendInfo, output: OutputInfo, rng: impl RngCore) -> Self {
+    fn new(spend: SpendInfo, output: OutputInfo, rng: impl Rng) -> Self {
         ActionInfo {
             spend,
             output,
@@ -485,7 +468,7 @@ impl ActionInfo {
     ///
     /// [orchardsend]: https://zips.z.cash/protocol/nu5.pdf#orchardsend
     #[cfg(feature = "host-crypto")]
-    fn build(self, mut rng: impl RngCore) -> (Action<SigningMetadata>, Circuit) {
+    fn build(self, mut rng: impl Rng) -> (Action<SigningMetadata>, Circuit) {
         // let v_net = self.value_sum();
         let v = self.note_value();
         // let cv_net = ValueCommitment::derive(self.value_sum(), self.rcv.clone());
@@ -509,7 +492,7 @@ impl ActionInfo {
         )
     }
 
-    // fn build_for_pczt(self, mut rng: impl RngCore) -> crate::pczt::Action {
+    // fn build_for_pczt(self, mut rng: impl Rng) -> crate::pczt::Action {
     //     let v_net = self.value_sum();
     //     let cv_net = ValueCommitment::derive(v_net, self.rcv.clone());
 
@@ -700,7 +683,7 @@ impl ActionInfo {
 //     // #[cfg(feature = "circuit")]
 //     pub fn build<V: TryFrom<i64>>(
 //         self,
-//         rng: impl RngCore,
+//         rng: impl Rng,
 //     ) -> Result<Option<(UnauthorizedBundle<V>, BundleMetadata)>, BuildError> {
 //         bundle(
 //             rng,
@@ -715,7 +698,7 @@ impl ActionInfo {
 //     /// metadata, for inclusion in a PCZT.
 //     pub fn build_for_pczt(
 //         self,
-//         rng: impl RngCore,
+//         rng: impl Rng,
 //     ) -> Result<(crate::pczt::Bundle, BundleMetadata), BuildError> {
 //         build_bundle(
 //             rng,
@@ -752,7 +735,7 @@ impl ActionInfo {
 // /// [`Bundle::create_proof`] and [`Bundle::apply_signatures`] respectively.
 // // #[cfg(feature = "circuit")]
 // pub fn bundle<V: TryFrom<i64>>(
-//     rng: impl RngCore,
+//     rng: impl Rng,
 //     anchor: Anchor,
 //     bundle_type: BundleType,
 //     spends: Vec<SpendInfo>,
@@ -807,7 +790,7 @@ impl ActionInfo {
 //     )
 // }
 
-// fn build_bundle<B, R: RngCore>(
+// fn build_bundle<B, R: Rng>(
 //     mut rng: R,
 //     anchor: Anchor,
 //     bundle_type: BundleType,
@@ -924,7 +907,7 @@ impl ActionInfo {
 //         &self,
 //         pk: &ProvingKey,
 //         instances: &[Instance],
-//         rng: impl RngCore,
+//         rng: impl Rng,
 //     ) -> Result<Proof, halo2_proofs::plonk::Error> {
 //         Proof::create(pk, &self.proof.circuits, instances, rng)
 //     }
@@ -936,7 +919,7 @@ impl ActionInfo {
 //     pub fn create_proof(
 //         self,
 //         pk: &ProvingKey,
-//         mut rng: impl RngCore,
+//         mut rng: impl Rng,
 //     ) -> Result<Bundle<InProgress<Proof, S>, V>, BuildError> {
 //         let instances: Vec<_> = self
 //             .actions()
@@ -1024,7 +1007,7 @@ pub struct SigningMetadata {
 //     /// Loads the sighash into this bundle, preparing it for signing.
 //     ///
 //     /// This API ensures that all signatures are created over the same sighash.
-//     pub fn prepare<R: RngCore + CryptoRng>(
+//     pub fn prepare<R: Rng + CryptoRng>(
 //         self,
 //         mut rng: R,
 //         sighash: [u8; 32],
@@ -1054,7 +1037,7 @@ pub struct SigningMetadata {
 //     ///
 //     /// This is a helper method that wraps [`Bundle::prepare`], [`Bundle::sign`], and
 //     /// [`Bundle::finalize`].
-//     pub fn apply_signatures<R: RngCore + CryptoRng>(
+//     pub fn apply_signatures<R: Rng + CryptoRng>(
 //         self,
 //         mut rng: R,
 //         sighash: [u8; 32],
@@ -1073,7 +1056,7 @@ pub struct SigningMetadata {
 //     /// Signs this bundle with the given [`SpendAuthorizingKey`].
 //     ///
 //     /// This will apply signatures for all notes controlled by this spending key.
-//     pub fn sign<R: RngCore + CryptoRng>(self, mut rng: R, ask: &SpendAuthorizingKey) -> Self {
+//     pub fn sign<R: Rng + CryptoRng>(self, mut rng: R, ask: &SpendAuthorizingKey) -> Self {
 //         let expected_ak = ask.into();
 //         self.map_authorization(
 //             &mut rng,
@@ -1226,7 +1209,7 @@ pub struct SigningMetadata {
 //         output_amounts: Vec<(Address, NoteValue)>,
 //     }
 
-//     impl<R: RngCore + CryptoRng> ArbitraryBundleInputs<R> {
+//     impl<R: Rng + CryptoRng> ArbitraryBundleInputs<R> {
 //         /// Create a bundle from the set of arbitrary bundle inputs.
 //         fn into_bundle<V: TryFrom<i64>>(mut self) -> Bundle<Authorized, V> {
 //             let fvk = FullViewingKey::from(&self.sk);

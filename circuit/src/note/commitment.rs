@@ -133,11 +133,11 @@ mod packing_tests {
     use crate::note::Note;
     use crate::note_poseidon::{lift_note_cmx, poseidon_note_cmx, rcm_to_base};
     use group::Curve;
-    use rand::rngs::OsRng;
+    use crate::os_rng;
 
     #[test]
     fn derive_matches_poseidon_ssot_for_dummy_note() {
-        let mut rng = OsRng;
+        let mut rng = os_rng();
         let (_sk, _fvk, esk, note) = Note::dummy(&mut rng, None);
         let rho = note.rho();
         let psi = note.rseed().psi(&rho);
@@ -181,7 +181,7 @@ mod packing_tests {
         assert_eq!(rcm_to_base(small), pallas::Base::from(99u64));
 
         // Random rseed-derived rcm still yields a stable base word.
-        let mut rng = OsRng;
+        let mut rng = os_rng();
         let (_sk, _fvk, _esk, note) = Note::dummy(&mut rng, None);
         let rcm = note.rseed().rcm(&note.rho());
         let a = rcm_to_base(rcm.inner());
@@ -192,7 +192,7 @@ mod packing_tests {
     #[test]
     fn esk_native_matches_derive_pallas() {
         use crate::spec::esk_to_base;
-        let mut rng = OsRng;
+        let mut rng = os_rng();
         let (_sk, _fvk, esk, _note) = Note::dummy(&mut rng, None);
         let via_derive = esk.derive_pallas();
         let via_esk_to_base = esk_to_base(&esk);

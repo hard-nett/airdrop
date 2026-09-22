@@ -164,7 +164,6 @@ fn save_headstash_cfg(
     ts: Vec<TokenStrategy>,
     w: WavsOperatorSet,
     circuit_id: u64,
-    claim_mock_verify: bool,
 ) -> Result<(), StdError> {
     distro::validate_instantiate_domain(distro_hash_domain)?;
     distro::register_genesis_root(
@@ -182,7 +181,6 @@ fn save_headstash_cfg(
             ts,
             w,
             cid: circuit_id,
-            claim_mock_verify,
         },
     )?;
     Ok(())
@@ -204,7 +202,6 @@ pub fn instantiate(
     let domain = msg.distro_hash_domain;
     let genesis_label = msg.genesis_label;
     let circuit_id = msg.circuit_id.unwrap_or(0);
-    let claim_mock_verify = msg.claim_mock_verify.unwrap_or(false);
     match ts.clone() {
         tokenfactory::TokenStrategy::NewFungible(ref cfg) => {
             // Save config for reply handler to access initial mints
@@ -217,7 +214,6 @@ pub fn instantiate(
                 vec![ts],
                 w,
                 circuit_id,
-                claim_mock_verify,
             )?;
 
             Ok(Response::new()
@@ -226,7 +222,6 @@ pub fn instantiate(
                 .add_attribute("subdenom", cfg.subdenom.raw.clone())
                 .add_attribute("distro_hash_domain", domain.as_str())
                 .add_attribute("circuit_id", circuit_id.to_string())
-                .add_attribute("claim_mock_verify", claim_mock_verify.to_string())
                 .add_attribute("root_id", GENESIS_ROOT_ID.to_string())
                 .add_submessage(
                     // Create new denom, denom info is saved in the reply
@@ -262,7 +257,6 @@ pub fn instantiate(
                 vec![ts],
                 w,
                 circuit_id,
-                claim_mock_verify,
             )?;
 
             Ok(Response::new()
@@ -271,7 +265,6 @@ pub fn instantiate(
                 .add_attribute("denom", denom.raw.clone())
                 .add_attribute("distro_hash_domain", domain.as_str())
                 .add_attribute("circuit_id", circuit_id.to_string())
-                .add_attribute("claim_mock_verify", claim_mock_verify.to_string())
                 .add_attribute("root_id", GENESIS_ROOT_ID.to_string()))
         }
     }
@@ -291,9 +284,6 @@ pub fn execute(
         }
         ExecuteMsg::SetCircuitId { circuit_id } => {
             crate::headstash::set_circuit_id(deps, info, circuit_id)
-        }
-        ExecuteMsg::SetClaimMockVerify { claim_mock_verify } => {
-            crate::headstash::set_claim_mock_verify(deps, info, claim_mock_verify)
         }
         ExecuteMsg::RegisterEligibilityRoot {
             root,
@@ -675,7 +665,6 @@ mod instantiate_tests {
             }),
             wavs: valid_wavs_proof(3),
             circuit_id: None,
-            claim_mock_verify: None,
         };
 
         let res = instantiate(deps.as_mut(), env.clone(), info, msg).unwrap();
@@ -751,7 +740,6 @@ mod instantiate_tests {
             }),
             wavs: valid_wavs_proof(3),
             circuit_id: None,
-            claim_mock_verify: None,
         };
 
         let res = instantiate(deps.as_mut(), env.clone(), info, msg).unwrap();
@@ -798,7 +786,6 @@ mod instantiate_tests {
             )),
             wavs: valid_wavs_proof(1),
             circuit_id: None,
-            claim_mock_verify: None,
         };
 
         let res = instantiate(deps.as_mut(), env.clone(), info, msg).unwrap();
@@ -831,7 +818,6 @@ mod instantiate_tests {
             )),
             wavs: valid_wavs_proof(1),
             circuit_id: None,
-            claim_mock_verify: None,
         };
 
         let err = instantiate(deps.as_mut(), env, info, msg).unwrap_err();
@@ -865,9 +851,8 @@ mod instantiate_tests {
                 minters: vec![],
             }),
             wavs: invalid_wavs,
-        
+
             circuit_id: None,
-            claim_mock_verify: None,
         };
 
         let err = instantiate(deps.as_mut(), env, info, msg).unwrap_err();
@@ -901,9 +886,8 @@ mod instantiate_tests {
                 minters: vec![],
             }),
             wavs,
-        
+
             circuit_id: None,
-            claim_mock_verify: None,
         };
 
         let err = instantiate(deps.as_mut(), env, info, msg).unwrap_err();
@@ -934,7 +918,6 @@ mod instantiate_tests {
             }),
             wavs: valid_wavs_proof(1),
             circuit_id: None,
-            claim_mock_verify: None,
         };
 
         instantiate(deps.as_mut(), env, info, msg).unwrap();
@@ -973,7 +956,6 @@ mod instantiate_tests {
             }),
             wavs: valid_wavs_proof(1),
             circuit_id: None,
-            claim_mock_verify: None,
         };
 
         let err = instantiate(deps.as_mut(), env, info, msg).unwrap_err();
@@ -1000,7 +982,6 @@ mod instantiate_tests {
             }),
             wavs: valid_wavs_proof(1),
             circuit_id: None,
-            claim_mock_verify: None,
         };
         instantiate(deps.as_mut(), env.clone(), info.clone(), msg).unwrap();
 
@@ -1048,7 +1029,6 @@ mod instantiate_tests {
             }),
             wavs: valid_wavs_proof(1),
             circuit_id: Some(0),
-            claim_mock_verify: Some(false),
         };
         instantiate(deps.as_mut(), env.clone(), info.clone(), msg).unwrap();
 
@@ -1059,19 +1039,10 @@ mod instantiate_tests {
             ExecuteMsg::SetCircuitId { circuit_id: 7 },
         )
         .unwrap();
-        execute(
-            deps.as_mut(),
-            env,
-            info,
-            ExecuteMsg::SetClaimMockVerify {
-                claim_mock_verify: true,
-            },
-        )
-        .unwrap();
 
         let cfg = HEADSTASH_CFG.load(&deps.storage).unwrap();
         assert_eq!(cfg.cid, 7);
-        assert!(cfg.claim_mock_verify);
+
         assert_eq!(cfg.distro_hash_domain, DistroHashDomain::PoseidonV1);
     }
 
@@ -1096,7 +1067,6 @@ mod instantiate_tests {
             }),
             wavs: valid_wavs_proof(1),
             circuit_id: None,
-            claim_mock_verify: None,
         };
         instantiate(deps.as_mut(), env.clone(), info, msg).unwrap();
 

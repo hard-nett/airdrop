@@ -33,21 +33,15 @@
 //! 1. Live `POST {HASH_MARKET_URL}/escrow-release/sign` (hashmerchant process)
 //! 2. In-process `LabCommittee::generate` only as labeled residual unless require-live
 //!
-//! Types SSOT: `private_dex_seams::egress` (PURE-EGRESS + authorize_escrow_release).
+//! Types SSOT: `terp_seams::dex::egress` (PURE-EGRESS + authorize_escrow_release).
 //! Host attach: Zakura RPC + G4 [`SealedDestV0`].
 
 use crate::harness::zakura_local::{
-    assert_dest_binding_equal, is_placeholder_owner_binding_hex, json_rpc_call,
-    reject_placeholder_binding_hex, rpc_ready, soft_validate_dest_prefix, validate_address,
-    SealedDestV0, ZakuraLocalConfig, ZakuraLocalError,
+    SealedDestV0, ZakuraLocalConfig, ZakuraLocalError, assert_dest_binding_equal,
+    is_placeholder_owner_binding_hex, json_rpc_call, reject_placeholder_binding_hex, rpc_ready,
+    soft_validate_dest_prefix, validate_address,
 };
-use private_dex_seams::{
-    authorize_escrow_release, hex32, lab_receipt_after_burn, reject_funder_only_as_product,
-    DestKind, EgressBurnEvidenceV0, EgressBurnPublic, EscrowReleaseError, ThresholdEscrowAuth,
-    ZecEgressReceiptV0, MODE_FROST_ESCROW_RELEASE, MODE_FROST_ESCROW_RELEASE_SIMULATED,
-    MODE_THRESHOLD_ESCROW_RELEASE, MODE_THRESHOLD_ESCROW_RELEASE_SIMULATED,
-};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 use std::fs;
 use std::io::{Read, Write};
@@ -55,7 +49,11 @@ use std::net::TcpStream;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use std::time::Duration;
-use threshold_committee::{lab_sign_with_threshold, LabCommittee};
+use terp_seams::dex::{
+    DestKind, EgressBurnEvidenceV0, EgressBurnPublic, ZecEgressReceiptV0, hex32,
+    lab_receipt_after_burn,
+};
+use threshold_committee::{LabCommittee, lab_sign_with_threshold};
 
 /// Lab mode when RPC down or send RPCs unavailable — synthetic inventory film.
 pub const MODE_LAB_INVENTORY_PAY_SIMULATED: &str = "lab_inventory_pay_simulated";
@@ -361,14 +359,14 @@ static LAST_THRESHOLD_AUTH_META: Mutex<Option<ThresholdAuthMeta>> = Mutex::new(N
 
 /// Last auth meta from [`lab_threshold_escrow_auth`] (receipt writers may attach).
 pub fn take_last_threshold_auth_meta() -> Option<ThresholdAuthMeta> {
-    LAST_THRESHOLD_AUTH_META.lock().ok().and_then(|mut g| g.take())
-}
-
-pub fn peek_last_threshold_auth_meta() -> Option<ThresholdAuthMeta> {
     LAST_THRESHOLD_AUTH_META
         .lock()
         .ok()
-        .and_then(|g| g.clone())
+        .and_then(|mut g| g.take())
+}
+
+pub fn peek_last_threshold_auth_meta() -> Option<ThresholdAuthMeta> {
+    LAST_THRESHOLD_AUTH_META.lock().ok().and_then(|g| g.clone())
 }
 
 fn store_threshold_auth_meta(meta: ThresholdAuthMeta) {
@@ -473,9 +471,8 @@ fn http_json_get(base: &str, path: &str) -> Result<Value, String> {
     } else {
         (hostport.to_string(), 80u16)
     };
-    let req = format!(
-        "GET {url_path} HTTP/1.0\r\nHost: {host}:{port}\r\nConnection: close\r\n\r\n"
-    );
+    let req =
+        format!("GET {url_path} HTTP/1.0\r\nHost: {host}:{port}\r\nConnection: close\r\n\r\n");
     let timeout = Duration::from_secs(2);
     let mut stream = TcpStream::connect_timeout(
         &format!("{host}:{port}")
@@ -522,13 +519,11 @@ pub fn live_hashmerchant_custody_ready() -> bool {
     for path in ["/custody", "/ve/custody"] {
         if let Ok(v) = http_json_get(&base, path) {
             let frost = v.get("frost").and_then(|x| x.as_bool()).unwrap_or(false)
-                || v
-                    .get("label")
+                || v.get("label")
                     .and_then(|x| x.as_str())
                     .map(|s| s.contains("frost"))
                     .unwrap_or(false)
-                || v
-                    .get("committee_crypto")
+                || v.get("committee_crypto")
                     .and_then(|x| x.as_str())
                     .map(|s| s.contains("frost"))
                     .unwrap_or(false);
@@ -536,8 +531,7 @@ pub fn live_hashmerchant_custody_ready() -> bool {
                 .get("threshold_committee")
                 .and_then(|x| x.as_bool())
                 .unwrap_or(false)
-                || v
-                    .get("label")
+                || v.get("label")
                     .and_then(|x| x.as_str())
                     .map(|s| s.contains("threshold"))
                     .unwrap_or(false);
@@ -586,12 +580,10 @@ pub fn live_threshold_escrow_auth(
         .get("public_key_hex")
         .and_then(|x| x.as_str())
         .ok_or_else(|| LabPayError::ThresholdAuth("response missing public_key_hex".into()))?;
-    let combined_sig = hex::decode(sig_hex.trim().trim_start_matches("0x")).map_err(|e| {
-        LabPayError::ThresholdAuth(format!("signature_hex decode: {e}"))
-    })?;
-    let committee_pk = hex::decode(pk_hex.trim().trim_start_matches("0x")).map_err(|e| {
-        LabPayError::ThresholdAuth(format!("public_key_hex decode: {e}"))
-    })?;
+    let combined_sig = hex::decode(sig_hex.trim().trim_start_matches("0x"))
+        .map_err(|e| LabPayError::ThresholdAuth(format!("signature_hex decode: {e}")))?;
+    let committee_pk = hex::decode(pk_hex.trim().trim_start_matches("0x"))
+        .map_err(|e| LabPayError::ThresholdAuth(format!("public_key_hex decode: {e}")))?;
     let frost_pk = frost_escrow::is_frost_public_key(&committee_pk);
     let tc_pk = threshold_committee::is_committee_public_key(&committee_pk);
     if !frost_pk && !tc_pk {
@@ -624,7 +616,7 @@ pub fn live_threshold_escrow_auth(
     let digest = threshold_committee::escrow_release_digest(
         &evidence.burn.nullifier,
         &evidence.burn.dest_commitment,
-        evidence.burn.value,
+        evidence.burn.value.into(),
         &evidence.burn.asset_id,
     );
     if frost_pk {
@@ -678,18 +670,17 @@ pub fn in_process_frost_escrow_auth(
     evidence: &EgressBurnEvidenceV0,
 ) -> Result<(ThresholdEscrowAuth, String, ThresholdAuthMeta), LabPayError> {
     let (t, n) = lab_committee_params();
-    let committee = frost_escrow::FrostLabCommittee::dkg(t, n).map_err(|e| {
-        LabPayError::ThresholdAuth(format!("FROST DKG t={t} n={n}: {e}"))
-    })?;
+    let committee = frost_escrow::FrostLabCommittee::dkg(t, n)
+        .map_err(|e| LabPayError::ThresholdAuth(format!("FROST DKG t={t} n={n}: {e}")))?;
     let digest = threshold_committee::escrow_release_digest(
         &evidence.burn.nullifier,
         &evidence.burn.dest_commitment,
-        evidence.burn.value,
+        evidence.burn.value.into(),
         &evidence.burn.asset_id,
     );
-    let sig = committee.sign_message(&digest).map_err(|e| {
-        LabPayError::ThresholdAuth(format!("FROST sign: {e}"))
-    })?;
+    let sig = committee
+        .sign_message(&digest)
+        .map_err(|e| LabPayError::ThresholdAuth(format!("FROST sign: {e}")))?;
     let committee_pk = committee.encoded_public.clone();
     let meta = ThresholdAuthMeta {
         auth_source: AUTH_SOURCE_IN_PROCESS_LAB.into(),
@@ -717,21 +708,17 @@ pub fn in_process_threshold_escrow_auth(
     evidence: &EgressBurnEvidenceV0,
 ) -> Result<(ThresholdEscrowAuth, String, ThresholdAuthMeta), LabPayError> {
     let (t, n) = lab_committee_params();
-    let committee = LabCommittee::generate(t, n).map_err(|e| {
-        LabPayError::ThresholdAuth(format!("lab DKG t={t} n={n}: {e}"))
-    })?;
+    let committee = LabCommittee::generate(t, n)
+        .map_err(|e| LabPayError::ThresholdAuth(format!("lab DKG t={t} n={n}: {e}")))?;
     let digest = threshold_committee::escrow_release_digest(
         &evidence.burn.nullifier,
         &evidence.burn.dest_commitment,
-        evidence.burn.value,
+        evidence.burn.value.into(),
         &evidence.burn.asset_id,
     );
-    let combined = lab_sign_with_threshold(&committee, &digest).map_err(|e| {
-        LabPayError::ThresholdAuth(format!("combine partials: {e}"))
-    })?;
-    let committee_pk = committee.roster.encode_public().map_err(|e| {
-        LabPayError::ThresholdAuth(format!("encode committee pk: {e}"))
-    })?;
+    let combined = lab_sign_with_threshold(&committee, &digest)
+        .map_err(|e| LabPayError::ThresholdAuth(format!("combine partials: {e}")))?;
+    let committee_pk = committee.encoded_public.clone();
     let meta = ThresholdAuthMeta {
         auth_source: AUTH_SOURCE_IN_PROCESS_LAB.into(),
         custody_label: format!("in-process-lab-committee;t={t};n={n}"),
@@ -746,7 +733,7 @@ pub fn in_process_threshold_escrow_auth(
     Ok((
         ThresholdEscrowAuth {
             committee_pk,
-            combined_sig: combined.encode(),
+            combined_sig: combined,
         },
         label,
         meta,
@@ -866,10 +853,11 @@ fn frost_object_b_spend_auth(
         evidence.burn.asset_id,
         hex::encode(object_a_sig),
     );
+    // SILENT ERROR
     pkg.validate_matches_burn(
         &evidence.burn.nullifier,
         &sealed.owner_binding,
-        evidence.burn.value,
+        evidence.burn.value.into(),
         &evidence.burn.asset_id,
     )
     .map_err(|e| LabPayError::ThresholdAuth(format!("Object B package: {e}")))?;
@@ -891,10 +879,11 @@ fn frost_object_b_spend_auth(
                 let sig_hex = v
                     .get("signature_hex")
                     .and_then(|x| x.as_str())
-                    .ok_or_else(|| LabPayError::ThresholdAuth("Object B missing signature".into()))?;
-                let sig = hex::decode(sig_hex.trim().trim_start_matches("0x")).map_err(|e| {
-                    LabPayError::ThresholdAuth(format!("Object B sig hex: {e}"))
-                })?;
+                    .ok_or_else(|| {
+                        LabPayError::ThresholdAuth("Object B missing signature".into())
+                    })?;
+                let sig = hex::decode(sig_hex.trim().trim_start_matches("0x"))
+                    .map_err(|e| LabPayError::ThresholdAuth(format!("Object B sig hex: {e}")))?;
                 frost_escrow::verify_spend_encoded(committee_pk, &pkg, &sig).map_err(|e| {
                     LabPayError::ThresholdAuth(format!("Object B live verify: {e}"))
                 })?;
@@ -916,16 +905,14 @@ fn frost_object_b_spend_auth(
         ));
     }
     let (t, n) = lab_committee_params();
-    let committee = frost_escrow::FrostLabCommittee::dkg(t, n).map_err(|e| {
-        LabPayError::ThresholdAuth(format!("Object B in-process DKG: {e}"))
-    })?;
+    let committee = frost_escrow::FrostLabCommittee::dkg(t, n)
+        .map_err(|e| LabPayError::ThresholdAuth(format!("Object B in-process DKG: {e}")))?;
     // Offline residual: one in-process committee signs Object B (demo of spend crypto).
-    let sig = committee.sign_spend_package(&pkg).map_err(|e| {
-        LabPayError::ThresholdAuth(format!("Object B in-process sign: {e}"))
-    })?;
-    frost_escrow::verify_spend_encoded(&committee.encoded_public, &pkg, &sig).map_err(|e| {
-        LabPayError::ThresholdAuth(format!("Object B verify: {e}"))
-    })?;
+    let sig = committee
+        .sign_spend_package(&pkg)
+        .map_err(|e| LabPayError::ThresholdAuth(format!("Object B in-process sign: {e}")))?;
+    frost_escrow::verify_spend_encoded(&committee.encoded_public, &pkg, &sig)
+        .map_err(|e| LabPayError::ThresholdAuth(format!("Object B verify: {e}")))?;
     let _ = committee_pk; // live FE01 only when /escrow-spend/sign used above
     Ok((pkg, sig))
 }
@@ -1100,7 +1087,9 @@ fn write_threshold_release_side_meta(
         fs::create_dir_all(parent).map_err(|e| LabPayError::Io(e.to_string()))?;
     }
     let decreased = match (bal_before, bal_after) {
-        (Some(b), Some(a)) => Some(a < b || (b >= receipt.amount_zat && a + receipt.amount_zat <= b + 1)),
+        (Some(b), Some(a)) => {
+            Some(a < b || (b >= receipt.amount_zat && a + receipt.amount_zat <= b + 1))
+        }
         _ => None,
     };
     let v = json!({
@@ -1275,16 +1264,15 @@ fn zec_amount_to_zat(v: &Value) -> Option<u64> {
                 // Some nodes return sat/zat integer — treat large ints as zat.
                 Some(i)
             } else if let Some(i) = n.as_i64() {
-                if i < 0 {
-                    None
-                } else {
-                    Some(i as u64)
-                }
+                if i < 0 { None } else { Some(i as u64) }
             } else {
                 None
             }
         }
-        Value::String(s) => s.parse::<f64>().ok().map(|f| (f * 100_000_000.0).round() as u64),
+        Value::String(s) => s
+            .parse::<f64>()
+            .ok()
+            .map(|f| (f * 100_000_000.0).round() as u64),
         _ => None,
     }
 }
@@ -1349,9 +1337,8 @@ fn build_receipt(
     zec_txid: Option<String>,
     mode: &str,
 ) -> Result<ZecEgressReceiptV0, LabPayError> {
-    lab_receipt_after_burn(evidence, sealed.dest_display.clone(), zec_txid, mode).map_err(|e| {
-        LabPayError::Pure(format!("{e:?}"))
-    })
+    lab_receipt_after_burn(evidence, sealed.dest_display.clone(), zec_txid, mode)
+        .map_err(|e| LabPayError::Pure(format!("{e:?}")))
 }
 
 /// Zcash pay gated on Terp burn evidence + G4 sealed dest.
@@ -1469,7 +1456,10 @@ pub fn confirm_open_at_sealed_dest_with_cfg(
             wallet_balance_zat: None,
             received_zat: None,
             mode: OPEN_CONFIRM_SKIP_NO_RPC.into(),
-            note: format!("Zakura RPC down at {} — open/confirm skip-clean", cfg.rpc_url),
+            note: format!(
+                "Zakura RPC down at {} — open/confirm skip-clean",
+                cfg.rpc_url
+            ),
         });
     }
 
@@ -1533,7 +1523,7 @@ pub fn confirm_open_at_sealed_dest_with_cfg(
 
 /// Build minimal lab evidence matching a sealed dest (harness / unit helper).
 ///
-/// Uses pure `egress_nullifier` domain via `private_dex_seams::egress_nullifier`.
+/// Uses pure `egress_nullifier` domain via `terp_seams::dex::egress_nullifier`.
 pub fn lab_evidence_for_sealed(
     sealed: &SealedDestV0,
     value: u64,
@@ -1545,7 +1535,7 @@ pub fn lab_evidence_for_sealed(
     let mut rcm = [0u8; 32];
     rcm[0] = 0xac;
     rcm[1] = 0x01;
-    let nf = private_dex_seams::egress_nullifier(&cm, &rcm);
+    let nf = terp_seams::dex::egress_nullifier(&cm, &rcm);
 
     let mut asset = [0u8; 32];
     asset[0] = b'Z';
@@ -1602,7 +1592,7 @@ pub fn write_zec_egress_receipt_json(
 mod tests {
     use super::*;
     use crate::harness::zakura_local::{
-        seal_funded_dest, REGTEST_MINER_DEST, REGTEST_MINER_OWNER_BINDING_HEX, SealedDestSource,
+        REGTEST_MINER_DEST, REGTEST_MINER_OWNER_BINDING_HEX, SealedDestSource, seal_funded_dest,
     };
     use std::env;
     use std::time::Duration;
@@ -1728,7 +1718,10 @@ mod tests {
         let receipt =
             lab_pay_zec_after_burn_with_cfg(&ev, &sealed, &offline_cfg()).expect("mock pay");
         assert_eq!(receipt.dest_display, REGTEST_MINER_DEST);
-        assert_eq!(receipt.dest_owner_binding_hex, REGTEST_MINER_OWNER_BINDING_HEX);
+        assert_eq!(
+            receipt.dest_owner_binding_hex,
+            REGTEST_MINER_OWNER_BINDING_HEX
+        );
         assert_eq!(receipt.amount_zat, 100_000);
         assert_eq!(receipt.mode, MODE_LAB_INVENTORY_PAY_SIMULATED);
         let txid = receipt.zec_txid.expect("synthetic txid");
@@ -1747,25 +1740,27 @@ mod tests {
     #[test]
     fn refuse_without_evidence_helper_gates() {
         let sealed = golden_sealed();
-        assert!(validate_lab_pay_gates(
-            &EgressBurnEvidenceV0 {
-                terp_tx_hash: None,
-                burn: EgressBurnPublic {
-                    asset_id: [0u8; 32],
-                    value: 0,
-                    cm_spent: [0u8; 32],
-                    nullifier: [0u8; 32],
-                    dest_commitment: sealed.owner_binding,
-                    dest_kind: DestKind::Transparent,
-                    root: [0u8; 32],
-                    source_pool_id: None,
+        assert!(
+            validate_lab_pay_gates(
+                &EgressBurnEvidenceV0 {
+                    terp_tx_hash: None,
+                    burn: EgressBurnPublic {
+                        asset_id: [0u8; 32],
+                        value: 0,
+                        cm_spent: [0u8; 32],
+                        nullifier: [0u8; 32],
+                        dest_commitment: sealed.owner_binding,
+                        dest_kind: DestKind::Transparent,
+                        root: [0u8; 32],
+                        source_pool_id: None,
+                    },
+                    proof_mode: String::new(),
+                    settle_receipt_ref: None,
                 },
-                proof_mode: String::new(),
-                settle_receipt_ref: None,
-            },
-            &sealed
-        )
-        .is_err());
+                &sealed
+            )
+            .is_err()
+        );
     }
 
     /// Live: when RPC up, attempt send; degrade to simulated if wallet RPC missing.
@@ -1790,7 +1785,10 @@ mod tests {
         let sealed = golden_sealed();
         let ev = lab_evidence_for_sealed(&sealed, 1, "mock_verify_lab");
         let receipt = lab_pay_zec_after_burn_with_cfg(&ev, &sealed, &cfg).expect("live or degrade");
-        assert_eq!(receipt.dest_owner_binding_hex, REGTEST_MINER_OWNER_BINDING_HEX);
+        assert_eq!(
+            receipt.dest_owner_binding_hex,
+            REGTEST_MINER_OWNER_BINDING_HEX
+        );
         assert!(receipt.zec_txid.is_some());
         assert!(
             receipt.mode == MODE_LAB_INVENTORY_PAY
@@ -1986,7 +1984,9 @@ mod tests {
             matches!(err, LabPayError::ProductRejectFunderOnly(_)),
             "expected product reject, got {err}"
         );
-        assert!(reject_funder_only_as_product(MODE_LAB_INVENTORY_PAY_SIMULATED));
+        assert!(reject_funder_only_as_product(
+            MODE_LAB_INVENTORY_PAY_SIMULATED
+        ));
     }
 
     #[test]
@@ -2009,8 +2009,12 @@ mod tests {
     #[test]
     fn reject_funder_only_as_product_ssot() {
         assert!(reject_funder_only_as_product(MODE_LAB_INVENTORY_PAY));
-        assert!(reject_funder_only_as_product(MODE_LAB_INVENTORY_PAY_SIMULATED));
-        assert!(!reject_funder_only_as_product(MODE_THRESHOLD_ESCROW_RELEASE));
+        assert!(reject_funder_only_as_product(
+            MODE_LAB_INVENTORY_PAY_SIMULATED
+        ));
+        assert!(!reject_funder_only_as_product(
+            MODE_THRESHOLD_ESCROW_RELEASE
+        ));
         assert!(!reject_funder_only_as_product(
             MODE_THRESHOLD_ESCROW_RELEASE_SIMULATED
         ));
@@ -2055,7 +2059,9 @@ mod tests {
         ));
         assert!(is_real_zec_txid("opid-deadbeef"));
         assert!(!rpc_err_method_missing("insufficient funds"));
-        assert!(rpc_err_method_missing(r#"{"code":-32601,"message":"Method not found"}"#));
+        assert!(rpc_err_method_missing(
+            r#"{"code":-32601,"message":"Method not found"}"#
+        ));
     }
 
     #[test]

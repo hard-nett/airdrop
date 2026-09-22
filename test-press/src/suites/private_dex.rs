@@ -186,6 +186,40 @@ impl<Chain: CwEnv> PrivateDexSuite<Chain> {
     pub fn address_string(&self) -> Result<String, CwOrchError> {
         Ok(self.dex.address()?.to_string())
     }
+
+    /// Resume-friendly store: skip upload when `cw_private_dex` code_id is in state.
+    pub fn upload_if_needed(&self) -> Result<(), CwOrchError> {
+        self.dex.upload_if_needed()?;
+        Ok(())
+    }
+
+    pub fn bound_code_id(&self) -> Option<u64> {
+        self.dex.code_id().ok()
+    }
+}
+
+impl<Chain: CwEnv> cw_orch::contract::Deploy<Chain> for PrivateDexSuite<Chain> {
+    type Error = CwOrchError;
+    type DeployData = ();
+
+    fn store_on(chain: Chain) -> Result<Self, Self::Error> {
+        let suite = Self::new(chain);
+        suite.upload_if_needed()?;
+        Ok(suite)
+    }
+
+    fn get_contracts_mut(&mut self) -> Vec<Box<&mut dyn ContractInstance<Chain>>> {
+        vec![Box::new(&mut self.dex)]
+    }
+
+    fn load_from(chain: Chain) -> Result<Self, Self::Error> {
+        Ok(Self::new(chain))
+    }
+
+    fn deploy_on(chain: Chain, _data: Self::DeployData) -> Result<Self, Self::Error> {
+        // Upload-if-needed only. Instantiation stays explicit (admin None).
+        Self::store_on(chain)
+    }
 }
 
 #[cfg(test)]

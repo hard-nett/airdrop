@@ -17,3 +17,6 @@ pub mod state;
 
 pub use crate::error::ContractError;
 pub use crate::msg::{ExecuteMsg, InstantiateMsg, QueryMsg, SudoMsg};
+
+#[cfg(feature = "interface")]
+pub mod interface;

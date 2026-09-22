@@ -3,13 +3,13 @@
 use core::cmp::{Ord, Ordering, PartialOrd};
 
 use pasta_curves::pallas;
-use rand::{CryptoRng, RngCore};
+use rand_core::{CryptoRng, RngCore};
 
 #[cfg(feature = "std")]
 pub use reddsa::batch;
 
 #[cfg(test)]
-use rand::rngs::OsRng;
+use crate::os_rng;
 
 /// A RedPallas signature type.
 pub trait SigType: reddsa::SigType + private::Sealed {}
@@ -57,8 +57,8 @@ impl SigningKey<SpendAuth> {
 
 impl<T: SigType> SigningKey<T> {
     /// Creates a signature of type `T` on `msg` using this `SigningKey`.
-    pub fn sign<R: RngCore + CryptoRng>(&self, rng: R, msg: &[u8]) -> Signature<T> {
-        Signature(self.0.sign(rng, msg))
+    pub fn sign<R: RngCore + CryptoRng>(&self, mut rng: R, msg: &[u8]) -> Signature<T> {
+        Signature(self.0.sign(&mut rng, msg))
     }
 }
 
@@ -116,7 +116,7 @@ impl VerificationKey<SpendAuth> {
     /// Used in the note encryption tests.
     #[cfg(test)]
     pub(crate) fn dummy() -> Self {
-        VerificationKey((&reddsa::SigningKey::new(OsRng)).into())
+        VerificationKey((&reddsa::SigningKey::new(os_rng())).into())
     }
 
     /// Randomizes this verification key with the given `randomizer`.

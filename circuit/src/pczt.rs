@@ -350,7 +350,7 @@ mod tests {
     use ff::{Field, PrimeField};
     use incrementalmerkletree::{Marking, Retention};
     use pasta_curves::pallas;
-    use rand::rngs::OsRng;
+    use crate::OsRng;
     use secp256k1::SecretKey;
     use shardtree::{store::memory::MemoryShardStore, ShardTree};
 

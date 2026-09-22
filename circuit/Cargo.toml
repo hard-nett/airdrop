@@ -9,6 +9,8 @@ edition = "2021"
 default = ["circuit", "multicore", "std", "interface", "host-crypto"]
 circuit = ["dep:halo2_gadgets", "dep:halo2_proofs", "std"]
 interface = ["std", "circuit", "dep:cw-orch"]
+# Host prove/verify: rayon via halo2_proofs::multicore::TryFoldAndReduce.
+# Guest wasm (cw-headstash) must leave this off.
 multicore = ["halo2_proofs?/multicore", "dep:rayon"]
 std = ["core3/std", "group/wnaf-memuse", "reddsa/std"]
 # Host-only: axiom base + libsecp C (breaks wasm32 guest / optimizer).
@@ -34,7 +36,7 @@ getset = { workspace = true }
 group = { workspace = true }
 halo2-base  = { workspace = true, optional = true }
 halo2_gadgets  = { workspace = true, optional = true }
-halo2_proofs  = { workspace = true, optional = true }
+halo2_proofs  = { workspace = true, optional = true, features = ["floor-planner-v1-legacy-pdqsort"] }
 headstash-randomness  = { workspace = true }
 hex = { workspace = true }
 incrementalmerkletree = "0.8.1"
@@ -69,3 +71,7 @@ incrementalmerkletree  = { workspace = true }
 proptest  = { workspace = true }
 shardtree = { workspace = true }
 zcash_note_encryption  = { workspace = true }
+
+[[example]]
+name = "curate_keys"
+required-features = ["interface", "host-crypto"]
