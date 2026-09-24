@@ -13,7 +13,7 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 /// Public instance wire size (6 × 32-byte field elements).
-pub const CLAIM_INSTANCE_BYTES_LEN: usize = 168;
+pub const CLAIM_INSTANCE_BYTES_LEN: usize = 200;
 
 #[derive(Debug, Error)]
 pub enum ClaimFixtureError {
@@ -41,12 +41,12 @@ pub struct ClaimFixture {
     pub path: Vec<String>,
     pub partial_note: ClaimFixturePartialNote,
     pub instance: ClaimFixtureInstance,
-    /// Must be 168 when present.
+    /// Must be 200 when present.
     #[serde(default = "default_instance_len")]
     pub instance_bytes_len: usize,
     #[serde(default)]
     pub circuit: ClaimFixtureCircuit,
-    /// Optional pre-encoded 168-byte instance wire (`0x` hex). Policy tests may omit.
+    /// Optional pre-encoded 200-byte instance wire (`0x` hex). Policy tests may omit.
     #[serde(default)]
     pub instance_bytes_hex: Option<String>,
     /// Mock-ZK proof bytes hex (L1 CI). Empty / absent = policy-only fixture.
@@ -171,7 +171,7 @@ pub fn build_suite_backed_claim_fixture(
         .suite_backed_claim_pair(num_leaves, selected_index)
         .map_err(|e| ClaimFixtureError::Schema(format!("suite_backed_claim_pair: {e}")))?;
 
-    // Wire layout: anchor(32) | nd(32) | v(8) | nf(32) | recp(32) | cmx(32) = 168
+    // Wire layout: anchor(32) | nd(32) | v(8) | nf(32) | recp(32) | cmx(32) | e(32) = 200
     let inst_bytes = instance.to_bytes();
     if inst_bytes.len() != CLAIM_INSTANCE_BYTES_LEN {
         return Err(ClaimFixtureError::Schema(format!(
@@ -286,7 +286,7 @@ mod tests {
     fn synthetic_policy_fixture_validates() {
         let f = build_policy_claim_fixture(3, 1_000_000);
         f.validate_policy().expect("synthetic ok");
-        assert_eq!(f.instance_bytes_len, 168);
+        assert_eq!(f.instance_bytes_len, 200);
         assert_eq!(f.depth, 32);
         assert_eq!(f.path.len(), 32);
         assert_eq!(f.mock_proof_bytes().unwrap(), vec![0xde, 0xad, 0xbe, 0xef]);
@@ -317,7 +317,7 @@ mod tests {
         assert_eq!(f.distro_hash_domain, "poseidon-v1");
         assert_eq!(f.depth, 32);
         assert_eq!(f.circuit.k, 18);
-        assert_eq!(f.instance_bytes_len, 168);
+        assert_eq!(f.instance_bytes_len, 200);
         assert_eq!(f.leaf_index, 1);
     }
 }

@@ -271,12 +271,15 @@ impl SpendInfo {
                 use crate::distro_poseidon::poseidon_distro_leaf;
                 use ff::PrimeField;
                 let (epk_x_be, epk_y_be) = self.note.elig_sk().epk().xy();
+                use crate::claim_auth::{claim_rseed_com, rseed_halves};
+                let (lo, hi) = rseed_halves(self.note.rseed().as_bytes());
                 let leaf = poseidon_distro_leaf(
                     secp_coord_be_to_pallas_base(&epk_x_be),
                     secp_coord_be_to_pallas_base(&epk_y_be),
                     self.note.nd().to_fp(),
                     pallas::Base::from(self.note.value().inner()),
                     pallas::Base::from(self.note.fdi()),
+                    claim_rseed_com(lo, hi),
                 );
                 let path_root = self.merkle_path.root_from_leaf(leaf);
                 &path_root == anchor

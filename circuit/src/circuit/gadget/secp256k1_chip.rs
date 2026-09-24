@@ -1461,6 +1461,8 @@ pub struct Secp256k1Config {
     q_scale: Selector,
     /// `out = bit ? a : b` on a single limb.
     q_blend: Selector,
+    /// `packed = lo + hi · 2^64` for a public 128-bit half of the challenge.
+    q_pack: Selector,
 }
 
 impl Secp256k1Config {
@@ -1489,6 +1491,7 @@ impl Secp256k1Config {
         let q_carry = meta.selector();
         let q_scale = meta.selector();
         let q_blend = meta.selector();
+        let q_pack = meta.selector();
         let two64 = biguint_to_fe_simple(&(BigUint::one() << 64));
 
         // Scalar decomposition gate (bit decomposition for MSM)
@@ -1547,6 +1550,15 @@ impl Secp256k1Config {
             ]
         });
 
+        // 128-bit public half of a secp scalar: packed = lo + hi·2^64.
+        meta.create_gate("pack u128", |meta| {
+            let q = meta.query_selector(q_pack);
+            let lo = meta.query_advice(advices[0], Rotation::cur());
+            let hi = meta.query_advice(advices[1], Rotation::cur());
+            let packed = meta.query_advice(advices[2], Rotation::cur());
+            vec![q * (packed - (lo + hi * Expression::Constant(two64)))]
+        });
+
         Self {
             fp_config,
             fq_config,
@@ -1554,6 +1566,7 @@ impl Secp256k1Config {
             q_carry,
             q_scale,
             q_blend,
+            q_pack,
         }
     }
 }
@@ -1567,6 +1580,7 @@ pub struct Secp256k1Chip {
     q_carry: Selector,
     q_scale: Selector,
     q_blend: Selector,
+    q_pack: Selector,
 }
 
 impl Secp256k1Chip {
@@ -1591,7 +1605,32 @@ impl Secp256k1Chip {
             q_carry: config.q_carry,
             q_scale: config.q_scale,
             q_blend: config.q_blend,
+            q_pack: config.q_pack,
         }
+    }
+
+    /// `packed = lo + hi·2^64`. Both limbs are already range-checked to 64 bits.
+    pub fn pack_u128(
+        &self,
+        mut layouter: impl Layouter<pallas::Base>,
+        lo: &AssignedCell<pallas::Base, pallas::Base>,
+        hi: &AssignedCell<pallas::Base, pallas::Base>,
+    ) -> Result<AssignedCell<pallas::Base, pallas::Base>, PlonkError> {
+        let two64 = pallas::Base::from_u128(1u128 << 64);
+        let packed_val = lo
+            .value()
+            .zip(hi.value())
+            .map(|(lo, hi)| *lo + *hi * two64);
+        let advice = self.fq.config.advices;
+        layouter.assign_region(
+            || "pack u128",
+            |mut region| {
+                self.q_pack.enable(&mut region, 0)?;
+                lo.copy_advice(|| "lo limb", &mut region, advice[0], 0)?;
+                hi.copy_advice(|| "hi limb", &mut region, advice[1], 0)?;
+                region.assign_advice(|| "packed", advice[2], 0, || packed_val)
+            },
+        )
     }
 
     // ── Scalar bit decomposition ──
@@ -2611,6 +2650,204 @@ impl Secp256k1Chip {
         fq: &ProperCrtUint<pallas::Base>,
     ) -> Result<AssignedCell<pallas::Base, pallas::Base>, PlonkError> {
         self.fq.to_native(layouter, fq)
+    }
+
+    /// ECDSA verify under `Q`: `R = (e·s⁻¹)·G + (r·s⁻¹)·Q`, and `R.x ≡ r (mod n)`.
+    ///
+    /// `e`, `r`, and `s` are secp256k1 scalars. `e` is the challenge the contract
+    /// computed as `keccak256` of the EIP-191 claim message, reduced modulo `n`.
+    /// `Q` is the eligible public key (a witness). The scalar `esk` is not an input.
+    pub fn prove_ecdsa_verify(
+        &self,
+        mut layouter: impl Layouter<pallas::Base>,
+        e: Value<Secp256k1Fq>,
+        r: Value<Secp256k1Fq>,
+        s: Value<Secp256k1Fq>,
+        qx: Value<Secp256k1Fp>,
+        qy: Value<Secp256k1Fp>,
+    ) -> Result<
+        (
+            AssignedCell<pallas::Base, pallas::Base>,
+            AssignedCell<pallas::Base, pallas::Base>,
+            ProperCrtUint<pallas::Base>,
+        ),
+        PlonkError,
+    > {
+        let e = self.fq.load_private(layouter.namespace(|| "e"), e)?;
+        let r = self.fq.load_private(layouter.namespace(|| "r"), r)?;
+        let s = self.fq.load_private(layouter.namespace(|| "s"), s)?;
+        self.fq.range_check_limbs(layouter.namespace(|| "rc e"), &e)?;
+        self.fq.range_check_limbs(layouter.namespace(|| "rc r"), &r)?;
+        self.fq.range_check_limbs(layouter.namespace(|| "rc s"), &s)?;
+
+        let one = self.load_pinned_fq(layouter.namespace(|| "one"), Secp256k1Fq::from(1u64))?;
+        let s_inv = self.fq.div(layouter.namespace(|| "s inverse"), &one, &s)?;
+        let u1 = self.fq.mul(layouter.namespace(|| "u1 = e/s"), &e, &s_inv)?;
+        let u2 = self.fq.mul(layouter.namespace(|| "u2 = r/s"), &r, &s_inv)?;
+
+        let r_g = self.scalar_mul_glv(layouter.namespace(|| "u1·G"), &u1)?;
+        let q = (
+            self.fp
+                .load_private(layouter.namespace(|| "Q.x"), qx)?,
+            self.fp
+                .load_private(layouter.namespace(|| "Q.y"), qy)?,
+        );
+        self.fp
+            .range_check_limbs(layouter.namespace(|| "rc Q.x"), &q.0)?;
+        self.fp
+            .range_check_limbs(layouter.namespace(|| "rc Q.y"), &q.1)?;
+        // Variable base: ψ(Q) = (β·x, y). The 2^128 offset is doubled out of Q,
+        // not pinned, because it depends on Q.
+        let r_q = self.scalar_mul_glv_at(layouter.namespace(|| "u2·Q"), &u2, &q)?;
+        let point = self.add_point(layouter.namespace(|| "R = u1G + u2Q"), &r_g, &r_q)?;
+
+        // R.x = m·n + r, with m ∈ {0, 1}, because the base field prime is less than 2n.
+        let m_v = point.0.value.as_ref().map(|x| {
+            let x = x.to_biguint().expect("x >= 0");
+            pallas::Base::from(u64::from(x >= secp_n()))
+        });
+        let m = self.assign_bit(layouter.namespace(|| "x high"), m_v)?;
+        let m_n = self.scale_modulus_by_bit(layouter.namespace(|| "m·n"), &m)?;
+        let (sum, cout) =
+            self.carry_add_limbs(layouter.namespace(|| "m·n + r"), &m_n, &r.truncation.limbs)?;
+        let zero = layouter.assign_region(
+            || "x carry zero",
+            |mut region| {
+                let cell = region.assign_advice(
+                    || "zero",
+                    self.advice_col(),
+                    0,
+                    || Value::known(pallas::Base::ZERO),
+                )?;
+                region.constrain_constant(cell.cell(), pallas::Base::ZERO)?;
+                Ok(cell)
+            },
+        )?;
+        self.enforce_carry_equal(
+            layouter.namespace(|| "R.x = m·n + r"),
+            &sum,
+            &cout,
+            &point.0.truncation.limbs,
+            &zero,
+        )?;
+        Ok((q.0.native, q.1.native, e))
+    }
+
+    /// `[k]P` for a variable point, using the same GLV split as `[k]G`.
+    fn scalar_mul_glv_at(
+        &self,
+        mut layouter: impl Layouter<pallas::Base>,
+        scalar: &ProperCrtUint<pallas::Base>,
+        base: &SecpPoint<pallas::Base>,
+    ) -> Result<SecpPoint<pallas::Base>, PlonkError> {
+        let split_v = scalar.value.as_ref().map(|k| {
+            let k_big = k.to_biguint().expect("scalar is non-negative");
+            glv_split(&k_big)
+        });
+        let (mag1, sign1, z1_cell, z1, mag2, sign2, z2_cell, z2) =
+            self.constrain_glv_split(layouter.namespace(|| "glv split"), scalar, &split_v)?;
+
+        let beta = self.load_pinned_fp(layouter.namespace(|| "beta"), glv_beta_fp())?;
+        let psi = (
+            self.fp
+                .mul(layouter.namespace(|| "β·x"), &beta, &base.0)?,
+            base.1.clone(),
+        );
+        let base_pow = self.double_times(layouter.namespace(|| "2^128·P"), base, 128)?;
+        let psi_pow = self.double_times(layouter.namespace(|| "2^128·ψP"), &psi, 128)?;
+        let c_base = self.negate_point(layouter.namespace(|| "-2^128·P"), &base_pow)?;
+        let c_psi = self.negate_point(layouter.namespace(|| "-2^128·ψP"), &psi_pow)?;
+        let base_neg = self.negate_point(layouter.namespace(|| "-P"), base)?;
+        let psi_neg = self.negate_point(layouter.namespace(|| "-ψP"), &psi)?;
+        let c_base_neg = self.negate_point(layouter.namespace(|| "2^128·P"), &c_base)?;
+        let c_psi_neg = self.negate_point(layouter.namespace(|| "2^128·ψP"), &c_psi)?;
+        let dbl = self.double_point(layouter.namespace(|| "2P"), base)?;
+
+        let b1 = self.select_point(layouter.namespace(|| "±P"), &base_neg, base, &sign1)?;
+        let c1 = self.select_point(
+            layouter.namespace(|| "±corr P"),
+            &c_base_neg,
+            &c_base,
+            &sign1,
+        )?;
+        let b2 = self.select_point(layouter.namespace(|| "±ψP"), &psi_neg, &psi, &sign2)?;
+        let c2 = self.select_point(
+            layouter.namespace(|| "±corr ψ"),
+            &c_psi_neg,
+            &c_psi,
+            &sign2,
+        )?;
+        let p1 = self.scalar_mul_128(
+            layouter.namespace(|| "k1·P"),
+            &b1,
+            &mag1,
+            &c1,
+            z1,
+            base,
+            &dbl,
+        )?;
+        let p2 = self.scalar_mul_128(
+            layouter.namespace(|| "k2·ψP"),
+            &b2,
+            &mag2,
+            &c2,
+            z2,
+            base,
+            &dbl,
+        )?;
+        let sum = if z1 || z2 {
+            self.add_point(layouter.namespace(|| "var combine dummy"), base, &dbl)?
+        } else {
+            self.add_point(layouter.namespace(|| "k1 P + k2 ψP"), &p1, &p2)?
+        };
+        let inner = self.select_point(layouter.namespace(|| "var k1"), &p1, &sum, &z2_cell)?;
+        self.select_point(layouter.namespace(|| "var k2"), &p2, &inner, &z1_cell)
+    }
+
+    fn double_times(
+        &self,
+        mut layouter: impl Layouter<pallas::Base>,
+        point: &SecpPoint<pallas::Base>,
+        times: usize,
+    ) -> Result<SecpPoint<pallas::Base>, PlonkError> {
+        let mut acc = point.clone();
+        for i in 0..times {
+            acc = self.double_point(layouter.namespace(|| format!("double {i}")), &acc)?;
+        }
+        Ok(acc)
+    }
+
+    /// Affine negation. Constrains `y + (−y) = p` with the carry chain.
+    fn negate_point(
+        &self,
+        mut layouter: impl Layouter<pallas::Base>,
+        point: &SecpPoint<pallas::Base>,
+    ) -> Result<SecpPoint<pallas::Base>, PlonkError> {
+        let y_neg_v = point.1.value.as_ref().map(|y| {
+            let y = y.to_biguint().expect("y >= 0");
+            be32_to_fp(&biguint_to_be32(&(secp_p() - y)))
+        });
+        let y_neg = self
+            .fp
+            .load_private(layouter.namespace(|| "-y"), y_neg_v)?;
+        let (sum, cout) = self.carry_add_limbs(
+            layouter.namespace(|| "y + -y"),
+            &point.1.truncation.limbs,
+            &y_neg.truncation.limbs,
+        )?;
+        let p_limbs = {
+            let d = decompose_biguint_simple(&secp_p(), 4, 64);
+            [d[0], d[1], d[2], d[3]]
+        };
+        self.pin_limbs(layouter.namespace(|| "sum is p"), &sum, &p_limbs)?;
+        layouter.assign_region(
+            || "neg carry zero",
+            |mut region| {
+                let c = cout.copy_advice(|| "cout", &mut region, self.advice_col(), 0)?;
+                region.constrain_constant(c.cell(), pallas::Base::ZERO)
+            },
+        )?;
+        Ok((point.0.clone(), y_neg))
     }
 }
 

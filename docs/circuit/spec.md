@@ -30,7 +30,7 @@ ___
 *The claim is public. What we still refuse to publish is the eligible secret, and we try not to publish a unique fingerprint of which eligible key was used. Three obstacles:*
 
 ### Q: How Does Someone Prove They Own An Eligible Wallet Without Revealing The Actual Eligible Wallet?
-**A: in-circuit key pairing.** The prover witnesses `esk` and the affine point `epk = (epk_x, epk_y)`. The secp256k1 chip constrains `epk = esk · G` with GLV: `esk ≡ k1 + k2·λ (mod n)` and `epk = k1·G + k2·ψ(G)`, where `ψ(x, y) = (βx, y)` and both halves are shorter than the secp256k1 GLV bounds (under 128 bits). `esk` and `epk` are witnesses, not instance columns. The chain sees a proof, not the key and not an ECDSA signature.
+**A: personal_sign.** The wallet signs `headstash-claim-v1:` plus the hex of `keccak256` of the 168-byte claim prefix. The circuit checks that signature under the leaf key: `R = (e·s⁻¹)·G + (r·s⁻¹)·Q` and `R.x ≡ r (mod n)`. `e` is public (two 128-bit halves). `r`, `s`, and `Q` are witnesses. `esk` is not a witness. The multiplications are the same GLV split as before. The chain sees the proof and `e`, not the key and not `(r, s)`.
 
 ### Q: How can someone prevent leaking where their claimed funds end up, if the total amount & distributions allocated are public?
 
@@ -53,7 +53,7 @@ The distribution tree is public, and each claim publishes `nd`, `v`, and `recp`.
 >
 ## Requirements
 
-- **Proof of ownership:** constrain `epk = esk · G` on secp256k1, inside the Pallas circuit, using the GLV split above. No ECDSA. No "divide by G".
+- **Proof of ownership:** personal_sign under the leaf key, verified in the circuit. No `esk·G` pairing. No "divide by G".
 - **Proof of inclusion:** a depth-32 Poseidon-v1 Merkle opening of a public distribution leaf under the published root (`anchor`). The leaf is not a Sinsemilla hash.
 - **Nullifier and note commitment:** Poseidon-v1 commitment digest `cmx`, lifted to a Pallas point only so the nullifier can use the Orchard ECC equation. The contract's spent-nullifier set is what stops a second mint.
 - **On-chain verification:** one Halo2 IPA proof, `K = 18`, six instance columns, 4704 bytes. The contract checks it with `proof_instance_verify` when `claim_mock_verify` is false. Mock verify is a lab switch, not the product gate.
@@ -78,7 +78,7 @@ Three key-shaped values show up in a claim. Only the first one is a secp256k1 ke
 
 | # | Key type | Curve | What it is | Public / private | Notes |
 |---|----------|-------|------------|------------------|-------|
-| 1 | **Eligible key** | secp256k1 | `esk`, `epk = (x, y)` | Both are **witnesses**. The tree may publish `epk` coordinates in the note file. The proof does not. | Pairing is GLV inside `Secp256k1Chip::prove_key_pairing`. |
+| 1 | **Eligible key** | secp256k1 | `e`, `(r, s)`, `epk = (x, y)` | `e` is a **public** challenge. `(r, s)` and `epk` are witnesses. `esk` is not in the circuit. | `Secp256k1Chip::prove_ecdsa_verify`. |
 | 2 | **Recipient** | none | 32-byte `RecpAddr` | **Public** as raw bytes on the claim, and as `recp_to_fp` in the instance. | `Poseidon` of two little-endian `u128` halves. Not a bech32 string inside the circuit. |
 | 3 | **`nk`** | Pallas base | Poseidon(`DST_HKDF`, `esk_pallas`, `rho`) | **Witness** | `NullifierDerivingKey::derive_from`. Then `PRF_nf(nk, rho) = Poseidon(nk, rho)`. |
 
@@ -118,25 +118,34 @@ cm_point = [cmx] · NoteCommitR
 ### Nullifier
 
 ```text
-nk     = Poseidon_CL<3>(DST_HKDF, esk_pallas, rho)
-prf_nf = Poseidon(nk, rho)
-nf     = Extract_P( [prf_nf + psi] · NullifierK + cm_point )
+rseed_lo, rseed_hi = the note's 32-byte string, split into two 16-byte halves
+rho     = rseed_lo
+psi     = rseed_hi
+rcm     = rseed_lo + rseed_hi
+nk      = Poseidon_CL<3>(DST_HKDF, rseed_lo, rseed_hi)
+prf_nf  = Poseidon(nk, rho)
+nf      = Extract_P( [prf_nf + psi] · NullifierK + cm_point )
 ```
 
-`DST_HKDF` is the 32-byte constant `b"Hkdf_headstash_710_terp.network\0"`, read as a Pallas base element. It is not a prover input.
+The 32-byte string is sampled once when the note is created. It is not derived from `esk` or from the public leaf. Each half is a `u128`, so all 256 bits are kept.
+
+`rho` and `psi` are those halves, copied, not hashed again. `rcm` is one addition. `nk` is a Poseidon of the string alone. The eligible key is not in it: ownership is the personal-sign check. A free witness `nk` does not verify.
+
+`DST_HKDF` is the 32-byte constant `b"Hkdf_headstash_710_terp.network\0"`, read as a Pallas base element and pinned with `constrain_constant`. It is not a prover input.
 
 `NullifierK` is the Orchard hash-to-curve generator `hash_to_curve("z.cash:Orchard")(b"K")`. `Extract_P` is the Pallas x-coordinate extractor. The result is one base field element and it is instance column `nf`.
 
-`nk` is witnessed. The circuit uses it in `prf_nf`. It does not re-hash `DST_HKDF` inside `derive_nullifier`. The suite derives `nk` with `hdkf_pallas` before proving, from the same `esk` and `rho` the note uses.
+The chain stores that `nf` and rejects a second spend of the same value. The circuit is what makes a second `nf` for the same leaf impossible: the string that feeds `nk` / `rho` / `psi` is the string committed in the leaf, below. Publishing `nf` is not a lookup of `(epk, nd, v, fdi)`. An observer who has the tree and the nullifier still does not have the string, so they cannot recompute `nf` from a leaf.
 
 ### Distribution leaf and root
 
 The tree is public and depth 32. A missing sibling is `pallas::Base::ZERO`. Layer 0 hashes two leaves. The layer counter goes up toward the root. That is not Orchard's `MERKLE_DEPTH - layer - 1` index.
 
 ```text
-leaf = Poseidon_CL<6>(
+rseed_com = Poseidon_CL<3>("terp-hs-rseed-v1", rseed_lo, rseed_hi)
+leaf = Poseidon_CL<7>(
   "terp-hs-distro-leaf-v1",
-  epk_x, epk_y, nd, v, fdi
+  epk_x, epk_y, nd, v, fdi, rseed_com
 )
 node = Poseidon_CL<4>(
   "terp-hs-distro-crh-v1",
@@ -163,17 +172,18 @@ One instance column, six used entries. The Halo2 array is nine scalars wide. Ent
 
 `Instance::to_bytes` is 168 bytes and stores the recipient as raw 32 bytes, not as the Poseidon digest. `to_halo2_instance` is what the proof is checked against, and that column is `recp.to_fp()`. The contract checks the claim's recipient bytes against the raw field in the instance blob. The proof binds the hash.
 
-Witnesses the chain does not get as instances: `esk`, `epk_x`, `epk_y`, `fdi`, `rho`, `psi`, `rcm`, `nk`, the 32 Merkle siblings, and the leaf position.
+Witnesses the chain does not get as instances: `esk`, `epk_x`, `epk_y`, `fdi`, the 32-byte note string, `rho`, `psi`, `rcm`, `nk`, the 32 Merkle siblings, and the leaf position. The leaf publishes `rseed_com`, not the string.
 
 ### Poseidon uses
 
 | Name | Message | Where |
 |------|---------|-------|
 | `recp_to_fp` | two `u128` halves of the 32-byte address, little-endian | instance column `recp`, and the note commitment |
-| `hdkf_pallas` | `DST_HKDF`, `esk_pallas`, `rho` | `nk` |
+| `terp-hs-rseed-v1` | `rseed_lo`, `rseed_hi` | `rseed_com` inside the public leaf |
+| nullifier key | `DST_HKDF`, `rseed_lo`, `rseed_hi` | `nk` |
 | `prf_nf` | `nk`, `rho` | nullifier scalar |
 | note commit | tag + `nd, v, fdi, recp, esk, rho, psi, rcm_base` | `cmx` |
-| distro leaf | tag + `epk_x, epk_y, nd, v, fdi` | inclusion |
+| distro leaf | tag + `epk_x, epk_y, nd, v, fdi, rseed_com` | inclusion |
 | distro CRH | tag + `layer, left, right` | inclusion, 32 layers |
 
 ### Blake3
@@ -197,23 +207,27 @@ Witnesses the chain does not get as instances: `esk`, `epk_x`, `epk_y`, `fdi`, `
 | `cmx` | Poseidon note digest | **Public** |
 | `esk`, `epk` | eligible secp256k1 keypair | **Witness** |
 | `fdi` | which fixed-denomination piece | **Witness** (it is inside the public leaf preimage) |
-| `rho`, `psi`, `rcm` | note randomness and the commitment trapdoor | **Witness** |
-| `nk` | `hdkf_pallas(esk, rho)` | **Witness** |
+| `rseed` | 32-byte string, sampled once per note | **Witness** |
+| `rho`, `psi`, `rcm` | the two halves, and their sum | **Witness** |
+| `nk` | Poseidon of `DST_HKDF` and that string | **Witness** |
+| `e`, `r`, `s` | personal_sign over the claim prefix | **Witness**. `e` is also public |
 | `path`, `pos` | depth-32 opening | **Witness** |
 
-`psi` and `rcm` still come from a note `rseed` through the Orchard `PrfExpand` expanders (`ORCHARD_ESK` / `ORCHARD_RCM` names in the crate). They are note randomness, not the eligible key.
+`rho`, `psi`, and `rcm` are not the Orchard `PrfExpand` expanders on this path. A second string is a different `rseed_com`, so it does not open the published leaf, and it is a different nullifier. The old `hdkf_pallas(esk, rho)` derivation is not what the claim checks.
 
 ## Distribution tree
 
-**This tree is built off chain and then published.** Its job is eligibility: a leaf binds one `epk` to one `(nd, v, fdi)` piece. The prover shows that leaf opens to the public root, and shows the `epk` on the leaf is the point of the `esk` they know.
+**This tree is built off chain and then published.** Its job is eligibility: a leaf binds one `epk` to one `(nd, v, fdi)` piece and to one hiding commitment of that note's random string. The prover shows that leaf opens to the public root, and shows the `epk` on the leaf is the point of the `esk` they know.
 
-The tree does not hide the allocation from someone who has the note file. It stops a proof from minting a `(nd, v)` that was never in the root, and it stops a proof from using an `epk` that was not on that leaf.
+The tree does not hide the allocation from someone who has the note file. It stops a proof from minting a `(nd, v)` that was never in the root, it stops a proof from using an `epk` that was not on that leaf, and it stops a second random string from opening the same piece. The string itself is not in the leaf. `rseed_com` is.
 
 ```math
 \begin{aligned}
+\mathrm{rseed\_com}
+&= H_{\texttt{terp-hs-rseed-v1}}(\mathrm{rseed\_lo} \,\|\, \mathrm{rseed\_hi}) \\[4pt]
 \mathrm{leaf}
 &= H_{\texttt{terp-hs-distro-leaf-v1}}(
-    epk_x \,\|\, epk_y \,\|\, nd \,\|\, v \,\|\, fdi
+    epk_x \,\|\, epk_y \,\|\, nd \,\|\, v \,\|\, fdi \,\|\, \mathrm{rseed\_com}
 ) \\[4pt]
 \mathrm{anchor}
 &= H_{\texttt{terp-hs-distro-crh-v1}}^{\,32}(\mathrm{leaf},\,\mathrm{path},\,\mathrm{pos})
@@ -228,6 +242,7 @@ The tree does not hide the allocation from someone who has the note file. It sto
 | `nd` | trimmed Blake3 of the token name |
 | `v` | amount of this piece |
 | `fdi` | index of this piece inside the allocation. Witness in the proof. Part of the leaf preimage. |
+| `rseed_com` | Poseidon of the note's hidden 32-byte string. Not the string. |
 | `path` | 32 sibling digests |
 | `pos` | leaf index, used to order each pair |
 
@@ -309,11 +324,11 @@ The native Pallas ECC chip is separate. It is used for the note-commitment lift 
 
 1. Load the 10-bit range table.
 2. `prove_key_pairing` → `(esk, epk)`.
-3. Witness `nd`, `v`, `fdi`, `recp`, `psi`, `rho`, `nk`.
+3. Witness `nd`, `v`, `fdi`, `recp`, `psi`, `rho`, `nk`, and the two halves of the note string.
 4. Bind `nd` and `recp` to instance columns 1 and 3.
-5. Poseidon note commit. Bind `v` and `cmx` to columns 2 and 5.
-6. Derive the nullifier from `nk`, `rho`, `psi`, and `cm_point`. Bind `nf` to column 4.
-7. Poseidon leaf from `(epk_x, epk_y, nd, v, fdi)`, then 32 CRH steps. Bind the root to column 0.
+5. Hash `rseed_com`. Copy `rho` and `psi` from the two halves, constrain `rcm` to their sum, and constrain `nk` to `Poseidon(DST_HKDF, esk, lo, hi)`. Poseidon note commit. Bind `v` and `cmx` to columns 2 and 5.
+6. Derive the nullifier from the bound `nk`, `rho`, `psi`, and `cm_point`. Bind `nf` to column 4.
+7. Poseidon leaf from `(epk_x, epk_y, nd, v, fdi, rseed_com)`, then 32 CRH steps. Bind the root to column 0.
 
 ## Metamask Snap
 

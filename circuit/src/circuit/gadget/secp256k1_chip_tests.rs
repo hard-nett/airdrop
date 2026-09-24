@@ -107,6 +107,122 @@ impl Circuit<pallas::Base> for KeyPairingTestCircuit {
     }
 }
 
+/// Proves a wallet ECDSA signature under `pk` for challenge `e`.
+struct EcdsaVerifyCircuit {
+    e: Secp256k1Fq,
+    r: Secp256k1Fq,
+    s: Secp256k1Fq,
+    pk_x: Secp256k1Fp,
+    pk_y: Secp256k1Fp,
+}
+
+impl Circuit<pallas::Base> for EcdsaVerifyCircuit {
+    type Config = Secp256k1TestConfig;
+    type FloorPlanner = SimpleFloorPlanner;
+
+    fn without_witnesses(&self) -> Self {
+        Self {
+            e: Secp256k1Fq::from(1u64),
+            r: Secp256k1Fq::from(1u64),
+            s: Secp256k1Fq::from(1u64),
+            pk_x: Secp256k1Fp::from(1u64),
+            pk_y: Secp256k1Fp::from(1u64),
+        }
+    }
+
+    fn configure(meta: &mut ConstraintSystem<pallas::Base>) -> Self::Config {
+        Secp256k1TestConfig::configure(meta)
+    }
+
+    fn synthesize(
+        &self,
+        config: Self::Config,
+        mut layouter: impl Layouter<pallas::Base>,
+    ) -> Result<(), PlonkError> {
+        layouter.assign_table(
+            || "range_check_table",
+            |mut table| {
+                for index in 0..(1 << 10) {
+                    table.assign_cell(
+                        || "table_idx",
+                        config.table_idx,
+                        index,
+                        || Value::known(pallas::Base::from(index as u64)),
+                    )?;
+                }
+                Ok(())
+            },
+        )?;
+        let chip = Secp256k1Chip::construct(config.secp_config);
+        chip.prove_ecdsa_verify(
+            layouter.namespace(|| "ecdsa"),
+            Value::known(self.e),
+            Value::known(self.r),
+            Value::known(self.s),
+            Value::known(self.pk_x),
+            Value::known(self.pk_y),
+        )?;
+        Ok(())
+    }
+}
+
+fn fq_from_be(bytes: &[u8; 32]) -> Secp256k1Fq {
+    let mut le = *bytes;
+    le.reverse();
+    secp_fq_from_le(le)
+}
+
+fn reduce_mod_n(bytes: &[u8; 32]) -> [u8; 32] {
+    use num_bigint::BigUint;
+    let n = BigUint::parse_bytes(
+        b"FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEBAAEDCE6AF48A03BBFD25E8CD0364141",
+        16,
+    )
+    .unwrap();
+    let reduced = BigUint::from_bytes_be(bytes) % n;
+    let be = reduced.to_bytes_be();
+    let mut out = [0u8; 32];
+    if !be.is_empty() {
+        out[32 - be.len()..].copy_from_slice(&be);
+    }
+    out
+}
+
+#[test]
+fn test_ecdsa_verify_accepts_wallet_signature() {
+    use secp256k1::{Message, PublicKey, Secp256k1, SecretKey};
+
+    use crate::claim_auth::claim_challenge;
+
+    let secp = Secp256k1::new();
+    let sk = SecretKey::from_byte_array([0x11; 32]).unwrap();
+    let pk = PublicKey::from_secret_key(&secp, &sk);
+    let body = [0xab; 32];
+    let challenge = claim_challenge(&body);
+    let sig = secp.sign_ecdsa(Message::from_digest(challenge), &sk);
+    let compact = sig.serialize_compact();
+    let mut r_bytes = [0u8; 32];
+    let mut s_bytes = [0u8; 32];
+    r_bytes.copy_from_slice(&compact[..32]);
+    s_bytes.copy_from_slice(&compact[32..]);
+    let raw = pk.serialize_uncompressed();
+    let mut x = [0u8; 32];
+    let mut y = [0u8; 32];
+    x.copy_from_slice(&raw[1..33]);
+    y.copy_from_slice(&raw[33..65]);
+
+    let circuit = EcdsaVerifyCircuit {
+        e: fq_from_be(&reduce_mod_n(&challenge)),
+        r: fq_from_be(&r_bytes),
+        s: fq_from_be(&s_bytes),
+        pk_x: secp_fp_from_coord_be(&x),
+        pk_y: secp_fp_from_coord_be(&y),
+    };
+    // Two GLV multiplications. K=19 leaves room for the variable-base offset doubles.
+    let prover = MockProver::run(19, &circuit, vec![]).expect("synthesize");
+    assert_eq!(prover.verify(), Ok(()));
+}
+
 // ============================================================================
 // Test: Valid Secp256k1 Key Pair (Should Pass)
 // ============================================================================

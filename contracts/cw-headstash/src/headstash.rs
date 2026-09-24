@@ -74,12 +74,14 @@ pub struct HeadstashInstances {
     pub nf: Binary,
     pub recp: Binary,
     pub cmx: Binary,
+    /// Reduced EIP-191 challenge, 32 bytes. Not part of the signed prefix.
+    pub e: Binary,
 }
 
 /// Implement CosmWasm Instance as a Halo2 Circuit Instance Struct
 impl Into<Instance> for HeadstashInstances {
     fn into(self) -> Instance {
-        Instance::from_parts(
+        let mut inst = Instance::from_parts(
             Anchor::from_bytes(
                 self.anchor
                     .as_slice()
@@ -99,7 +101,9 @@ impl Into<Instance> for HeadstashInstances {
             .expect("darn"),
             ExtractedNoteCommitment::from_bytes(&self.cmx.to_array().expect("cmx bytes"))
                 .expect("ExtractedNoteCommitment"),
-        )
+        );
+        inst.e = self.e.to_array().expect("challenge bytes");
+        inst
     }
 }
 
@@ -132,6 +136,16 @@ pub fn process_headstash(
         // Instantiation with `sinsemilla-legacy` genesis opts into recovery mode.
         if cfg.distro_hash_domain == DistroHashDomain::PoseidonV1 {
             distro::assert_claim_domain_poseidon_v1(&root_entry)?;
+        }
+
+        let inst: Instance = claim.i.clone().into();
+        let wire = inst.to_bytes();
+        let body = zk_headstash::claim_auth::keccak256(&wire[..168]);
+        let expect = zk_headstash::claim_auth::challenge_scalar_be(&body);
+        if inst.e != expect {
+            return Err(StdError::msg(
+                "claim challenge is not the personal_sign of this claim",
+            ));
         }
 
         let nf_hex = claim.i.nf.to_hex();

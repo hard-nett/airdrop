@@ -91,7 +91,7 @@ pub fn build_headstash_keys_to(
     }
     eprintln!("headstash keygen → {}", path.display());
     eprintln!(
-        "  Product A: Poseidon distro + Poseidon note cmx; instance width i=6; K={}",
+        "  Product A: Poseidon distro + Poseidon note cmx; instance width i=8; K={}",
         crate::circuit::K
     );
     let pk = crate::circuit::ProvingKey::build_and_write(path.to_path_buf())?;
@@ -112,10 +112,10 @@ fn validate_store_circuit_blob(bytes: &[u8]) -> Result<(), BoxError> {
     if footer.prover_id != Into::<u8>::into(zk_cosmwasm::CircuitType::Plonkish)
         || footer.curve_id != Into::<u8>::into(zk_cosmwasm::curves::CurveType::Pasta)
         || footer.k != crate::circuit::K as u8
-        || footer.i != 6
+        || footer.i != 8
     {
         return Err(format!(
-            "footer meta expected Plonkish/Pasta/K={}/i=6, got prover={} curve={} k={} i={}",
+            "footer meta expected Plonkish/Pasta/K={}/i=8, got prover={} curve={} k={} i={}",
             crate::circuit::K, footer.prover_id, footer.curve_id, footer.k, footer.i
         )
         .into());
@@ -143,7 +143,7 @@ fn validate_store_circuit_blob(bytes: &[u8]) -> Result<(), BoxError> {
     zk_cosmwasm::AnyVerifyingKey::from_bytes(bytes)
         .map_err(|e| format!("AnyVerifyingKey::from_bytes: {e}"))?;
     eprintln!(
-        "  footer ok: Plonkish Pasta K={} i=6 param_len={} cs_len={} vk_len={}",
+        "  footer ok: Plonkish Pasta K={} i=8 param_len={} cs_len={} vk_len={}",
         footer.k, footer.param_len, footer.cs_len, footer.vk_len
     );
     eprintln!(
@@ -539,16 +539,32 @@ pub trait HeadstashSinsemillaTree: HeadstashBitwiseInstance {
     }
 
     /// Leaf hash (default: **Poseidon-v1**).
-    fn leaf_hash(epk_x: Fp, epk_y: Fp, nd: Fp, v: Fp, fdi: Fp) -> Result<pallas::Base, BoxError> {
-        Ok(Self::leaf_hash_poseidon_v1(epk_x, epk_y, nd, v, fdi))
+    fn leaf_hash(
+        epk_x: Fp,
+        epk_y: Fp,
+        nd: Fp,
+        v: Fp,
+        fdi: Fp,
+        rseed_com: Fp,
+    ) -> Result<pallas::Base, BoxError> {
+        Ok(Self::leaf_hash_poseidon_v1(
+            epk_x, epk_y, nd, v, fdi, rseed_com,
+        ))
     }
 
     /// Poseidon-v1 public inclusion **leaf** hash.
     ///
     /// Full field elements (including full `epk_y`, not Sinsemilla 1-bit packing).
     /// SSOT: [`poseidon_distro_leaf`]. Domain tag `terp-hs-distro-leaf-v1`.
-    fn leaf_hash_poseidon_v1(epk_x: Fp, epk_y: Fp, nd: Fp, v: Fp, fdi: Fp) -> pallas::Base {
-        poseidon_distro_leaf(epk_x, epk_y, nd, v, fdi)
+    fn leaf_hash_poseidon_v1(
+        epk_x: Fp,
+        epk_y: Fp,
+        nd: Fp,
+        v: Fp,
+        fdi: Fp,
+        rseed_com: Fp,
+    ) -> pallas::Base {
+        poseidon_distro_leaf(epk_x, epk_y, nd, v, fdi, rseed_com)
     }
 
     /// Sinsemilla-legacy leaf (recovery only).
@@ -665,7 +681,18 @@ pub trait HeadstashSinsemillaTree: HeadstashBitwiseInstance {
                 let nd_fp = Fp::from_repr(Self::derive_nd(token_name)).unwrap();
                 let v_fp = Fp::from(fixed_amount);
                 let fdi_fp = Fp::from(idx as u64);
-                let leaf = Self::leaf_hash_poseidon_v1(epk_x, epk_y, nd_fp, v_fp, fdi_fp);
+                let mut rseed = [0u8; 32];
+                rseed[0] = 0x11;
+                rseed[1] = idx as u8;
+                let (lo, hi) = crate::claim_auth::rseed_halves(&rseed);
+                let leaf = Self::leaf_hash_poseidon_v1(
+                    epk_x,
+                    epk_y,
+                    nd_fp,
+                    v_fp,
+                    fdi_fp,
+                    crate::claim_auth::claim_rseed_com(lo, hi),
+                );
                 let leaf_hex = format!("0x{}", hex::encode(leaf.to_repr()));
                 leaf_hexes
                     .lock()
@@ -682,7 +709,18 @@ pub trait HeadstashSinsemillaTree: HeadstashBitwiseInstance {
             let nd_fp = Fp::from_repr(Self::derive_nd(token_name)).unwrap();
             let v_fp = Fp::from(fixed_amount);
             let fdi_fp = Fp::from(idx as u64);
-            let leaf = Self::leaf_hash_poseidon_v1(epk_x, epk_y, nd_fp, v_fp, fdi_fp);
+            let mut rseed = [0u8; 32];
+            rseed[0] = 0x11;
+            rseed[1] = idx as u8;
+            let (lo, hi) = crate::claim_auth::rseed_halves(&rseed);
+            let leaf = Self::leaf_hash_poseidon_v1(
+                epk_x,
+                epk_y,
+                nd_fp,
+                v_fp,
+                fdi_fp,
+                crate::claim_auth::claim_rseed_com(lo, hi),
+            );
             let leaf_hex = format!("0x{}", hex::encode(leaf.to_repr()));
             leaf_hexes
                 .lock()
@@ -943,6 +981,8 @@ pub struct TestLeafData {
     pub raw_addr: [u8; 32],
     /// Raw token name (for reference)
     pub raw_token: String,
+    /// One-time 32-byte note random. The leaf stores only its hiding commitment.
+    pub rseed: [u8; 32],
 }
 
 /// Full merkle tree structure containing all levels.
@@ -1051,13 +1091,16 @@ impl MerkleAuthPath {
 /// Distinct from private note `cmx` ([`Note::commitment`]).
 pub fn poseidon_distro_leaf_from_note(note: &Note) -> Fp {
     use crate::circuit::gadget::secp256k1_chip::secp_coord_be_to_pallas_base;
+    use crate::claim_auth::{claim_rseed_com, rseed_halves};
     let (epk_x_be, epk_y_be) = note.elig_sk().epk().xy();
+    let (lo, hi) = rseed_halves(note.rseed().as_bytes());
     poseidon_distro_leaf(
         secp_coord_be_to_pallas_base(&epk_x_be),
         secp_coord_be_to_pallas_base(&epk_y_be),
         note.nd().to_fp(),
         Fp::from(note.value().inner()),
         Fp::from(note.fdi()),
+        claim_rseed_com(lo, hi),
     )
 }
 
@@ -1076,6 +1119,8 @@ pub struct PartialClaimNote {
     pub value: u64,
     /// Fixed denomination index for this leaf.
     pub fdi: u64,
+    /// One-time note random. The leaf commits to it; the bytes stay off chain.
+    pub rseed: [u8; 32],
     /// Raw 32-byte recipient (canonical cosmos addr bytes or test pad).
     pub recipient: [u8; 32],
 }
@@ -1088,6 +1133,7 @@ impl PartialClaimNote {
             token: data.raw_token.clone(),
             value: data.raw_v,
             fdi: data.raw_fdi,
+            rseed: data.rseed,
             recipient: data.raw_addr, // default: claim-to-self for fixtures
         }
     }
@@ -1112,12 +1158,14 @@ impl PartialClaimNote {
         impl HeadstashBitwiseInstance for Bits {}
         let (epk_x, epk_y) = Bits::derive_epk_natives(self.esk_bytes);
         let nd = Fp::from_repr(Bits::derive_nd(&self.token)).unwrap();
+        let (lo, hi) = crate::claim_auth::rseed_halves(&self.rseed);
         poseidon_distro_leaf(
             epk_x,
             epk_y,
             nd,
             Fp::from(self.value),
             Fp::from(self.fdi),
+            crate::claim_auth::claim_rseed_com(lo, hi),
         )
     }
 }
@@ -1224,6 +1272,11 @@ pub trait MerkleTestDataBuilder: HeadstashSinsemillaTree {
                     raw_fdi: i as u64,
                     raw_addr,
                     raw_token,
+                    rseed: {
+                        let mut rseed = [0u8; 32];
+                        rand::Rng::fill_bytes(&mut rng, &mut rseed);
+                        rseed
+                    },
                 }
             })
             .collect()
@@ -1249,6 +1302,11 @@ pub trait MerkleTestDataBuilder: HeadstashSinsemillaTree {
             raw_fdi: fdi_index,
             raw_addr: *addr,
             raw_token: token.to_string(),
+            rseed: {
+                let mut rseed = [0x11; 32];
+                rseed[1] = fdi_index as u8;
+                rseed
+            },
         }
     }
 
@@ -1273,12 +1331,14 @@ pub trait MerkleTestDataBuilder: HeadstashSinsemillaTree {
 
     /// Compute **Poseidon-v1** public inclusion leaf from TestLeafData.
     fn compute_leaf_from_data_poseidon_v1(&self, data: &TestLeafData) -> Fp {
+        let (lo, hi) = crate::claim_auth::rseed_halves(&data.rseed);
         <Self as HeadstashSinsemillaTree>::leaf_hash_poseidon_v1(
             data.epk_x_native,
             data.epk_y_native,
             data.nd,
             data.v,
             data.fdi,
+            crate::claim_auth::claim_rseed_com(lo, hi),
         )
     }
 
@@ -1651,10 +1711,10 @@ pub trait HeadstashProofBuilder: HeadstashBitwiseInstance + MerkleTestDataBuilde
 
         // Eligibility key MUST match the distro leaf (suite stores sk in raw_addr).
         let esk = EligibleSk::from_bytes(leaf_data.raw_addr);
+        let secret_be = esk.secret_bytes();
 
         let rho = self.rho_from_secure_random();
-        let rseed_bytes = self.rho_from_secure_random().to_bytes();
-        let rseed = RandomSeed::from_bytes(rseed_bytes, &rho).expect("rseed issue");
+        let rseed = RandomSeed::from_bytes(leaf_data.rseed, &rho).expect("rseed issue");
 
         let partial = PartialClaimNote::from_test_leaf(leaf_data);
         let leaf = partial.poseidon_leaf();
@@ -1670,10 +1730,11 @@ pub trait HeadstashProofBuilder: HeadstashBitwiseInstance + MerkleTestDataBuilde
 
         let nf = note.nullifier();
         let cmx = ExtractedNoteCommitment::from(note.commitment());
-        let instance =
+        let mut instance =
             crate::circuit::Instance::from_parts(anchor, hv.denom(), hv.amount(), recp, nf, cmx);
 
-        let circuit = Circuit::from_action_context_unchecked(spend_info, note);
+        let mut circuit = Circuit::from_action_context_unchecked(spend_info, note);
+        circuit.attach_personal_sign(&mut instance, &secret_be);
         let proof = Proof::create(pk, &[circuit], &[instance.clone()], &mut rng)?;
 
         Ok(HeadstashProofBundle {
@@ -1704,9 +1765,9 @@ pub trait HeadstashProofBuilder: HeadstashBitwiseInstance + MerkleTestDataBuilde
         let sk = SpendingKey::random(&mut rng);
         let fvk = FullViewingKey::from(&sk);
         let esk = EligibleSk::from_bytes(leaf_data.raw_addr);
+        let secret_be = esk.secret_bytes();
         let rho = self.rho_from_secure_random();
-        let rseed_bytes = self.rho_from_secure_random().to_bytes();
-        let rseed = RandomSeed::from_bytes(rseed_bytes, &rho).expect("rseed");
+        let rseed = RandomSeed::from_bytes(leaf_data.rseed, &rho).expect("rseed");
 
         let hv =
             HeadstashValue::from_raw(leaf_data.raw_v, &leaf_data.raw_token, leaf_data.raw_fdi)?;
@@ -1715,12 +1776,13 @@ pub trait HeadstashProofBuilder: HeadstashBitwiseInstance + MerkleTestDataBuilde
 
         let spend_info =
             SpendInfo::new(fvk, note.clone(), merkle_path).ok_or("SpendInfo failed")?;
-        let circuit = Circuit::from_action_context_unchecked(spend_info, note.clone());
+        let mut circuit = Circuit::from_action_context_unchecked(spend_info, note.clone());
 
         let nf = note.nullifier();
         let cmx = ExtractedNoteCommitment::from(note.commitment());
-        let instance =
+        let mut instance =
             crate::circuit::Instance::from_parts(anchor, hv.denom(), hv.amount(), recp, nf, cmx);
+        circuit.attach_personal_sign(&mut instance, &secret_be);
 
         Ok((circuit, instance, anchor, partial))
     }
@@ -1761,16 +1823,18 @@ pub trait HeadstashLaunchpadInstance: HeadstashBitwiseInstance + HeadstashIpfsIn
         let spk = SpendingKey::from_bytes(r).expect("spk");
         let fvk = FullViewingKey::from(&spk);
 
+        let secret_be = esk.secret_bytes();
         let n = Note::from_parts(hv, recp, esk, rho, rseed).expect("note derivation");
         let nf = n.nullifier();
         let cmx = ExtractedNoteCommitment::from(n.commitment());
 
-        let c = SpendInfo::new(fvk, n, mp).expect("headstash claim");
+        let c = SpendInfo::new(fvk, n.clone(), mp).expect("headstash claim");
 
         // generate proof, unchecked as we rho is not deterministically derived
-        let instances =
+        let mut instances =
             crate::circuit::Instance::from_parts(a, hv.denom(), hv.amount(), recp, nf, cmx);
-        let circuit = Circuit::from_action_context_unchecked(c, n);
+        let mut circuit = Circuit::from_action_context_unchecked(c, n);
+        circuit.attach_personal_sign(&mut instances, &secret_be);
         Ok(Proof::create(&pk, &[circuit], &[instances], &mut rng)?)
     }
     /// create_new_headstash

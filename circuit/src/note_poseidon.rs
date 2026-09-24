@@ -392,7 +392,7 @@ mod tests {
         // Same small field vector must not collide across note-commit vs distro-leaf domains.
         let (nd, v, fdi, recp, esk, rho, psi, rcm_base) = sample_note_fields(42);
         let note = poseidon_note_cmx(nd, v, fdi, recp, esk, rho, psi, rcm_base);
-        let distro = poseidon_distro_leaf(nd, v, fdi, recp, esk);
+        let distro = poseidon_distro_leaf(nd, v, fdi, recp, esk, pallas::Base::from(1u64));
         assert_ne!(note, distro);
 
         // Forged: note payload hashed under distro leaf tag + arity 6.

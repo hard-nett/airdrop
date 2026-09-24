@@ -123,6 +123,24 @@ impl RandomSeed {
     }
 }
 
+/// Domain-separated one-time inputs of a hiding nullifier.
+#[cfg(feature = "host-crypto")]
+#[derive(Clone, Debug)]
+pub(crate) struct HidingBinding {
+    /// Low half of the note string.
+    pub rho: Rho,
+    /// High half of the note string.
+    pub psi: pallas::Base,
+    /// `rseed_lo + rseed_hi`, lifted into a scalar trapdoor.
+    pub rcm: commitment::NoteCommitTrapdoor,
+    /// `Poseidon(DST_HKDF, esk, rseed_lo, rseed_hi)`.
+    pub nk: NullifierDerivingKey,
+    /// Low 16 bytes of the note's one-time random string.
+    pub rseed_lo: pallas::Base,
+    /// High 16 bytes of the note's one-time random string.
+    pub rseed_hi: pallas::Base,
+}
+
 /// A discrete amount of funds received by an address.
 #[derive(Debug, Copy, Clone)]
 pub struct Note {
@@ -310,16 +328,54 @@ impl Note {
     ///
     /// [notes]: https://zips.z.cash/protocol/nu5.pdf#notes
 
+    /// One-time nullifier inputs, each a Poseidon PRF under its own DST.
+    ///
+    /// `rho` and `psi` are the halves of this note's 32-byte `rseed`.
+    /// `rcm` is their sum. `nk` is a Poseidon of that string.
+    /// The leaf inputs are not hashed in.
+    #[cfg(feature = "host-crypto")]
+    pub(crate) fn hiding_binding(&self) -> HidingBinding {
+        use crate::claim_auth::{claim_nk, claim_psi, claim_rcm_base, claim_rho, rseed_halves};
+
+        let (lo, hi) = rseed_halves(self.rseed.as_bytes());
+        let rho = Rho(claim_rho(lo));
+        let psi = claim_psi(hi);
+        let rcm_base = claim_rcm_base(lo, hi);
+        let rcm = commitment::NoteCommitTrapdoor(
+            Option::from(pallas::Scalar::from_repr(rcm_base.to_repr()))
+                .expect("pallas base fits in the scalar field"),
+        );
+        HidingBinding {
+            rho,
+            psi,
+            rcm,
+            nk: NullifierDerivingKey::from_prf(claim_nk(lo, hi)),
+            rseed_lo: lo,
+            rseed_hi: hi,
+        }
+    }
+
     fn commitment_inner(&self) -> CtOption<NoteCommitment> {
+        #[cfg(feature = "host-crypto")]
+        let (rho, psi, rcm) = {
+            let bound = self.hiding_binding();
+            (bound.rho.0, bound.psi, bound.rcm)
+        };
+        #[cfg(not(feature = "host-crypto"))]
+        let (rho, psi, rcm) = (
+            self.rho.0,
+            self.rseed.psi(&self.rho),
+            self.rseed.rcm(&self.rho),
+        );
         NoteCommitment::derive(
             self.nd.to_fp(),
             self.v,
             self.fdi.into(),
             self.recipient,
             self.esk,
-            self.rho.0,
-            self.rseed.psi(&self.rho),
-            self.rseed.rcm(&self.rho),
+            rho,
+            psi,
+            rcm,
         )
     }
 
@@ -330,12 +386,20 @@ impl Note {
 
     /// Derives the nullifier for this note.
     pub fn nullifier(&self) -> Nullifier {
-        Nullifier::derive(
-            &self.nk(self.rho()),
-            self.rho.0,
-            self.rseed.psi(&self.rho),
-            self.commitment(),
-        )
+        #[cfg(feature = "host-crypto")]
+        {
+            let bound = self.hiding_binding();
+            return Nullifier::derive(&bound.nk, bound.rho.0, bound.psi, self.commitment());
+        }
+        #[cfg(not(feature = "host-crypto"))]
+        {
+            Nullifier::derive(
+                &self.nk(self.rho()),
+                self.rho.0,
+                self.rseed.psi(&self.rho),
+                self.commitment(),
+            )
+        }
     }
 }
 

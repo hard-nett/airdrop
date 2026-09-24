@@ -49,7 +49,7 @@ fn bench_one_claim_proof_native() {
         "floor_planner": "V1+floor-planner-v1-legacy-pdqsort",
         "runtime": "native-release",
         "threads": std::thread::available_parallelism().map(|n| n.get()).unwrap_or(1),
-        "k": 18,
+        "k": crate::circuit::K,
         "scalar_mul": "glv-128",
         "dropped": "q_orchard selector and action cv/enable gates (never enabled)",
         "keygen_secs": keygen_secs,

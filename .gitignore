@@ -1,3 +1,6 @@
 target
 .env
 data
+community-notes/notes.json
+artifacts/community-notes/notes.json
+*/node_modules

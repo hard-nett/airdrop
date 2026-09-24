@@ -15,6 +15,7 @@ use std::path::{Path, PathBuf};
 
 use ff::{Field, PrimeField};
 use pasta_curves::pallas;
+use rand::RngExt;
 use rayon::prelude::*;
 use serde_json::{json, Value};
 use zk_headstash::circuit::gadget::secp256k1_chip::secp_coord_be_to_pallas_base;
@@ -197,12 +198,16 @@ fn main() -> anyhow::Result<()> {
             let (x, y, epk_x, epk_y, uncompressed) =
                 epk_for_proof(&p.pk_compressed).expect("elig_pk");
             let nd = NoteDenom::new_for_proof(&p.token);
+            let mut rseed = [0u8; 32];
+            rand::rng().fill(&mut rseed);
+            let (lo, hi) = zk_headstash::claim_auth::rseed_halves(&rseed);
             let leaf = poseidon_distro_leaf(
                 epk_x,
                 epk_y,
                 nd.to_fp(),
                 pallas::Base::from(p.value),
                 pallas::Base::from(p.fdi),
+                zk_headstash::claim_auth::claim_rseed_com(lo, hi),
             );
             json!({
                 "community": p.community,
@@ -211,11 +216,12 @@ fn main() -> anyhow::Result<()> {
                 "elig_pk_uncompressed": uncompressed,
                 "epk_x": format!("0x{}", hex::encode(x)),
                 "epk_y": format!("0x{}", hex::encode(y)),
-                "esk_hint": "ETH secp256k1 private key (same key that signed a mainnet tx from addr); circuit proves epk = esk·G",
+                "esk_hint": "rseed is the one-time witness for this leaf. It is not public. The current circuit also proves epk = esk·G with the ETH key for addr. Do not publish rseed or esk.",
                 "token": p.token,
                 "nd": format!("0x{}", hex::encode(nd.as_bytes())),
                 "v": p.value,
                 "fdi": p.fdi,
+                "rseed": format!("0x{}", hex::encode(rseed)),
                 "recp": format!("0x{}", hex::encode(recp_from_eth(&p.addr))),
                 "leaf": format!("0x{}", hex::encode(leaf.to_repr())),
             })
@@ -243,6 +249,11 @@ fn main() -> anyhow::Result<()> {
         "count": notes.len(),
         "holders_keyed": notes.iter().filter_map(|n| n["addr"].as_str()).collect::<HashSet<_>>().len(),
         "distro_hash_domain": "poseidon-v1",
+        "leaf_personalization": "terp-hs-distro-leaf-v1",
+        "leaf_arity": 7,
+        "leaf_fields": ["tag", "epk_x", "epk_y", "nd", "v", "fdi", "rseed_com"],
+        "rseed_com": "Poseidon(terp-hs-rseed-v1, lo, hi). The 32-byte rseed is stored on the note only.",
+        "supersedes_root": "0x6bb155b7a04eb34410bb32f5790e6c6735940dcb08964397bfb91caff8b3272b",
         "threads": rayon::current_num_threads(),
     });
     fs::write(out.join("merkle_output.json"), serde_json::to_vec_pretty(&merkle)?)?;

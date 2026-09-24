@@ -1,3 +1,4 @@
+use ff::Field;
 use pasta_curves::pallas;
 use subtle::{ConstantTimeEq, CtOption};
 
@@ -58,7 +59,9 @@ impl NoteCommitment {
         psi: pallas::Base,
         rcm: NoteCommitTrapdoor,
     ) -> CtOption<Self> {
-        let esk = esk.derive_pallas();
+        // The eligible key is not a note-commit input. Ownership is the signature.
+        let _ = esk;
+        let esk = pallas::Base::ZERO;
         let recp = recp.to_fp();
         let rcm_base = rcm_to_base(rcm.0);
         let v_base = pallas::Base::from(v.inner());

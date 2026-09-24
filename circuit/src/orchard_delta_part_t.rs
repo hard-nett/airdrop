@@ -19,7 +19,7 @@ use rand_core::Rng;
 use crate::os_rng;
 
 use crate::circuit::gadget::secp256k1_chip::{
-    secp_coord_be_to_pallas_base, secp_fp_from_coord_be, secp_fq_from_secret_be,
+    secp_coord_be_to_pallas_base, secp_fp_from_coord_be,
 };
 use crate::circuit::{Circuit, Instance, K};
 use crate::distro_poseidon::poseidon_distro_leaf;
@@ -69,12 +69,12 @@ fn valid_claim_pair<R: Rng>(mut rng: R) -> (Circuit, Instance) {
         secp_fp_from_coord_be(&epkx_be),
         secp_fp_from_coord_be(&epky_be),
     );
-    let e_sk_fq = secp_fq_from_secret_be(&esk.secret_bytes());
     let epk_x_native: pallas::Base = secp_coord_be_to_pallas_base(&epkx_be);
     let epk_y_native: pallas::Base = secp_coord_be_to_pallas_base(&epky_be);
     let recp = spent_note.recipient();
 
-    let nk = spent_note.nk(spent_note.rho());
+    let bound = spent_note.hiding_binding();
+    let nk = bound.nk;
     let nf = spent_note.nullifier();
     let cmx = spent_note.commitment().into();
     let nd = spent_note.nd();
@@ -85,35 +85,47 @@ fn valid_claim_pair<R: Rng>(mut rng: R) -> (Circuit, Instance) {
     let fdi_pallas: pallas::Base = pallas::Base::from(spent_note.fdi());
 
     // Poseidon-v1 public inclusion leaf + path root (ADR-POSEIDON-DISTRO-TREE).
-    let leaf = poseidon_distro_leaf(epk_x_native, epk_y_native, nd_pallas, v_pallas, fdi_pallas);
+    let leaf = poseidon_distro_leaf(
+        epk_x_native,
+        epk_y_native,
+        nd_pallas,
+        v_pallas,
+        fdi_pallas,
+        crate::claim_auth::claim_rseed_com(bound.rseed_lo, bound.rseed_hi),
+    );
     let anchor = path.root_from_leaf(leaf);
 
-    (
-        Circuit {
-            path: Value::known(path.auth_path()),
-            pos: Value::known(path.position()),
-            nk: Value::known(nk),
-            nd: Value::known(spent_note.nd().to_fp()),
-            v: Value::known(spent_note.value()),
-            fdi: Value::known(pallas::Base::from(spent_note.fdi())),
-            recp: Value::known(recp.to_fp()),
-            esk: Value::known(e_sk_fq),
-            epkx: Value::known(epkx),
-            epky: Value::known(epky),
-            rho_old: Value::known(spent_note.rho()),
-            psi_old: Value::known(spent_note.rseed().psi(&spent_note.rho())),
-            rcm_old: Value::known(spent_note.rseed().rcm(&spent_note.rho())),
-            cm_old: Value::known(spent_note.commitment()),
-        },
-        Instance {
-            anchor,
-            nd,
-            v,
-            recp,
-            nf,
-            cmx,
-        },
-    )
+    let mut circuit = Circuit {
+        path: Value::known(path.auth_path()),
+        pos: Value::known(path.position()),
+        nk: Value::known(nk),
+        rseed_lo: Value::known(bound.rseed_lo),
+        rseed_hi: Value::known(bound.rseed_hi),
+        nd: Value::known(spent_note.nd().to_fp()),
+        v: Value::known(spent_note.value()),
+        fdi: Value::known(pallas::Base::from(spent_note.fdi())),
+        recp: Value::known(recp.to_fp()),
+        sig_e: Value::unknown(),
+        sig_r: Value::unknown(),
+        sig_s: Value::unknown(),
+        epkx: Value::known(epkx),
+        epky: Value::known(epky),
+        rho_old: Value::known(bound.rho),
+        psi_old: Value::known(bound.psi),
+        rcm_old: Value::known(bound.rcm),
+        cm_old: Value::known(spent_note.commitment()),
+    };
+    let mut instance = Instance {
+        anchor,
+        nd,
+        v,
+        recp,
+        nf,
+        cmx,
+        e: [0u8; 32],
+    };
+    circuit.attach_personal_sign(&mut instance, &esk.secret_bytes());
+    (circuit, instance)
 }
 
 fn public_columns(instance: &Instance) -> Vec<Vec<pallas::Base>> {
@@ -124,13 +136,43 @@ fn public_columns(instance: &Instance) -> Vec<Vec<pallas::Base>> {
         .collect()
 }
 
+/// A second note random does not open the published leaf.
+#[test]
+fn h_rerolled_rseed_fails() {
+    let (mut circuit, instance) = valid_claim_pair(os_rng());
+    circuit.rseed_lo = Value::known(pallas::Base::from(1u64));
+    circuit.rseed_hi = Value::known(pallas::Base::from(2u64));
+    let public = public_columns(&instance);
+    let prover = MockProver::run(K, &circuit, public).expect("prover must construct");
+    assert!(
+        prover.verify().is_err(),
+        "a fresh rseed must not satisfy the leaf commitment or the nullifier"
+    );
+}
+
+/// A free `nk` (the old witness) must not verify. The nullifier key is the DST PRF.
+#[test]
+fn h_free_nk_fails() {
+    let (mut circuit, instance) = valid_claim_pair(os_rng());
+    let (_sk, _fvk, esk, note) = Note::dummy(&mut os_rng(), None);
+    // nk derived from the note's sampled rho, not from the leaf-bound rho.
+    circuit.nk = Value::known(note.nk(note.rho()));
+    let _ = esk;
+    let public = public_columns(&instance);
+    let prover = MockProver::run(K, &circuit, public).expect("prover must construct");
+    assert!(
+        prover.verify().is_err(),
+        "an unconstrained nullifier key must be rejected"
+    );
+}
+
 /// H1: Valid claim with Poseidon-v1 path — MockProver must fully verify.
 #[test]
 fn h1_valid_claim() {
     let (circuit, instance) = valid_claim_pair(os_rng());
     let public = public_columns(&instance);
     let prover = MockProver::run(K, &circuit, public).expect("H1: MockProver must construct");
-    assert_eq!(instance.to_bytes().len(), 168, "H1: public instance wire size");
+    assert_eq!(instance.to_bytes().len(), 200, "H1: public instance wire size");
     assert_eq!(
         prover.verify(),
         Ok(()),

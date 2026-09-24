@@ -645,7 +645,7 @@ mod tests {
         let suite = PrivateBridgeSuite::new(chain);
         let fix = suite.build_claim_fixture(3, 1_000_000);
         fix.validate_policy().expect("policy");
-        assert_eq!(fix.instance_bytes_len, 168);
+        assert_eq!(fix.instance_bytes_len, 200);
     }
 
     #[test]

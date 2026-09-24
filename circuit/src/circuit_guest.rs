@@ -24,6 +24,8 @@ pub struct Instance {
     pub(crate) nf: Nullifier,
     pub(crate) recp: RecpAddr,
     pub(crate) cmx: ExtractedNoteCommitment,
+    /// Reduced EIP-191 challenge. Not part of the signed 168-byte prefix.
+    pub e: [u8; 32],
 }
 
 impl Instance {
@@ -43,10 +45,11 @@ impl Instance {
             recp,
             nf,
             cmx,
+            e: [0u8; 32],
         }
     }
 
-    /// Byte layout matches host `circuit::Instance::to_bytes` (168 bytes).
+    /// Byte layout matches host `circuit::Instance::to_bytes` (200 bytes).
     pub fn from_bytes(bytes: Vec<u8>) -> Self {
         const THREETWO: usize = 32;
         const EIGHT: usize = 8;
@@ -68,6 +71,8 @@ impl Instance {
         let recp = &bytes[offset..offset + THREETWO];
         offset += THREETWO;
         let cmx: &[u8; 32] = &bytes[offset..offset + THREETWO].try_into().expect("cmx");
+        offset += THREETWO;
+        let e: [u8; 32] = bytes[offset..offset + THREETWO].try_into().expect("e");
 
         Instance {
             anchor: Anchor::from_bytes(*anchor).expect("anchor"),
@@ -76,18 +81,20 @@ impl Instance {
             nf: Nullifier::from_bytes(nf).expect("nf"),
             recp: RecpAddr::try_from(recp).expect("recp"),
             cmx: ExtractedNoteCommitment::from_bytes(cmx).expect("cmx"),
+            e,
         }
     }
 
     /// Serialize for CosmWasm proof_instance_verify / storage.
     pub fn to_bytes(&self) -> Vec<u8> {
-        let mut bytes = Vec::with_capacity(168);
+        let mut bytes = Vec::with_capacity(200);
         bytes.extend_from_slice(&self.anchor.to_bytes());
         bytes.extend_from_slice(&self.nd.to_fp().to_repr());
         bytes.extend_from_slice(&self.v.inner().to_le_bytes());
         bytes.extend_from_slice(&self.nf.to_bytes());
         bytes.extend_from_slice(&self.recp.to_canonical_bytes());
         bytes.extend_from_slice(&self.cmx.to_bytes());
+        bytes.extend_from_slice(&self.e);
         bytes
     }
 }

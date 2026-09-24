@@ -46,7 +46,7 @@ use crate::{
     tree::{Anchor, MerkleHashOrchard},
     value::{NoteDenom, NoteValue},
 };
-use ff::PrimeField;
+use ff::{Field, PrimeField};
 use halo2_gadgets::{
     ecc::{
         chip::{EccChip, EccConfig},
@@ -70,10 +70,9 @@ mod note_commit_bit_tests;
 
 pub use crate::Proof;
 
-/// Row budget. K=17 is not enough (`NotEnoughRowsAvailable`): ECC + secp +
-/// 32-deep Poseidon still fill more than 2^17 rows. The unused Orchard
-/// selector is gone; that does not shrink the row count.
-pub(crate) const K: u32 = 18;
+/// Row budget. One GLV mul fit in K=18. Personal-sign verify is two
+/// (fixed base and variable base), which does not.
+pub(crate) const K: u32 = 19;
 
 // Absolute offsets for public inputs.
 const ANCHOR: usize = 0;
@@ -82,6 +81,9 @@ const HS_V: usize = 2;
 const RECP: usize = 3;
 const NF_OLD: usize = 4;
 const CMX: usize = 5;
+/// Low and high 128-bit halves of the public EIP-191 challenge scalar.
+const E_LO: usize = 6;
+const E_HI: usize = 7;
 // const RK_X: usize = 4;
 // const RK_Y: usize = 5;
 // const ENABLE_SPEND: usize = 7;
@@ -107,10 +109,16 @@ pub struct Config {
 pub struct Circuit {
     pub(crate) path: Value<[MerkleHashOrchard; MERKLE_DEPTH_ORCHARD]>,
     pub(crate) pos: Value<u32>,
-    pub(crate) esk: Value<Secp256k1Fq>,
+    /// EIP-191 challenge, and the `(r, s)` of the personal_sign over it.
+    pub(crate) sig_e: Value<Secp256k1Fq>,
+    pub(crate) sig_r: Value<Secp256k1Fq>,
+    pub(crate) sig_s: Value<Secp256k1Fq>,
     pub(crate) epkx: Value<Secp256k1Fp>,
     pub(crate) epky: Value<Secp256k1Fp>,
     pub(crate) nk: Value<NullifierDerivingKey>,
+    /// Low and high halves of the note's one-time 32-byte random string.
+    pub(crate) rseed_lo: Value<pallas::Base>,
+    pub(crate) rseed_hi: Value<pallas::Base>,
     pub(crate) fdi: Value<pallas::Base>,
     pub(crate) v: Value<NoteValue>,
     pub(crate) nd: Value<pallas::Base>,
@@ -187,17 +195,17 @@ impl Circuit {
         // alpha: pallas::Scalar,
         // rcv: ValueCommitTrapdoor,
     ) -> Circuit {
-        let rho_old = spend.note.rho();
-        let psi_old = spend.note.rseed().psi(&rho_old);
-        let rcm_old = spend.note.rseed().rcm(&rho_old);
-        let esk = spend.note.elig_sk();
+        let bound = spend.note.hiding_binding();
+        let rho_old = bound.rho;
+        let psi_old = bound.psi;
+        let rcm_old = bound.rcm;
         let fdi = spend.note.fdi();
         let (epkx, epky) = spend.note.elig_sk().epk().xy();
         let recp = spend.note.recipient();
         let nd = spend.note.nd();
 
-        // Headstash nullifier key is derived from eligibility sk + rho (not Orchard fvk.nk).
-        let nk = spend.note.nk(rho_old);
+        // nk is the DST_HKDF PRF of the note string, not a free witness.
+        let nk = bound.nk;
 
         Circuit {
             path: Value::known(spend.merkle_path.auth_path()),
@@ -208,16 +216,34 @@ impl Circuit {
             rcm_old: Value::known(rcm_old),
             cm_old: Value::known(spend.note.commitment()),
             nk: Value::known(nk),
-            // secret_bytes / uncompressed coords are big-endian; halo2curves Fp/Fq are LE.
-            esk: Value::known(gadget::secp256k1_chip::secp_fq_from_secret_be(
-                &esk.secret_bytes(),
-            )),
+            rseed_lo: Value::known(bound.rseed_lo),
+            rseed_hi: Value::known(bound.rseed_hi),
+            sig_e: Value::unknown(),
+            sig_r: Value::unknown(),
+            sig_s: Value::unknown(),
             epkx: Value::known(gadget::secp256k1_chip::secp_fp_from_coord_be(&epkx)),
             epky: Value::known(gadget::secp256k1_chip::secp_fp_from_coord_be(&epky)),
             fdi: Value::known(fdi.into()),
             nd: Value::known(nd.to_fp()),
             recp: Value::known(recp.to_fp()),
         }
+    }
+
+    /// Fill `(e, r, s)` from a personal_sign of the instance prefix.
+    ///
+    /// The signed body is `keccak256` of the 168-byte instance with the
+    /// challenge bytes still zero. `instance.e` becomes the reduced scalar.
+    pub fn attach_personal_sign(&mut self, instance: &mut Instance, secret_be: &[u8; 32]) {
+        use crate::claim_auth::{keccak256, sign_personal_claim};
+        use crate::circuit::gadget::secp256k1_chip::secp_fq_from_secret_be;
+
+        let prefix = instance.to_bytes();
+        let body = keccak256(&prefix[..168]);
+        let (e_be, r_be, s_be) = sign_personal_claim(secret_be, &body);
+        instance.e = e_be;
+        self.sig_e = Value::known(secp_fq_from_secret_be(&e_be));
+        self.sig_r = Value::known(secp_fq_from_secret_be(&r_be));
+        self.sig_s = Value::known(secp_fq_from_secret_be(&s_be));
     }
 }
 
@@ -339,14 +365,28 @@ impl plonk::Circuit<pallas::Base> for Circuit {
         // Construct the ECC chip.
         let ecc_chip = config.ecc_chip();
 
-        // 1. --------------- Eligible Key Pairing Constraint -------------------------
+        // 1. Eligible key signed the public claim challenge. esk is not a witness.
         let secp256k1_chip = Secp256k1Chip::construct(config.secp256k1.clone());
-        let (esk_crt, epk_crt) = secp256k1_chip.prove_key_pairing(
-            layouter.namespace(|| "secp256k1 key pairing: epk = esk * G"),
-            self.esk,
+        let (epk_x, epk_y, sig_e) = secp256k1_chip.prove_ecdsa_verify(
+            layouter.namespace(|| "personal_sign"),
+            self.sig_e,
+            self.sig_r,
+            self.sig_s,
             self.epkx,
             self.epky,
         )?;
+        let e_lo = secp256k1_chip.pack_u128(
+            layouter.namespace(|| "challenge lo"),
+            &sig_e.truncation.limbs[0],
+            &sig_e.truncation.limbs[1],
+        )?;
+        let e_hi = secp256k1_chip.pack_u128(
+            layouter.namespace(|| "challenge hi"),
+            &sig_e.truncation.limbs[2],
+            &sig_e.truncation.limbs[3],
+        )?;
+        layouter.constrain_instance(e_lo.cell(), config.primary, E_LO)?;
+        layouter.constrain_instance(e_hi.cell(), config.primary, E_HI)?;
 
         // Witness private inputs that are used across multiple checks.
         let (nd, v, fdi, recp, psi_old, rho_old, nk) = {
@@ -430,6 +470,51 @@ impl plonk::Circuit<pallas::Base> for Circuit {
         )?;
         layouter.constrain_instance(v_for_cm.cell(), config.primary, HS_V)?;
 
+        let rseed_lo = assign_free_advice(
+            layouter.namespace(|| "witness note random lo"),
+            config.advices[0],
+            self.rseed_lo,
+        )?;
+        let rseed_hi = assign_free_advice(
+            layouter.namespace(|| "witness note random hi"),
+            config.advices[0],
+            self.rseed_hi,
+        )?;
+        // rho and psi are the note-random halves. rcm is their sum.
+        // nk is a PRF of that string. rseed_com hides the halves in the leaf.
+        let rseed_com = note_poseidon_gadget::derive_rseed_commitment(
+            layouter.namespace(|| "rseed commitment"),
+            &config.poseidon_config,
+            config.advices[0],
+            rseed_lo.clone(),
+            rseed_hi.clone(),
+        )?;
+        note_poseidon_gadget::bind_hiding_nullifier_inputs(
+            layouter.namespace(|| "bind hiding nullifier"),
+            &config.poseidon_config,
+            config.advices[0],
+            &config.add_chip(),
+            rseed_lo,
+            rseed_hi,
+            &rho_old,
+            &psi_old,
+            &rcm_base,
+            &nk,
+        )?;
+
+        let esk_zero = layouter.assign_region(
+            || "note commit does not take esk",
+            |mut region| {
+                let cell = region.assign_advice(
+                    || "zero",
+                    config.advices[0],
+                    0,
+                    || Value::known(pallas::Base::ZERO),
+                )?;
+                region.constrain_constant(cell.cell(), pallas::Base::ZERO)?;
+                Ok(cell)
+            },
+        )?;
         let (cm_old, cmx_cell) = note_poseidon_gadget::note_commit_poseidon(
             layouter.namespace(|| "derive note commitment Poseidon-v1"),
             &config.poseidon_config,
@@ -439,7 +524,7 @@ impl plonk::Circuit<pallas::Base> for Circuit {
             v_for_cm,
             fdi.clone(),
             recp.clone(),
-            esk_crt.native.clone(),
+            esk_zero,
             rho_old.clone(),
             psi_old.clone(),
             rcm_base,
@@ -478,11 +563,12 @@ impl plonk::Circuit<pallas::Base> for Circuit {
             layouter.namespace(|| "derive genesis leaf Poseidon-v1"),
             &config.poseidon_config,
             config.advices[0],
-            epk_crt.0.native.clone(),
-            epk_crt.1.native.clone(),
+            epk_x,
+            epk_y,
             nd,
             v_base,
             fdi,
+            rseed_com,
         )?;
 
         let path_vals = self
@@ -595,7 +681,7 @@ impl ProvingKey {
                 zk_cosmwasm::CircuitType::Plonkish,
                 zk_cosmwasm::curves::CurveType::Pasta,
                 K as u8,
-                6,   // i — number of public input scalars (6 instance fields)
+                8,   // i — anchor, nd, v, recp, nf, cmx, challenge lo, challenge hi
                 paramlen as u32,
                 cslen as u32,
                 vklen as u32,
@@ -630,6 +716,8 @@ pub struct Instance {
     pub(crate) nf: Nullifier,
     pub(crate) recp: RecpAddr,
     pub(crate) cmx: ExtractedNoteCommitment,
+    /// Reduced EIP-191 challenge, 32 big-endian bytes. Not part of the signed prefix.
+    pub e: [u8; 32],
 }
 
 impl Instance {
@@ -658,6 +746,7 @@ impl Instance {
             recp,
             nf,
             cmx,
+            e: [0u8; 32],
             // rk,
             // enable_spend,
             // enable_output,
@@ -671,11 +760,13 @@ impl Instance {
     /// Nullifier: 32 bytes
     /// Recipient: 32 bytes
     /// Note Commitment: 32 bytes
-    /// Total: 168 bytes (1344 bits)
+    /// Challenge: 32 bytes
+    /// Total: 200 bytes. The challenge is not part of the signed prefix.
     pub fn from_bytes(bytes: Vec<u8>) -> Self {
         const THREETWO: usize = 32;
         const EIGHT: usize = 8;
-        const TOTAL_SIZE: usize = (5 * THREETWO) + EIGHT;
+        const TOTAL_SIZE: usize = (6 * THREETWO) + EIGHT;
+        assert_eq!(bytes.len(), TOTAL_SIZE);
         let mut offset = 0;
 
         let anchor: &[u8; 32] = &bytes[offset..offset + THREETWO].try_into().expect("anchor");
@@ -694,6 +785,8 @@ impl Instance {
         let recp = &bytes[offset..offset + THREETWO];
         offset += THREETWO;
         let cmx: &[u8; 32] = &bytes[offset..offset + THREETWO].try_into().expect("cmx");
+        offset += THREETWO;
+        let e: [u8; 32] = bytes[offset..offset + THREETWO].try_into().expect("e");
 
         Instance {
             anchor: Anchor::from_bytes(*anchor).expect("anchor"),
@@ -702,13 +795,14 @@ impl Instance {
             nf: Nullifier::from_bytes(nf).expect("msg"),
             recp: RecpAddr::try_from(recp).expect(""),
             cmx: ExtractedNoteCommitment::from_bytes(cmx).expect(""),
+            e,
         }
     }
 
     /// Constructs an  [Vec<u8>]  from an instance for serialization/deserialization.
     /// NOTE: we store ALL values as their out-of-circuit specs, NOT applying in circuit serialization for field comatibility.
     pub fn to_bytes(&self) -> Vec<u8> {
-        let mut bytes = Vec::with_capacity(168);
+        let mut bytes = Vec::with_capacity(200);
 
         bytes.extend_from_slice(&self.anchor.to_bytes());
         bytes.extend_from_slice(&self.nd.to_fp().to_repr());
@@ -716,6 +810,7 @@ impl Instance {
         bytes.extend_from_slice(&self.nf.to_bytes());
         bytes.extend_from_slice(&self.recp.to_canonical_bytes());
         bytes.extend_from_slice(&self.cmx.to_bytes());
+        bytes.extend_from_slice(&self.e);
 
         bytes
     }
@@ -728,6 +823,10 @@ impl Instance {
         instance[RECP] = self.recp.to_fp();
         instance[NF_OLD] = self.nf.0;
         instance[CMX] = self.cmx.inner();
+        let e_lo = u128::from_be_bytes(self.e[16..32].try_into().expect("e lo"));
+        let e_hi = u128::from_be_bytes(self.e[0..16].try_into().expect("e hi"));
+        instance[E_LO] = pallas::Base::from_u128(e_lo);
+        instance[E_HI] = pallas::Base::from_u128(e_hi);
 
         [instance]
     }
@@ -808,9 +907,7 @@ mod tests {
 
     use super::{Circuit, Instance, Proof, ProvingKey, VerifyingKey, K};
     use crate::{
-        circuit::gadget::secp256k1_chip::{
-            secp_coord_be_to_pallas_base, secp_fp_from_coord_be, secp_fq_from_secret_be,
-        },
+        circuit::gadget::secp256k1_chip::{secp_coord_be_to_pallas_base, secp_fp_from_coord_be},
         distro_poseidon::poseidon_distro_leaf,
         note::Note,
         tree::MerklePath,
@@ -831,12 +928,12 @@ mod tests {
             secp_fp_from_coord_be(&epkx_be),
             secp_fp_from_coord_be(&epky_be),
         );
-        let e_sk_fq = secp_fq_from_secret_be(&esk.secret_bytes());
         let epk_x_native: pallas::Base = secp_coord_be_to_pallas_base(&epkx_be);
         let epk_y_native: pallas::Base = secp_coord_be_to_pallas_base(&epky_be);
         let recp = spent_note.recipient();
 
-        let nk = spent_note.nk(spent_note.rho());
+        let bound = spent_note.hiding_binding();
+        let nk = bound.nk;
         let nf = spent_note.nullifier();
         // Private note cmx: Poseidon CL9 (NoteCommitment::derive / note_poseidon SSOT).
         let cmx = spent_note.commitment().into();
@@ -855,37 +952,43 @@ mod tests {
             nd_pallas,
             v_pallas,
             fdi_pallas,
+            crate::claim_auth::claim_rseed_com(bound.rseed_lo, bound.rseed_hi),
         );
         // Auth path is random siblings; root via Poseidon CRH so anchor matches
         // calculate_distro_root_poseidon in synthesize.
         let anchor = path.root_from_leaf(distro_leaf);
 
-        (
-            Circuit {
-                path: Value::known(path.auth_path()),
-                pos: Value::known(path.position()),
-                nk: Value::known(nk),
-                nd: Value::known(spent_note.nd().to_fp()),
-                v: Value::known(spent_note.value()),
-                fdi: Value::known(pallas::Base::from(spent_note.fdi())),
-                recp: Value::known(recp.to_fp()),
-                esk: Value::known(e_sk_fq),
-                epkx: Value::known(epkx),
-                epky: Value::known(epky),
-                rho_old: Value::known(spent_note.rho()),
-                psi_old: Value::known(spent_note.rseed().psi(&spent_note.rho())),
-                rcm_old: Value::known(spent_note.rseed().rcm(&spent_note.rho())),
-                cm_old: Value::known(spent_note.commitment()),
-            },
-            Instance {
-                anchor,
-                nd,
-                v,
-                recp,
-                nf,
-                cmx,
-            },
-        )
+        let mut circuit = Circuit {
+            path: Value::known(path.auth_path()),
+            pos: Value::known(path.position()),
+            nk: Value::known(nk),
+            rseed_lo: Value::known(bound.rseed_lo),
+            rseed_hi: Value::known(bound.rseed_hi),
+            nd: Value::known(spent_note.nd().to_fp()),
+            v: Value::known(spent_note.value()),
+            fdi: Value::known(pallas::Base::from(spent_note.fdi())),
+            recp: Value::known(recp.to_fp()),
+            sig_e: Value::unknown(),
+            sig_r: Value::unknown(),
+            sig_s: Value::unknown(),
+            epkx: Value::known(epkx),
+            epky: Value::known(epky),
+            rho_old: Value::known(bound.rho),
+            psi_old: Value::known(bound.psi),
+            rcm_old: Value::known(bound.rcm),
+            cm_old: Value::known(spent_note.commitment()),
+        };
+        let mut instance = Instance {
+            anchor,
+            nd,
+            v,
+            recp,
+            nf,
+            cmx,
+            e: [0u8; 32],
+        };
+        circuit.attach_personal_sign(&mut instance, &esk.secret_bytes());
+        (circuit, instance)
     }
 
     // TODO: recast as a proptest
@@ -1235,7 +1338,9 @@ mod tests {
         let circuit = Circuit {
             path: Value::unknown(),
             pos: Value::unknown(),
-            esk: Value::unknown(),
+            sig_e: Value::unknown(),
+            sig_r: Value::unknown(),
+            sig_s: Value::unknown(),
             epkx: Value::unknown(),
             epky: Value::unknown(),
             rho_old: Value::unknown(),
@@ -1249,6 +1354,8 @@ mod tests {
             // alpha: Value::unknown(),
             // ak: Value::unknown(),
             nk: Value::unknown(),
+            rseed_lo: Value::unknown(),
+            rseed_hi: Value::unknown(),
             // rivk: Value::unknown(),
             // g_d_new: Value::unknown(),
             // pk_d_new: Value::unknown(),

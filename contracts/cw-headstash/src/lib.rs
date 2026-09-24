@@ -1078,6 +1078,7 @@ mod instantiate_tests {
                 nf: Binary::from(vec![0xAB; 32]),
                 recp: Binary::from(vec![0u8; 32]),
                 cmx: Binary::from(vec![0u8; 32]),
+                e: Binary::from(vec![0u8; 32]),
             },
             p: Binary::default(),
             rr: Binary::from(vec![0u8; 32]),

@@ -17,10 +17,128 @@ use halo2_proofs::{
     circuit::{AssignedCell, Layouter, Value},
     plonk::{Advice, Column, Error},
 };
+use ff::PrimeField;
 use pasta_curves::pallas;
 
 use crate::constants::{OrchardFixedBases, OrchardFixedBasesBase};
 use crate::note_poseidon::note_commit_tag;
+
+/// Assign a field element and pin it. The prover cannot swap a domain tag.
+fn assign_pinned(
+    mut layouter: impl Layouter<pallas::Base>,
+    column: Column<Advice>,
+    label: &'static str,
+    value: pallas::Base,
+) -> Result<AssignedCell<pallas::Base, pallas::Base>, Error> {
+    layouter.assign_region(
+        || label,
+        |mut region| {
+            let cell = region.assign_advice(|| label, column, 0, || Value::known(value))?;
+            region.constrain_constant(cell.cell(), value)?;
+            Ok(cell)
+        },
+    )
+}
+
+fn poseidon_hash<const N: usize>(
+    mut layouter: impl Layouter<pallas::Base>,
+    poseidon_config: &PoseidonConfig<pallas::Base, 3, 2>,
+    label: &'static str,
+    message: [AssignedCell<pallas::Base, pallas::Base>; N],
+) -> Result<AssignedCell<pallas::Base, pallas::Base>, Error> {
+    let poseidon_chip = PoseidonChip::construct(poseidon_config.clone());
+    let hasher = PoseidonHash::<_, _, P128Pow5T3, ConstantLength<N>, 3, 2>::init(
+        poseidon_chip,
+        layouter.namespace(|| label),
+    )?;
+    hasher.hash(layouter.namespace(|| label), message)
+}
+
+/// Bind the one-time nullifier inputs to a 32-byte note random string.
+///
+/// ```text
+/// rho = rseed_lo
+/// psi = rseed_hi
+/// rcm = rseed_lo + rseed_hi
+/// nk  = Poseidon(DST_HKDF, rseed_lo, rseed_hi)
+/// ```
+///
+/// The halves are the secret. The public leaf still hides them behind
+/// `rseed_com`. The eligible key is not an input: ownership is the signature.
+#[allow(clippy::too_many_arguments)]
+pub(in crate::circuit) fn bind_hiding_nullifier_inputs(
+    mut layouter: impl Layouter<pallas::Base>,
+    poseidon_config: &PoseidonConfig<pallas::Base, 3, 2>,
+    advice: Column<Advice>,
+    add_chip: &crate::circuit::gadget::add_chip::AddChip,
+    rseed_lo: AssignedCell<pallas::Base, pallas::Base>,
+    rseed_hi: AssignedCell<pallas::Base, pallas::Base>,
+    rho: &AssignedCell<pallas::Base, pallas::Base>,
+    psi: &AssignedCell<pallas::Base, pallas::Base>,
+    rcm_base: &AssignedCell<pallas::Base, pallas::Base>,
+    nk: &AssignedCell<pallas::Base, pallas::Base>,
+) -> Result<(), Error> {
+    use crate::circuit::gadget::AddInstruction;
+    use crate::constants::DST_HKDF;
+    layouter.assign_region(
+        || "rho = rseed_lo",
+        |mut region| region.constrain_equal(rho.cell(), rseed_lo.cell()),
+    )?;
+    layouter.assign_region(
+        || "psi = rseed_hi",
+        |mut region| region.constrain_equal(psi.cell(), rseed_hi.cell()),
+    )?;
+    let rcm_sum = add_chip.add(
+        layouter.namespace(|| "rcm = rseed_lo + rseed_hi"),
+        &rseed_lo,
+        &rseed_hi,
+    )?;
+    layouter.assign_region(
+        || "rcm bound",
+        |mut region| region.constrain_equal(rcm_base.cell(), rcm_sum.cell()),
+    )?;
+
+    let nk_tag = assign_pinned(
+        layouter.namespace(|| "nk dst"),
+        advice,
+        "dst_nk",
+        pallas::Base::from_repr(DST_HKDF).expect("DST_HKDF is canonical"),
+    )?;
+    let nk_prf = poseidon_hash(
+        layouter.namespace(|| "nk prf"),
+        poseidon_config,
+        "nk",
+        [nk_tag, rseed_lo, rseed_hi],
+    )?;
+    layouter.assign_region(
+        || "nk bound",
+        |mut region| region.constrain_equal(nk.cell(), nk_prf.cell()),
+    )
+}
+
+/// Hiding commitment of the note random string, published inside the distro leaf.
+pub fn derive_rseed_commitment(
+    mut layouter: impl Layouter<pallas::Base>,
+    poseidon_config: &PoseidonConfig<pallas::Base, 3, 2>,
+    advice: Column<Advice>,
+    rseed_lo: AssignedCell<pallas::Base, pallas::Base>,
+    rseed_hi: AssignedCell<pallas::Base, pallas::Base>,
+) -> Result<AssignedCell<pallas::Base, pallas::Base>, Error> {
+    use crate::claim_auth::DST_RSEED;
+    use crate::note_poseidon::personalization_to_fp;
+    let tag = assign_pinned(
+        layouter.namespace(|| "rseed dst"),
+        advice,
+        "dst_rseed",
+        personalization_to_fp(DST_RSEED),
+    )?;
+    poseidon_hash(
+        layouter.namespace(|| "rseed com"),
+        poseidon_config,
+        "rseed_com",
+        [tag, rseed_lo, rseed_hi],
+    )
+}
 
 /// Assign a fixed field element as an advice cell (constant witness).
 fn assign_constant(

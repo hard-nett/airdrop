@@ -29,5 +29,6 @@ sha3 = "0.10"
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "sync", "time"] }
 ff = { workspace = true }
 pasta_curves = { workspace = true }
+rand = { workspace = true }
 rayon = "1.10"
 zk-headstash = { workspace = true, features = ["circuit", "std", "host-crypto", "multicore"] }

@@ -2,6 +2,7 @@
 resolver = "2"
 members = [
     "circuit",
+    "claim-flock",
     "test-press",
     "contracts/no-rick",
     "contracts/cw-headstash",

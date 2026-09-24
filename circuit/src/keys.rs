@@ -246,6 +246,11 @@ impl NullifierDerivingKey {
     pub(crate) fn prf_nf(&self, rho: pallas::Base) -> pallas::Base {
         prf_nf(self.0, rho)
     }
+    /// Nullifier key already reduced by a domain-separated PRF.
+    pub fn from_prf(nk: pallas::Base) -> Self {
+        Self(nk)
+    }
+
     /// derive from esk & rho via [crate::spec::hdkf_pallas]
     pub fn derive_from(esk: EligibleSk, rho: crate::note::Rho) -> Self {
         Self(crate::spec::hdkf_pallas(

@@ -37,8 +37,8 @@ fn assign_constant(
 /// Poseidon-v1 public inclusion **leaf**.
 ///
 /// ```text
-/// Poseidon^P128Pow5T3 / ConstantLength<6>(
-///   tag_leaf, epk_x, epk_y, nd, v, fdi
+/// Poseidon^P128Pow5T3 / ConstantLength<7>(
+///   tag_leaf, epk_x, epk_y, nd, v, fdi, rseed_com
 /// )
 /// ```
 ///
@@ -54,6 +54,7 @@ pub fn derive_leaf_poseidon(
     nd: AssignedCell<pallas::Base, pallas::Base>,
     v: AssignedCell<pallas::Base, pallas::Base>,
     fdi: AssignedCell<pallas::Base, pallas::Base>,
+    rseed_com: AssignedCell<pallas::Base, pallas::Base>,
 ) -> Result<AssignedCell<pallas::Base, pallas::Base>, Error> {
     let tag = assign_constant(
         layouter.namespace(|| "leaf personalization tag"),
@@ -63,13 +64,13 @@ pub fn derive_leaf_poseidon(
     )?;
 
     let poseidon_chip = PoseidonChip::construct(poseidon_config.clone());
-    let hasher = PoseidonHash::<_, _, P128Pow5T3, ConstantLength<6>, 3, 2>::init(
+    let hasher = PoseidonHash::<_, _, P128Pow5T3, ConstantLength<7>, 3, 2>::init(
         poseidon_chip,
         layouter.namespace(|| "Poseidon leaf init"),
     )?;
     hasher.hash(
         layouter.namespace(|| "Poseidon distro leaf"),
-        [tag, epk_x, epk_y, nd, v, fdi],
+        [tag, epk_x, epk_y, nd, v, fdi, rseed_com],
     )
 }
 
@@ -166,6 +167,7 @@ mod tests {
         nd: Value<pallas::Base>,
         v: Value<pallas::Base>,
         fdi: Value<pallas::Base>,
+        rseed_com: Value<pallas::Base>,
     }
 
     #[derive(Clone)]
@@ -238,6 +240,7 @@ mod tests {
             let nd = load(config.advice[2], self.nd)?;
             let v = load(config.advice[4], self.v)?;
             let fdi = load(config.advice[5], self.fdi)?;
+            let rseed_com = load(config.advice[0], self.rseed_com)?;
             let leaf = derive_leaf_poseidon(
                 layouter.namespace(|| "leaf"),
                 &config.poseidon,
@@ -247,6 +250,7 @@ mod tests {
                 nd,
                 v,
                 fdi,
+                rseed_com,
             )?;
             layouter.constrain_instance(leaf.cell(), config.instance, 0)?;
             Ok(())
@@ -260,7 +264,8 @@ mod tests {
         let nd = pallas::Base::from(33u64);
         let v = pallas::Base::from(44u64);
         let fdi = pallas::Base::from(55u64);
-        let expected = poseidon_distro_leaf(epk_x, epk_y, nd, v, fdi);
+        let rseed_com = pallas::Base::from(66u64);
+        let expected = poseidon_distro_leaf(epk_x, epk_y, nd, v, fdi, rseed_com);
 
         let circuit = LeafCircuit {
             epk_x: Value::known(epk_x),
@@ -268,6 +273,7 @@ mod tests {
             nd: Value::known(nd),
             v: Value::known(v),
             fdi: Value::known(fdi),
+            rseed_com: Value::known(rseed_com),
         };
         // k=11 is enough for a single ConstantLength<6> Poseidon
         let prover = MockProver::run(11, &circuit, vec![vec![expected]]).unwrap();

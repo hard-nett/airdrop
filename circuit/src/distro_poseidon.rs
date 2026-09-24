@@ -108,8 +108,8 @@ pub const POSEIDON_T: usize = 3;
 /// Fixed Poseidon rate (`rate = 2` ⇒ capacity 1).
 pub const POSEIDON_RATE: usize = 2;
 
-/// Message arity of [`poseidon_distro_leaf`] (tag + 5 fields).
-pub const POSEIDON_DISTRO_LEAF_ARITY: usize = 6;
+/// Message arity of [`poseidon_distro_leaf`] (tag + 6 fields, including `rseed_com`).
+pub const POSEIDON_DISTRO_LEAF_ARITY: usize = 7;
 
 /// Message arity of [`poseidon_distro_crh`] (tag + layer + left + right).
 pub const POSEIDON_DISTRO_CRH_ARITY: usize = 4;
@@ -193,25 +193,29 @@ pub fn distro_crh_tag() -> pallas::Base {
 /// Public distribution **leaf** hash (Poseidon-v1).
 ///
 /// ```text
-/// Poseidon^P128Pow5T3 / ConstantLength<6>(
+/// Poseidon^P128Pow5T3 / ConstantLength<7>(
 ///   personalization_to_fp("terp-hs-distro-leaf-v1"),
-///   epk_x, epk_y, nd, v, fdi
+///   epk_x, epk_y, nd, v, fdi, rseed_com
 /// )
 /// ```
+///
+/// `rseed_com` is [`crate::claim_auth::claim_rseed_com`], not the raw 32-byte string.
 pub fn poseidon_distro_leaf(
     epk_x: pallas::Base,
     epk_y: pallas::Base,
     nd: pallas::Base,
     v: pallas::Base,
     fdi: pallas::Base,
+    rseed_com: pallas::Base,
 ) -> pallas::Base {
-    poseidon::Hash::<_, P128Pow5T3, ConstantLength<6>, 3, 2>::init().hash([
+    poseidon::Hash::<_, P128Pow5T3, ConstantLength<7>, 3, 2>::init().hash([
         distro_leaf_tag(),
         epk_x,
         epk_y,
         nd,
         v,
         fdi,
+        rseed_com,
     ])
 }
 
@@ -329,8 +333,8 @@ mod tests {
     #[test]
     fn leaf_hash_is_deterministic() {
         let (x, y, nd, v, fdi) = sample_leaf_inputs(7);
-        let a = poseidon_distro_leaf(x, y, nd, v, fdi);
-        let b = poseidon_distro_leaf(x, y, nd, v, fdi);
+        let a = poseidon_distro_leaf(x, y, nd, v, fdi, pallas::Base::from(1u64));
+        let b = poseidon_distro_leaf(x, y, nd, v, fdi, pallas::Base::from(1u64));
         assert_eq!(a, b);
         assert_ne!(a, pallas::Base::ZERO);
     }
@@ -338,12 +342,19 @@ mod tests {
     #[test]
     fn leaf_hash_changes_with_any_field() {
         let (x, y, nd, v, fdi) = sample_leaf_inputs(11);
-        let base = poseidon_distro_leaf(x, y, nd, v, fdi);
-        assert_ne!(base, poseidon_distro_leaf(x + pallas::Base::ONE, y, nd, v, fdi));
-        assert_ne!(base, poseidon_distro_leaf(x, y + pallas::Base::ONE, nd, v, fdi));
-        assert_ne!(base, poseidon_distro_leaf(x, y, nd + pallas::Base::ONE, v, fdi));
-        assert_ne!(base, poseidon_distro_leaf(x, y, nd, v + pallas::Base::ONE, fdi));
-        assert_ne!(base, poseidon_distro_leaf(x, y, nd, v, fdi + pallas::Base::ONE));
+        let base = poseidon_distro_leaf(x, y, nd, v, fdi, pallas::Base::from(1u64));
+        assert_ne!(base, poseidon_distro_leaf(x + pallas::Base::ONE, y, nd, v, fdi, pallas::Base::from(1u64)));
+        assert_ne!(base, poseidon_distro_leaf(x, y + pallas::Base::ONE, nd, v, fdi, pallas::Base::from(1u64)));
+        assert_ne!(base, poseidon_distro_leaf(x, y, nd + pallas::Base::ONE, v, fdi, pallas::Base::from(1u64)));
+        assert_ne!(base, poseidon_distro_leaf(x, y, nd, v + pallas::Base::ONE, fdi, pallas::Base::from(1u64)));
+        assert_ne!(base, poseidon_distro_leaf(
+            x,
+            y,
+            nd,
+            v,
+            fdi + pallas::Base::ONE,
+            pallas::Base::from(1u64),
+        ));
     }
 
     #[test]
@@ -351,7 +362,7 @@ mod tests {
         // Same five payload fields hashed under leaf vs under a forged CRH-shaped message
         // must not collide with either domain's honest output.
         let (x, y, nd, v, fdi) = sample_leaf_inputs(42);
-        let leaf = poseidon_distro_leaf(x, y, nd, v, fdi);
+        let leaf = poseidon_distro_leaf(x, y, nd, v, fdi, pallas::Base::from(1u64));
 
         // CRH with layer/left/right drawn from subset of leaf fields still uses CRH tag.
         let crh = poseidon_distro_crh(0, x, y);
@@ -389,8 +400,8 @@ mod tests {
         let (x0, y0, nd0, v0, fdi0) = sample_leaf_inputs(1);
         let (x1, y1, nd1, v1, fdi1) = sample_leaf_inputs(1000);
 
-        let leaf0 = poseidon_distro_leaf(x0, y0, nd0, v0, fdi0);
-        let leaf1 = poseidon_distro_leaf(x1, y1, nd1, v1, fdi1);
+        let leaf0 = poseidon_distro_leaf(x0, y0, nd0, v0, fdi0, pallas::Base::from(1u64));
+        let leaf1 = poseidon_distro_leaf(x1, y1, nd1, v1, fdi1, pallas::Base::from(1u64));
         assert_ne!(leaf0, leaf1);
 
         let root = poseidon_distro_root_two_leaves(leaf0, leaf1);
@@ -432,6 +443,7 @@ mod tests {
             pallas::Base::from(7u64),
             pallas::Base::from(6u64),
             pallas::Base::from(5u64),
+            pallas::Base::from(1u64),
         );
         let parent = poseidon_distro_crh(0, leaf, pallas::Base::ZERO);
         assert_ne!(parent, leaf);

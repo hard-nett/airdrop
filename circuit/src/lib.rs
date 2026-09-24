@@ -70,6 +70,10 @@ pub mod distro_poseidon;
 #[cfg(feature = "circuit")]
 pub mod note_poseidon;
 
+/// Offline-wallet claim authorization: EIP-191 message, nullifier, signature check.
+#[cfg(feature = "circuit")]
+pub mod claim_auth;
+
 #[cfg(feature = "interface")]
 pub mod suite;
 
